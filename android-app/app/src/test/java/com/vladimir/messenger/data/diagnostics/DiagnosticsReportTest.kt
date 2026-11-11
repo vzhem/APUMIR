@@ -371,8 +371,8 @@ class DiagnosticsReportTest {
             "не вскрылось (попытки; адресат/причина не подтверждены)=2",
             "ядро передало сигналов=42",
             "пересылка: отброшено из-за полной очереди=9",
-            "очередь ядра: своё ждёт получателя=нет (пусто)",
-            "очередь ядра: чужая пересылка=нет (пусто)",
+            "очередь ядра: своё ждёт получателя=нет данных",
+            "очередь ядра: чужая пересылка=нет данных",
         )) {
             assertTrue("в отчёте нет строки: $marker", report.contains(marker))
         }
@@ -483,6 +483,8 @@ class DiagnosticsReportTest {
             logcat = emptyList(),
         )
         assertTrue(report.contains("очередь ядра: своё ждёт получателя=1000"))
+        assertTrue(report.contains("отдельно сигналов и пакетов=19"))
+        assertFalse(report.contains("из них сигналов и пакетов"))
         assertTrue(report.contains("предел-своих=1000"))
         assertTrue(report.contains("старейшее-своё=1 дн 0 ч"))
 
@@ -492,11 +494,14 @@ class DiagnosticsReportTest {
                 counters = mapOf(Counters.MSG_IN to 3L, Counters.MSG_OUT to 4L),
                 lastIncomingAtMs = 1_700_000_000_000L - 60_000L,
                 relayQueueOwn = 1000L,
+                relayQueueOwnSignals = 19L,
                 relayQueueOwnLimit = 1000L,
                 relayQueueOwnOldestSecs = 86_400L,
             ),
         ).first { it.title == "Сообщения" }
         assertTrue(summary.value.contains("своё ждёт получателя 1000"))
+        assertTrue(summary.value.contains("отдельно сигналов и пакетов 19"))
+        assertFalse(summary.value.contains("из них сигналов и пакетов"))
         assertTrue(summary.value.contains("предел-своих 1000"))
         assertTrue(summary.value.contains("старейшее-своё 1 дн 0 ч"))
 

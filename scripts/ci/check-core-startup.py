@@ -56,6 +56,48 @@ class CoreStartupContracts(unittest.TestCase):
         self.assertIn("newSingleThreadExecutor", queue)
         self.assertIn("generation !== token", text("data/RelayWakeYield.kt"))
 
+    def test_failed_native_cleanup_blocks_a_second_engine_and_identity_change(self):
+        bridge = text("data/RustBridge.kt")
+        startup = bridge[bridge.index("    private fun initializeLocked("):bridge.index("    internal fun requestRelayWakeYield()")]
+        self.assertIn("publicationLock = IdentitySigningKeyStore", bridge)
+        self.assertLess(startup.index("engineSlot.unsettled()"), startup.index("createEngineDurable("))
+        self.assertIn("if (!engineSlot.stop()) return false", startup)
+        self.assertIn("return engineSlot.startNew(", startup)
+        self.assertIn("IdentitySigningKeyStore.matchesInstalledRoute(existingPublicKey)", startup)
+        self.assertLess(startup.index("applyOnlineHelperPolicy(e)"), startup.index("e.start()"))
+        self.assertLess(startup.index("applyPathPolicy(e)"), startup.index("e.start()"))
+        self.assertNotIn("e.relayCustodyMode()", startup)
+        self.assertNotIn("e.relayQuarantineCount()", startup)
+        self.assertIn("recordFailure = { error ->", startup)
+        signing = bridge[bridge.index("    internal fun signingRouteCompatible("):bridge.index("    private fun initializeLocked(")]
+        self.assertIn("synchronized(IdentitySigningKeyStore)", signing)
+        self.assertIn("engineSlot.unsettled()", signing)
+        self.assertIn("expected == signingEngineNodeId", signing)
+        self.assertNotIn(".nodeId()", signing)  # no native lock while holding the identity monitor
+        publish = startup[startup.index("            beforePublish = { e ->"):startup.index("            recordFailure = { error ->")]
+        self.assertLess(publish.index("e.publicKey()"), publish.index("signingEngineNodeId = startedNodeId"))
+        self.assertLess(publish.index("signingEngineNodeId = startedNodeId"), publish.index("engineRunning = true"))
+        status = bridge[bridge.index("    fun isRunning(): Boolean"):bridge.index("    fun isNetworkUp()")]
+        self.assertIn("if (!engineSlot.ifActive(current) { engineRunning = running }) return false", status)
+        self.assertIn("if (current == null) return false", status)
+        shutdown = bridge[bridge.index("    private fun shutdownLocked()"):bridge.index("    data class RelayWakeResult(")]
+        self.assertIn("engineSlot.stop()", shutdown)
+        diagnostics = bridge[bridge.index("    internal fun runningForDiagnostics()"):bridge.index("    fun isRunning()")]
+        self.assertIn("if (engineSlot.unsettled()) null else false", diagnostics)
+        slot = text("data/CoreEngineSlot.kt")
+        start = slot[slot.index("    fun startNew("):slot.index("    fun stop(): Boolean")]
+        self.assertLess(start.index("synchronized(publicationLock)"), start.index("!allow()"))
+        self.assertLess(start.index("!allow()"), start.index("starting = true"))
+        self.assertLess(start.index("starting = true"), start.index("create()"))
+        self.assertLess(start.index("pending = handle"), start.index("prepareAndStart(handle)"))
+        self.assertLess(start.index("beforePublish(handle)"), start.index("live = handle"))
+        self.assertIn("if (claimed) stop()", start)
+        stop = slot[slot.index("    fun stop(): Boolean"):]
+        self.assertLess(stop.index("pending = candidate"), stop.index("live = null"))
+        self.assertLess(stop.index("stop(handle)"), stop.index("pending = null"))
+        self.assertIn("finally {", stop)
+        self.assertIn("recordFailure(error)", stop)
+
     def test_application_start_timing_covers_pre_service_cleanup(self):
         app = text("MessengerApplication.kt")
         create = app[app.index("override fun onCreate()"):app.index("override fun onTrimMemory")]

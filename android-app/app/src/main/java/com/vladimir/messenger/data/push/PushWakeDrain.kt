@@ -13,7 +13,7 @@ import java.util.concurrent.CancellationException
  *
  * The scheduler must redrive a pending inbox at [Result.Pending.readyAtMs],
  * including after process death, and close the enqueue/worker-exit race. A
- * A service start, scheduled work, or provider acceptance is not a completed
+ * service start, scheduled work, or provider acceptance is not a completed
  * sync. The caller may return [SyncOutcome.COMPLETED_WINDOW] only after a
  * bounded receive window actually ran, its events were consumed and any
  * accepted messages were durably processed. Failure, inability to start, or an

@@ -64,6 +64,7 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, OUTBOX_CLASS: {
     "recoveryEventsCoalesceWithoutBeingLostDuringAnActiveSync",
     "rollbackOfWallClockCannotLeaveAnAbandonedLeaseStuckForDays",
     "concurrentInstancesCoalesceAndStillPreserveAnInflightWake",
+    "dispatcherRedrivesNewSignalsAndRestartUsingRealInboxWithFakeScheduler",
     "malformedRoutesBadClockAndExhaustedLeaseSequenceFailClosed",
 }, PUSH_DRAIN_CLASS: {
     "mixedSignalsAreInspectedAndAllowedRoutesShareOneGenericSync",
@@ -77,6 +78,7 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, OUTBOX_CLASS: {
     "wakeCryptoFfiRejectsInvalidInputWithoutStartingPush",
 }, CORE_LIFECYCLE_CLASS: {
     "staleServiceStopCannotStopARealEngineAdoptedByAnotherOwner",
+    "rejectedRealEngineIsStoppedBeforeAReplacementIsPublished",
 }}
 
 

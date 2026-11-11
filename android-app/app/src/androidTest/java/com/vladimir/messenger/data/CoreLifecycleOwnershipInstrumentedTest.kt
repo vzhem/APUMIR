@@ -6,9 +6,13 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.vladimir.messenger.data.security.DeviceIdentityMarker
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import uniffi.p2p_core.P2pCoreHandle
+import uniffi.p2p_core.createEngine
+import uniffi.p2p_core.initializeCore
 
 /**
  * Uses an in-memory native engine and synthetic service owners on a fresh test
@@ -33,6 +37,10 @@ class CoreLifecycleOwnershipInstrumentedTest {
             assertTrue(RustBridge.initialize("Lifecycle CI", serviceOwner = old))
             val nodeId = RustBridge.nodeId()
             assertNotNull(nodeId)
+            val otherRoute = if (nodeId == "pk_" + "0".repeat(64)) "pk_" + "1".repeat(64) else "pk_" + "0".repeat(64)
+            assertTrue(RustBridge.signingRouteCompatible(nodeId!!))
+            assertFalse(RustBridge.signingRouteCompatible(otherRoute))
+            assertFalse(RustBridge.signingRouteCompatible(""))
             assertTrue(RustBridge.initialize("Lifecycle CI", existingPublicKey = nodeId, serviceOwner = replacement))
 
             RustBridge.shutdownServiceAsync(old)
@@ -45,6 +53,60 @@ class CoreLifecycleOwnershipInstrumentedTest {
         } finally {
             // The normal path is already stopped; also clean up on failed assertions.
             RustBridge.shutdown()
+        }
+    }
+
+    @Test(timeout = 120_000L)
+    fun rejectedRealEngineIsStoppedBeforeAReplacementIsPublished() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+        assertFalse(prefs.getBoolean("identity_created", false))
+        assertFalse(DeviceIdentityMarker.isPresent(context))
+        assertFalse(RustBridge.isRunning())
+        initializeCore()
+        val handles = mutableListOf<P2pCoreHandle>()
+        var simulateStopFailure = true
+        var failedStops = 0
+        val slot = CoreEngineSlot<P2pCoreHandle>(Any(), {
+            if (simulateStopFailure) throw IllegalStateException("simulated stop failure")
+            it.stop()
+        }, { failedStops++ })
+        fun fresh(): P2pCoreHandle = createEngine("Lifecycle slot CI").also(handles::add)
+        try {
+            val rejected = fresh()
+            assertFalse(slot.startNew(
+                create = { rejected },
+                prepareAndStart = { assertTrue(it.start()); assertTrue(it.isRunning()); false },
+                beforePublish = { throw AssertionError("rejected engine must not be published") },
+                recordFailure = { throw AssertionError(it) },
+            ))
+            assertNull(slot.active())
+            assertTrue(slot.unsettled())
+            assertTrue(rejected.isRunning()) // the simulated failure happened before real native stop
+            assertTrue(failedStops == 1)
+            var createdWhilePending = false
+            assertFalse(slot.startNew({ createdWhilePending = true; fresh() }, { it.start() }, {}, {}))
+            assertFalse(createdWhilePending)
+            simulateStopFailure = false
+            assertTrue(slot.stop())
+            assertFalse(slot.unsettled())
+            assertFalse(rejected.isRunning())
+
+            val replacement = fresh()
+            assertTrue(slot.startNew(
+                create = { replacement },
+                prepareAndStart = { it.start() },
+                beforePublish = { assertNull(slot.active()); assertTrue(slot.unsettled()) },
+                recordFailure = { throw AssertionError(it) },
+            ))
+            assertTrue(slot.active() === replacement)
+            assertTrue(replacement.isRunning())
+            assertTrue(slot.stop())
+            assertFalse(replacement.isRunning())
+        } finally {
+            simulateStopFailure = false
+            slot.stop()
+            handles.forEach { it.close() }
         }
     }
 

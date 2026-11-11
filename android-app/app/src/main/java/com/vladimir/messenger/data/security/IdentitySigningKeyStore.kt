@@ -86,8 +86,8 @@ object IdentitySigningKeyStore {
             Log.w(TAG, "Signing sidecar disabled: invalid legacy routing ID")
             return null
         }
-        // Engine initialization uses the same monitor; no other profile can
-        // start between this check and installing the process-global sidecar.
+        // Engine startup reserves its slot under this same monitor; no other
+        // profile can start between this check and installing the global sidecar.
         if (!com.vladimir.messenger.data.RustBridge.signingRouteCompatible(legacyRoutingNodeId)) {
             Log.e(TAG, "Signing sidecar rejected: running engine uses another route")
             return null

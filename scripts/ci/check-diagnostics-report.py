@@ -1192,9 +1192,13 @@ class DiagnosticsContractsTest(unittest.TestCase):
         stats = queue[queue.index("pub fn stats"):queue.index("impl Default for RelayQueue")]
         # Возраст считается по СВОЕЙ переписке: служебное не в счёт.
         self.assertIn("e.own && !e.kind.is_transient()", stats)
+        self.assertIn("e.own && e.kind.is_transient()", stats)
         self.assertIn("own_oldest_age_ms", stats)
 
         report = source(DIAG / "DiagnosticsReport.kt")
+        self.assertNotIn("из них сигналов и пакетов", report)
+        self.assertIn("отдельно сигналов и пакетов", report)
+        self.assertNotIn('?: "нет (пусто)"', report)
         scan = source(DIAG / "TransferDiagnostics.kt")
         for marker in (
             "relayQueueOwnLimit",

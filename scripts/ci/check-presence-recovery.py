@@ -66,9 +66,13 @@ class PresenceWiring(unittest.TestCase):
     def test_sidecar_and_engine_start_share_a_guard_and_preserve_saved_route(self):
         bridge = read(APP, "data/RustBridge.kt")
         startup = section(bridge, "private fun initializeLocked(", "fun shutdown()")
-        for marker in ("synchronized(IdentitySigningKeyStore)", "matchesInstalledRoute(existingPublicKey)",
+        self.assertIn("publicationLock = IdentitySigningKeyStore", bridge)
+        for marker in ("engineSlot.startNew(", "matchesInstalledRoute(existingPublicKey)",
                        "matchesRunning(existingPublicKey, actual)"):
             self.assertIn(marker, startup)
+        slot = read(APP, "data/CoreEngineSlot.kt")
+        self.assertLess(slot.index("synchronized(publicationLock)"), slot.index("!allow()"))
+        self.assertLess(slot.index("!allow()"), slot.index("starting = true"))
         signing = read(APP, "data/security/IdentitySigningKeyStore.kt")
         install = section(signing, "fun installIntoCore(", "fun existingVerifiedBinding(")
         self.assertIn("RustBridge.signingRouteCompatible(legacyRoutingNodeId)", install)

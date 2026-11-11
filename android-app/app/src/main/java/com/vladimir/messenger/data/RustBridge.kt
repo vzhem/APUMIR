@@ -22,8 +22,12 @@ object RustBridge {
     private const val TAG = "RustBridge"
     private const val MAX_RELAY_WAKE_WINDOW_MILLIS = 30_000L
 
-    @Volatile
-    private var engine: P2pCoreHandle? = null
+    private val engineSlot = CoreEngineSlot<P2pCoreHandle>(
+        publicationLock = IdentitySigningKeyStore,
+        stop = { it.stop() },
+        recordFailure = { Log.e(TAG, "Native engine cleanup failed; a second engine is refused", it) },
+    )
+    private val engine: P2pCoreHandle? get() = engineSlot.active()
 
     /** Запомненная политика пути доставки (см. `setNetworkPathPolicy`). */
     @Volatile
@@ -31,6 +35,11 @@ object RustBridge {
 
     @Volatile
     private var engineRunning: Boolean = false
+
+    // Captured from this engine before publication. Unlike cachedNodeId, this is
+    // never changed by the mirror shadow; identity checks fail closed if absent.
+    @Volatile
+    private var signingEngineNodeId: String? = null
 
     @Volatile
     private var cachedNodeId: String? = null
@@ -182,31 +191,29 @@ object RustBridge {
     }
 
     /**
-     * Called by IdentitySigningKeyStore while holding its monitor. A non-null
-     * handle with an unreadable identity fails closed rather than being replaced.
+     * A sidecar change and engine publication share this monitor. The route is
+     * captured during startup, so this check never waits for native code while
+     * holding it. An unavailable route on a live handle fails closed.
      */
-    internal fun signingRouteCompatible(expected: String): Boolean {
-        val current = engine ?: return true
-        val actual = runCatching { current.nodeId() }.getOrNull()
-        return com.vladimir.messenger.data.security.ExistingRoutingIdentity.matchesRunning(expected, actual)
+    internal fun signingRouteCompatible(expected: String): Boolean = synchronized(IdentitySigningKeyStore) {
+        if (expected.isBlank() || engineSlot.unsettled()) return@synchronized false
+        if (engine == null) return@synchronized true
+        expected == signingEngineNodeId
     }
 
-    /** Startup shares the sidecar monitor as well as the lifecycle queue. */
+    /** Lifecycle is serialized; the slot reserves against sidecar changes without holding its lock over FFI. */
     private fun initializeLocked(
         displayName: String,
         existingPublicKey: String?,
         existingPrivateKey: String?,
         relayDbPath: String?,
-    ): Boolean = synchronized(IdentitySigningKeyStore) {
-        initializeWithSigningLock(displayName, existingPublicKey, existingPrivateKey, relayDbPath)
-    }
-
-    private fun initializeWithSigningLock(
-        displayName: String,
-        existingPublicKey: String?,
-        existingPrivateKey: String?,
-        relayDbPath: String?,
     ): Boolean {
+        if (engineSlot.unsettled()) {
+            // A previous failure may have left an inaccessible handle without
+            // a service owner. Retry once on the lifecycle queue before startup.
+            Log.w(TAG, "Retrying unresolved native engine cleanup")
+            if (!engineSlot.stop()) return false
+        }
         val current = engine
         if (current != null) {
             val running = try { current.isRunning() } catch (error: Exception) {
@@ -223,80 +230,71 @@ object RustBridge {
                 Log.w(TAG, "Engine already initialized")
                 return true
             }
-            engine = null
             engineRunning = false
+            if (!engineSlot.stop()) return false
         }
-        if (!IdentitySigningKeyStore.matchesInstalledRoute(existingPublicKey)) {
-            Log.e(TAG, "Installed signing sidecar does not match the requested routing identity")
-            return false
-        }
-
-        return try {
-            if (!coreInitialized) {
-                val initResult = initializeCore()
-                Log.i(TAG, "initializeCore(): $initResult")
-                coreInitialized = true
-            }
-
-            Log.i(TAG, "Rust version: ${getVersion()}")
-            // The device key id is published in mDNS when the engine starts (P3 pairing).
-            com.vladimir.messenger.data.pairing.DevicePairingController.prepareLocal()
-
-            val e = if (!relayDbPath.isNullOrBlank()) {
-                // M8-C: durable-режим. Пустые строки ключей = «сгенерировать новые».
-                Log.i(TAG, "Creating durable engine, relayDbPath=$relayDbPath")
-                createEngineDurable(
-                    displayName,
-                    existingPublicKey ?: "",
-                    existingPrivateKey ?: "",
-                    relayDbPath,
-                )
-            } else if (!existingPublicKey.isNullOrEmpty()) {
-                Log.i(TAG, "Restoring engine with key: ${existingPublicKey.take(16)}")
-                createEngineWithKeys(displayName, existingPublicKey, existingPrivateKey ?: "")
-            } else {
-                Log.i(TAG, "Creating engine without existing keys")
-                createEngine(displayName)
-            }
-
-            // Apply saved consent before the first inbound packet, including worker wakeups.
-            applyOnlineHelperPolicy(e)
-            // Настройки пути доставки и kill-switch IPv6 — до `start()`: сокеты
-            // привязываются там, и выключенный IPv6 обязан быть выключен уже к
-            // этому моменту.
-            applyPathPolicy(e)
-            val ok = e.start()
-            if (ok) {
-                val actual = runCatching { e.nodeId() }.getOrNull()
-                if (!com.vladimir.messenger.data.security.ExistingRoutingIdentity.matchesRunning(existingPublicKey, actual)) {
-                    Log.e(TAG, "Started engine has a different routing identity; stopping it")
-                    runCatching { e.stop() }.onFailure { Log.w(TAG, "Mismatched engine stop failed", it) }
-                    engineRunning = false
-                    return false
+        engineRunning = false
+        var startedNodeId: String? = null
+        return engineSlot.startNew(
+            allow = {
+                val matches = IdentitySigningKeyStore.matchesInstalledRoute(existingPublicKey)
+                if (!matches) Log.e(TAG, "Installed signing sidecar does not match the requested routing identity")
+                matches
+            },
+            create = {
+                if (!coreInitialized) {
+                    val initResult = initializeCore()
+                    Log.i(TAG, "initializeCore(): $initResult")
+                    coreInitialized = true
                 }
-                engine = e
+                Log.i(TAG, "Rust version: ${getVersion()}")
+                com.vladimir.messenger.data.pairing.DevicePairingController.prepareLocal()
+                if (!relayDbPath.isNullOrBlank()) {
+                    Log.i(TAG, "Creating durable engine, relayDbPath=$relayDbPath")
+                    createEngineDurable(displayName, existingPublicKey ?: "", existingPrivateKey ?: "", relayDbPath)
+                } else if (!existingPublicKey.isNullOrEmpty()) {
+                    Log.i(TAG, "Restoring engine with key: ${existingPublicKey.take(16)}")
+                    createEngineWithKeys(displayName, existingPublicKey, existingPrivateKey ?: "")
+                } else {
+                    Log.i(TAG, "Creating engine without existing keys")
+                    createEngine(displayName)
+                }
+            },
+            prepareAndStart = { e ->
+                // Consent and path policy must precede native start/binding sockets.
+                applyOnlineHelperPolicy(e)
+                applyPathPolicy(e)
+                if (!e.start()) {
+                    Log.e(TAG, "Engine.start() returned false")
+                    false
+                } else {
+                    startedNodeId = runCatching { e.nodeId() }.getOrNull()
+                    val matches = com.vladimir.messenger.data.security.ExistingRoutingIdentity
+                        .matchesRunning(existingPublicKey, startedNodeId)
+                    if (!matches) Log.e(TAG, "Started engine has a different routing identity; stopping it")
+                    matches
+                }
+            },
+            beforePublish = { e ->
+                // Complete the potentially blocking FFI read before changing
+                // any caches; the provisional handle is still unavailable.
+                val publicKey = runCatching { e.publicKey() }.getOrNull()
+                Log.i(TAG, "Engine started. NodeId: $startedNodeId")
                 shadowNodeId = null
-                engineRunning = true
                 cachedNetworkStatus = "offline"
                 cachedConnectedPeers = 0L
-                cachedNodeId = actual
-                cachedPublicKey = runCatching { e.publicKey() }.getOrNull()
-                Log.i(TAG, "Engine started. NodeId: $cachedNodeId")
-                // Diagnostics must not turn a successfully-started engine into a failed startup.
-                val custodyMode = runCatching { e.relayCustodyMode() }.getOrDefault("unknown")
-                val quarantined = runCatching { e.relayQuarantineCount() }.getOrDefault(0uL)
-                Log.i(TAG, "Relay custody mode: $custodyMode, quarantined: $quarantined")
-            } else {
-                engine = null
+                cachedNodeId = startedNodeId
+                cachedPublicKey = publicKey
+                signingEngineNodeId = startedNodeId
+                engineRunning = true
+                // Optional custody/SQLite diagnostics are queried by the report,
+                // not synchronously on the critical startup path.
+            },
+            recordFailure = { error ->
                 engineRunning = false
-                Log.e(TAG, "Engine.start() returned false")
-            }
-            ok
-        } catch (ex: Exception) {
-            engineRunning = false
-            Log.e(TAG, "Failed to initialize engine", ex)
-            false
-        }
+                Log.e(TAG, "Failed to initialize engine", error)
+            },
+        )
     }
 
     /**
@@ -331,24 +329,10 @@ object RustBridge {
 
     private fun shutdownLocked() {
         lifecycle.clearOwner()
-        val current = engine
-        if (current == null) {
-            engineRunning = false
-            cachedNetworkStatus = "offline"
-            cachedConnectedPeers = 0L
-            return
-        }
-        try {
-            current.stop()
-            Log.i(TAG, "Engine stopped")
-        } catch (ex: Exception) {
-            Log.e(TAG, "Error stopping engine", ex)
-        } finally {
-            if (engine === current) engine = null
-            engineRunning = false
-            cachedNetworkStatus = "offline"
-            cachedConnectedPeers = 0L
-        }
+        engineRunning = false
+        cachedNetworkStatus = "offline"
+        cachedConnectedPeers = 0L
+        if (engineSlot.stop()) Log.i(TAG, "Engine cleanup completed")
     }
 
     /** Результат одного ограниченного M8-E wake-окна. */
@@ -437,7 +421,7 @@ object RustBridge {
 
     /** Diagnostics must distinguish an unreadable native state from a confirmed stop. */
     internal fun runningForDiagnostics(): Boolean? {
-        val current = engine ?: return false
+        val current = engine ?: return if (engineSlot.unsettled()) null else false
         return try { current.isRunning() } catch (error: Exception) {
             Log.w(TAG, "Native engine state is unavailable for diagnostics", error)
             null
@@ -446,15 +430,14 @@ object RustBridge {
 
     /** Main-thread reads are cache-only; a native state check can wait on the engine lock. */
     fun isRunning(): Boolean {
-        if (isMainThread()) return engineRunning
+        if (isMainThread()) return isRunningCached()
         val current = engine
-        if (current == null) {
-            engineRunning = false
-            return false
-        }
+        if (current == null) return false
         val running = runCatching { current.isRunning() }.getOrDefault(false)
-        engineRunning = running
-        return running
+        // A late check of an old handle must not overwrite a replacement's
+        // status. Publication and this short cache update use the same lock.
+        if (!engineSlot.ifActive(current) { engineRunning = running }) return false
+        return running && engine === current
     }
 
     /**

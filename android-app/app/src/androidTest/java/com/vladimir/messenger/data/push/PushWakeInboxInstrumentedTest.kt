@@ -176,6 +176,41 @@ class PushWakeInboxInstrumentedTest {
         } finally { pool.shutdownNow() }
     }
 
+    @Test fun dispatcherRedrivesNewSignalsAndRestartUsingRealInboxWithFakeScheduler() {
+        val store = inbox()
+        val failures = mutableListOf<() -> Unit>()
+        var reported = 0
+        fun dispatcher(): PushWakeDispatcher {
+            val gate = PushWakeScheduleGate({ failed -> failures += failed; true }, { reported++ })
+            return PushWakeDispatcher(gate, { PushWakeIntake.Hint.FOUND }, store::enqueueRoute,
+                store::enqueueRecovery, store::pending, { reported++ })
+        }
+        val first = dispatcher()
+        val payload = mapOf("v" to "1", "route" to a)
+        assertEquals(PushWakeIntake.Result.QUEUED, first.onData(payload, now))
+        val worker = first.workerStarted()
+        val old = ready(store, now)
+        assertEquals(PushWakeIntake.Result.QUEUED, first.onData(payload, now + 1))
+        assertEquals(1, failures.size) // the running worker owns the earlier request
+        assertEquals(PushWakeInbox.Completion.NEWER_QUEUED, store.complete(old, true, now + 2))
+        assertEquals(PushWakeScheduleGate.Finish.RETRY, first.workerFinished(worker, false, now + 2))
+        val retry = first.workerStarted()
+        val newer = ready(store, now + 2)
+        assertEquals(PushWakeInbox.Completion.COMPLETED, store.complete(newer, true, now + 3))
+        assertEquals(PushWakeScheduleGate.Finish.SUCCESS, first.workerFinished(retry, false, now + 3))
+
+        // The old job may still be returning: the backend must accept a successor.
+        assertEquals(PushWakeIntake.Result.QUEUED, first.onData(payload, now + 4))
+        assertEquals(2, failures.size)
+        failures.last().invoke() // asynchronous scheduling failure does not delete SQLite
+        assertEquals(1, reported)
+        store.close()
+        val restarted = dispatcher() // fresh process-local gate, same durable inbox
+        assertEquals(PushWakeIntake.Result.QUEUED, restarted.resume(now + 5))
+        assertEquals(3, failures.size)
+        assertTrue(store.pending(now + 5) is PushWakeInbox.PendingResult.Pending)
+    }
+
     @Test fun malformedRoutesBadClockAndExhaustedLeaseSequenceFailClosed() {
         val store = inbox()
         listOf("", "*", "ab".repeat(32).uppercase(), a + "0", a.drop(1), "g".repeat(64), a + "\n").forEach {
