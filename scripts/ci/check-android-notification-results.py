@@ -10,6 +10,8 @@ PUSH_CLASS = "com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest"
 REGISTRATION_CLASS = "com.vladimir.messenger.data.push.PushRegistrationStoreInstrumentedTest"
 PUSH_INTEGRATION_CLASS = "com.vladimir.messenger.data.push.PushWakeIntegrationInstrumentedTest"
 MAILBOX_DRAIN_CLASS = "com.vladimir.messenger.data.push.PushMailboxDrainInstrumentedTest"
+MAILBOX_OUTBOX_CLASS = "com.vladimir.messenger.data.push.PushMailboxOutboxInstrumentedTest"
+MAILBOX_OUTBOX_FFI_CLASS = "com.vladimir.messenger.data.push.PushMailboxOutboxRealFfiInstrumentedTest"
 PUSH_INBOX_CLASS = "com.vladimir.messenger.data.push.PushWakeInboxInstrumentedTest"
 PUSH_DRAIN_CLASS = "com.vladimir.messenger.data.push.PushWakeDrainInstrumentedTest"
 FIREBASE_CLASS = "com.vladimir.messenger.data.push.FirebaseClientConfigurationInstrumentedTest"
@@ -60,6 +62,20 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, OUTBOX_CLASS: {
     "mailboxRoundTripAuthenticatesRealFfiAndPreviouslyPinnedParticipants",
 }, MAILBOX_DRAIN_CLASS: {
     "realRoomCommitPrecedesAckAndReplayedEnvelopeDeduplicatesAfterReopen",
+}, MAILBOX_OUTBOX_CLASS: {
+    "committedTripleSurvivesReopenAndALostResponseWithoutResealing",
+    "concurrentDifferentCiphertextsAndCutoffsCommitOneWinner",
+    "changedMessagePinBindingOrEpochCannotReplaceAnExistingRecord",
+    "invalidInputsOrCutoffsNeverSealOrInsert",
+    "expiryIsTerminalAndRollbackOfWallClockNeverExtendsIt",
+    "retiringIsCompareAndSetAndAStaleCallbackRollsBack",
+    "staleOrCancelledPrepareAfterInsertRollsBackTheTransaction",
+    "quotasNeverEvictTerminalHistoryOrPartiallyInsertLargeCiphertexts",
+    "boundedExpirySweepPreservesMarkersAndOtherActiveRecords",
+    "corruptedPayloadOrUnauthenticatedExpiryCannotBeReplaced",
+    "missingKeystoreKeyDoesNotRecreateItWhenRecordsExist",
+}, MAILBOX_OUTBOX_FFI_CLASS: {
+    "realFfiPersistsAndReusesTheWireBeforeAnAuthenticatedRoundTrip",
 }, PUSH_INBOX_CLASS: {
     "routeAndOverflowRecoverySurviveReopenWithoutPrivateFields",
     "newWakeDuringLeaseCannotBeErasedByTheOldCompletion",

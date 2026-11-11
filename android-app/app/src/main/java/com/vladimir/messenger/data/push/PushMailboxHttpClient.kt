@@ -8,8 +8,8 @@ import java.util.concurrent.CancellationException
 import javax.net.ssl.HttpsURLConnection
 
 /**
- * Disabled mailbox transport seam; no Firebase, scheduler, local outbox or
- * receive router invokes it yet. Call off the UI thread with a fixed reviewed
+ * Disabled mailbox transport seam; no production sender, Firebase, scheduler
+ * or receive router invokes it yet. Call off the UI thread with a fixed reviewed
  * endpoint. A stored/handled/accepted response is NOT proof of user delivery.
  * An ACK must only be created after authenticated opening and durable handling.
  */

@@ -16,7 +16,8 @@ import uniffi.p2p_core.fileExchangeBindingNodeId
  * sender identity and the sender secret; the original id and participants are
  * inside the ciphertext, not trusted to the server's outside metadata.
  *
- * This is intentionally not connected to an outbox or network. The caller MUST
+ * The experimental device journal can persist this result, but neither it nor
+ * this sealer is connected to the production router or network. The caller MUST
  * persist the resulting wire, an immutable expiry and the derived outside
  * mailbox id before its first put, and retry only the identical triple. It must
  * also coordinate pin, identity, restore, epoch and message mutations; [current]
