@@ -1,11 +1,15 @@
-// EXPERIMENTAL: a separate, disabled-by-default FCM wake relay. This is not a
-// mailbox and is not wired to the existing application or deployed worker.
-// See docs/REMOTE_PUSH_DESIGN.md before enabling it.
+// EXPERIMENTAL: isolated, disabled-by-default wake and ciphertext mailbox.
+// Neither is wired to the application or deployed. Read REMOTE_PUSH_DESIGN.md
+// before enabling; provider or storage acceptance is not message delivery.
 import { fcmConfigured, FcmV1 } from "./fcm.mjs";
 import { rateIdentity, routeFor, shardFor, validRegistration, validWake, verifyRegistration } from "./protocol.mjs";
+import { MAX_MAILBOX_BODY_BYTES, validMailboxAccess, validMailboxPut, verifyMailboxAccess } from "./mailbox-protocol.mjs";
+import { CiphertextMailbox } from "./mailbox.mjs";
 import { WakeQueue } from "./wake-queue.mjs";
 
 const MAX_BODY_BYTES = 8192;
+const MAILBOX_PATHS = ["/v1/mailbox/put", "/v1/mailbox/pull", "/v1/mailbox/ack"];
+const PATHS = ["/v1/registration", "/v1/wake", ...MAILBOX_PATHS];
 const REGISTER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const TOMBSTONE_MS = 15 * 60 * 1000; // > maximum signed timestamp validity, even with clock skew
 const ALARM_INTERVAL_MS = 12 * 60 * 60 * 1000;
@@ -28,12 +32,31 @@ function configured(env) {
   return serviceEnabled(env) && env.PUSH_SHARDS;
 }
 
+function validRequest(path, body, nowSeconds) {
+  if (path === "/v1/wake") return validWake(body);
+  if (path === "/v1/registration") return validRegistration(body, nowSeconds);
+  if (path === "/v1/mailbox/put") return validMailboxPut(body);
+  if (path === "/v1/mailbox/pull") return validMailboxAccess(body, "pull", nowSeconds);
+  if (path === "/v1/mailbox/ack") return validMailboxAccess(body, "ack", nowSeconds);
+  return false;
+}
+
+function mailboxResponse(result) {
+  if (result.status === 204) return new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
+  if (result.status === 200 || result.status === 201) {
+    const { status, ...body } = result;
+    return json(body, status);
+  }
+  const error = ({ 403: "unauthorised", 404: "route unavailable", 409: "conflict", 429: "rate limited", 503: "mailbox unavailable" })[result.status] || "mailbox unavailable";
+  return json({ error }, result.status);
+}
+
 /** Read incrementally; Content-Length is not trusted, and the cap is on bytes. */
-async function readJson(request) {
+async function readJson(request, maxBytes = MAX_BODY_BYTES) {
   const type = request.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
   if (type !== "application/json") throw new Error("content type");
   const length = request.headers.get("content-length");
-  if (length && (!/^\d+$/.test(length) || Number(length) > MAX_BODY_BYTES)) throw new Error("body too large");
+  if (length && (!/^\d+$/.test(length) || Number(length) > maxBytes)) throw new Error("body too large");
   if (!request.body) throw new Error("missing body");
   const reader = request.body.getReader();
   const chunks = [];
@@ -43,7 +66,7 @@ async function readJson(request) {
       const { value, done } = await reader.read();
       if (done) break;
       size += value.length;
-      if (size > MAX_BODY_BYTES) { await reader.cancel(); throw new Error("body too large"); }
+      if (size > maxBytes) { await reader.cancel(); throw new Error("body too large"); }
       chunks.push(value);
     }
   } finally { reader.releaseLock(); }
@@ -62,15 +85,13 @@ export default {
       return json({ ok: !!configured(env), service: "apu-push-wake", experimental: true }, configured(env) ? 200 : 503);
     }
     if (!configured(env)) return json({ error: "push unavailable" }, 503);
-    if (request.method !== "POST" || !["/v1/registration", "/v1/wake"].includes(path)) {
-      return json({ error: "not found" }, 404);
-    }
+    if (request.method !== "POST" || !PATHS.includes(path)) return json({ error: "not found" }, 404);
+    if (MAILBOX_PATHS.includes(path) && env.MAILBOX_ENABLED !== "true") return json({ error: "mailbox unavailable" }, 503);
     let body;
-    try { body = await readJson(request); } catch (_) { return json({ error: "bad request" }, 400); }
+    try { body = await readJson(request, path === "/v1/mailbox/put" ? MAX_MAILBOX_BODY_BYTES : MAX_BODY_BYTES); }
+    catch (_) { return json({ error: "bad request" }, 400); }
     const now = Math.floor(Date.now() / 1000);
-    if (path === "/v1/wake" ? !validWake(body) : !validRegistration(body, now)) {
-      return json({ error: "bad request" }, 400);
-    }
+    if (!validRequest(path, body, now)) return json({ error: "bad request" }, 400);
     // Cloudflare supplies this header; a missing value uses a shared fail-safe
     // bucket. It is HMACed before it leaves this worker and is never persisted.
     const identity = await rateIdentity(env.PUSH_RATE_KEY, request.headers.get("cf-connecting-ip"));
@@ -109,10 +130,12 @@ export class PushShard {
     )`);
     this.sql.exec("CREATE INDEX IF NOT EXISTS push_rate_expiry ON rate_limits(expires_at)");
     this.wakes = new WakeQueue(this);
+    this.mailbox = new CiphertextMailbox(this);
   }
 
   rows(query, ...args) { return this.sql.exec(query, ...args).toArray(); }
   count(query, ...args) { return Number(this.rows(query, ...args)[0]?.n || 0); }
+  mailboxEnabled() { return serviceEnabled(this.env) && this.env.MAILBOX_ENABLED === "true"; }
 
   // One synchronous transaction prevents overlapping requests from bypassing
   // quotas or replay protection. Bounded expiry work avoids unbounded scans.
@@ -120,6 +143,7 @@ export class PushShard {
     this.sql.exec("DELETE FROM registrations WHERE rowid IN (SELECT rowid FROM registrations WHERE expires_at <= ? LIMIT 128)", now);
     this.sql.exec("DELETE FROM rate_limits WHERE rowid IN (SELECT rowid FROM rate_limits WHERE expires_at <= ? LIMIT 128)", now);
     this.wakes.cleanup(now);
+    this.mailbox.cleanup(now);
   }
 
   consume(bucket, limit, duration, now) {
@@ -162,13 +186,13 @@ export class PushShard {
   async fetch(request) {
     if (!serviceEnabled(this.env)) return json({ error: "push unavailable" }, 503);
     const path = new URL(request.url).pathname;
-    if (request.method !== "POST" || !["/v1/registration", "/v1/wake"].includes(path)) return json({ error: "not found" }, 404);
+    if (request.method !== "POST" || !PATHS.includes(path)) return json({ error: "not found" }, 404);
+    if (MAILBOX_PATHS.includes(path) && this.env.MAILBOX_ENABLED !== "true") return json({ error: "mailbox unavailable" }, 503);
     let body;
-    try { body = await readJson(request); } catch (_) { return json({ error: "bad request" }, 400); }
+    try { body = await readJson(request, path === "/v1/mailbox/put" ? MAX_MAILBOX_BODY_BYTES : MAX_BODY_BYTES); }
+    catch (_) { return json({ error: "bad request" }, 400); }
     const now = Date.now();
-    if (path === "/v1/wake" ? !validWake(body) : !validRegistration(body, Math.floor(now / 1000))) {
-      return json({ error: "bad request" }, 400);
-    }
+    if (!validRequest(path, body, Math.floor(now / 1000))) return json({ error: "bad request" }, 400);
     const rateId = request.headers.get("x-apu-rate-id") || "";
     if (!/^[0-9a-f]{64}$/.test(rateId)) return json({ error: "bad request" }, 400);
     const allowed = this.state.storage.transactionSync(() => {
@@ -180,7 +204,16 @@ export class PushShard {
     if (!allowed) return json({ error: "rate limited" }, 429);
     const route = await routeFor(body.owner, body.capability);
     if (path === "/v1/registration") return this.register(body, route, now);
-    return this.wake(body.owner, route, now);
+    if (path === "/v1/wake") return this.wake(body.owner, route, now);
+    if (path === "/v1/mailbox/put") return mailboxResponse(await this.mailbox.put(body, route, now));
+    const action = path === "/v1/mailbox/pull" ? "pull" : "ack";
+    if (!(await verifyMailboxAccess(body, action))) return json({ error: "unauthorised" }, 403);
+    // Verification was asynchronous: re-check the switch, timestamp and the
+    // live registration immediately before the synchronous storage operation.
+    const current = Date.now();
+    if (!serviceEnabled(this.env) || this.env.MAILBOX_ENABLED !== "true") return json({ error: "mailbox unavailable" }, 503);
+    if (!validMailboxAccess(body, action, Math.floor(current / 1000))) return json({ error: "bad request" }, 400);
+    return mailboxResponse(action === "pull" ? this.mailbox.pull(body, route, current) : this.mailbox.ack(body, route, current));
   }
 
   async register(body, route, now) {

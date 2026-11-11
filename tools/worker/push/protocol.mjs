@@ -25,7 +25,7 @@ export function validRegistration(value, nowSeconds) {
     (value.action === "register" || value.action === "revoke") &&
     typeof value.owner === "string" && typeof value.capability === "string" && typeof value.device === "string" &&
     HEX32.test(value.owner) && HEX32.test(value.capability) && HEX16.test(value.device) &&
-    value.owner !== "0".repeat(64) && value.capability !== "0".repeat(64) &&
+    value.owner !== "0".repeat(64) && value.capability !== "0".repeat(64) && value.device !== "0".repeat(32) &&
     Number.isSafeInteger(value.sequence) && value.sequence > 0 &&
     Number.isSafeInteger(value.issuedAt) && Math.abs(value.issuedAt - nowSeconds) <= CLOCK_SKEW_SECONDS &&
     typeof value.token === "string" &&

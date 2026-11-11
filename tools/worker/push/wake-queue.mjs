@@ -81,26 +81,33 @@ export class WakeQueue {
     )`, now, now, now);
   }
 
+  // Call only inside mutate's SQLite transaction. Mailbox storage uses the
+  // same transaction so a crash cannot commit a message without its wake work.
+  enqueueInTransaction(owner, route, now, deviceFilter = null) {
+    this.sql.exec("DELETE FROM pending_wakes WHERE route = ? AND expires_at <= ?", route, now);
+    const allowed = deviceFilter === null ? null : new Set(deviceFilter);
+    const targets = this.rows(`SELECT device FROM registrations
+      WHERE route = ? AND owner = ? AND token IS NOT NULL AND expires_at > ? LIMIT ?`,
+    route, owner, now, MAX_DEVICES).filter((target) => allowed === null || allowed.has(target.device));
+    let queued = 0;
+    for (const target of targets) {
+      const existing = this.rows("SELECT 1 FROM pending_wakes WHERE route = ? AND device = ?", route, target.device).length;
+      if (!existing && this.shard.count("SELECT count(*) AS n FROM pending_wakes") >= MAX_PENDING_ROWS) continue;
+      // Multiple wakes coalesce, including one arriving while FCM is in
+      // flight. Preserve retry deadlines: a spammer cannot defeat backoff.
+      this.sql.exec(`INSERT INTO pending_wakes
+        (route, owner, device, generation, attempts, next_at, expires_at, claim_id, lease_until)
+        VALUES (?, ?, ?, 1, 0, ?, ?, NULL, 0)
+        ON CONFLICT(route, device) DO UPDATE SET
+          generation = generation + 1, expires_at = MAX(expires_at, excluded.expires_at)`,
+      route, owner, target.device, now, now + PENDING_TTL_MS);
+      queued++;
+    }
+    return { targets: targets.length, queued };
+  }
+
   async enqueue(owner, route, requestedAt) {
-    await this.mutate(requestedAt, (now) => {
-      // An expired/in-flight entry must not absorb a genuinely new request.
-      this.sql.exec("DELETE FROM pending_wakes WHERE route = ? AND expires_at <= ?", route, now);
-      const targets = this.rows(`SELECT device FROM registrations
-        WHERE route = ? AND owner = ? AND token IS NOT NULL AND expires_at > ? LIMIT ?`,
-      route, owner, now, MAX_DEVICES);
-      for (const target of targets) {
-        const existing = this.rows("SELECT 1 FROM pending_wakes WHERE route = ? AND device = ?", route, target.device).length;
-        if (!existing && this.shard.count("SELECT count(*) AS n FROM pending_wakes") >= MAX_PENDING_ROWS) continue;
-        // Multiple wakes coalesce, including one arriving while FCM is in
-        // flight. Preserve retry deadlines: a spammer cannot defeat backoff.
-        this.sql.exec(`INSERT INTO pending_wakes
-          (route, owner, device, generation, attempts, next_at, expires_at, claim_id, lease_until)
-          VALUES (?, ?, ?, 1, 0, ?, ?, NULL, 0)
-          ON CONFLICT(route, device) DO UPDATE SET
-            generation = generation + 1, expires_at = MAX(expires_at, excluded.expires_at)`,
-        route, owner, target.device, now, now + PENDING_TTL_MS);
-      }
-    });
+    await this.mutate(requestedAt, (now) => this.enqueueInTransaction(owner, route, now));
     // Do not wait for OAuth/FCM on the HTTP path. The committed row and alarm
     // survive an interrupted request; only the alarm performs provider I/O.
     await this.reschedule();
@@ -211,12 +218,17 @@ export class WakeQueue {
         "SELECT MIN(MIN(expires_at, MAX(next_at, lease_until))) AS due FROM pending_wakes";
       const row = this.rows(query)[0];
       const pendingDue = row?.due == null ? null : Number(row.due);
+      const mailboxExpiry = this.shard.mailbox.nextExpiry();
       const expired = this.shard.count("SELECT count(*) AS n FROM registrations WHERE expires_at <= ?", now) ||
-        this.shard.count("SELECT count(*) AS n FROM rate_limits WHERE expires_at <= ?", now);
+        this.shard.count("SELECT count(*) AS n FROM rate_limits WHERE expires_at <= ?", now) ||
+        mailboxExpiry !== null && mailboxExpiry <= now;
       const any = this.shard.count("SELECT count(*) AS n FROM registrations") ||
         this.shard.count("SELECT count(*) AS n FROM rate_limits");
       let deadline = expired ? now + 60_000 : any ? now + 12 * 60 * 60_000 : null;
       if (pendingDue !== null) deadline = deadline === null ? pendingDue : Math.min(deadline, pendingDue);
+      if (mailboxExpiry !== null && mailboxExpiry > now) {
+        deadline = deadline === null ? mailboxExpiry : Math.min(deadline, mailboxExpiry);
+      }
       if (deadline === null) {
         await this.storage.deleteAlarm();
       } else {

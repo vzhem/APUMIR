@@ -24,6 +24,8 @@ test("isolated deployment configuration stays disabled by default", async () => 
   assert.match(config, /^name\s*=\s*"apu-push-wake-experimental"\s*$/m);
   assert.match(config, /^PUSH_ENABLED\s*=\s*"false"\s*$/m);
   assert.equal((config.match(/^PUSH_ENABLED\s*=/gm) || []).length, 1);
+  assert.match(config, /^MAILBOX_ENABLED\s*=\s*"false"\s*$/m);
+  assert.equal((config.match(/^MAILBOX_ENABLED\s*=/gm) || []).length, 1);
   assert.match(config, /^class_name\s*=\s*"PushShard"\s*$/m);
   assert.match(config, /^new_sqlite_classes\s*=\s*\["PushShard"\]\s*$/m);
   assert.doesNotMatch(config, /^name\s*=\s*"p2p-relay"\s*$/m);
@@ -86,7 +88,7 @@ test("only bounded canonical fields, fresh time, and strictly typed lowercase va
   for (const changed of [
     { owner: value.owner.toUpperCase() }, { owner: 123 }, { owner: "0".repeat(64) },
     { capability: [] }, { capability: "0".repeat(64) },
-    { device: "00" }, { sequence: 0 }, { sequence: 1.5 }, { sequence: Number.MAX_SAFE_INTEGER + 1 },
+    { device: "00" }, { device: "00".repeat(16) }, { sequence: 0 }, { sequence: 1.5 }, { sequence: Number.MAX_SAFE_INTEGER + 1 },
     { issuedAt: value.issuedAt - 301 }, { issuedAt: value.issuedAt + 301 },
     { token: "short" }, { token: "x".repeat(2049) }, { token: "x".repeat(20) + "\n" },
     { signature: "00" }, { action: "revoke", token: "not empty" }, { extra: "no message text" },
