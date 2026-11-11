@@ -14,7 +14,10 @@ class OnlineHelperWiring(unittest.TestCase):
     def test_consent_precedes_native_start_in_shared_service_worker_path(self):
         text = source('data/RustBridge.kt')
         body = text[text.index('private fun initializeLocked('):text.index('fun shutdown()')]
-        self.assertLess(body.index('applyOnlineHelperPolicy(e)'), body.index('val ok = e.start()'))
+        self.assertIn('engineSlot.startNew(', body)
+        prepare = body[body.index('prepareAndStart = { e ->'):body.index('beforePublish = { e ->')]
+        self.assertEqual(prepare.count('if (!e.start())'), 1)
+        self.assertLess(prepare.index('applyOnlineHelperPolicy(e)'), prepare.index('if (!e.start())'))
         self.assertIn('current.configureOnlineHelper(', text)
         self.assertIn('helperRefreshQueued.compareAndSet(false, true)', text)
         self.assertIn('enqueueLifecycle {', text[text.index('fun refreshOnlineHelperPolicy()'):])
