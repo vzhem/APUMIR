@@ -95,6 +95,8 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, OUTBOX_CLASS: {
     "malformedRoutesBadClockAndExhaustedLeaseSequenceFailClosed",
 }, PUSH_DRAIN_CLASS: {
     "mixedSignalsAreInspectedAndAllowedRoutesShareOneGenericSync",
+    "batchOutcomesConsumeOnlyTheCorrespondingSqliteLeases",
+    "duplicateBatchResultRetainsAllSqliteLeasesForRetry",
     "wakesArrivingWhileSyncRunsSurviveAndAreRedriven",
     "inspectAndSyncFailuresRetryWithoutBlockingOtherRoutes",
     "startingWithoutACompletedReceiveWindowDoesNotConsumeTheWake",

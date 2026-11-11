@@ -9,27 +9,51 @@ import java.util.concurrent.CancellationException
  * freshly derive the route; a queue claim/index hit is not authentication.
  * A null route denotes the provider's deleted-messages recovery marker, for
  * which the caller must instead check local opt-in/identity before requesting a
- * bounded generic sync. No peer id or payload is passed to [sync].
+ * bounded generic sync. [sync] receives only the bounded opaque route hints it
+ * must process, including a null generic-recovery marker; no peer id, token,
+ * capability or message payload is passed. It must revalidate live trust under
+ * an ABA-safe lifecycle boundary before effects, not rely on [inspect] alone.
  *
  * The scheduler must redrive a pending inbox at [Result.Pending.readyAtMs],
  * including after process death, and close the enqueue/worker-exit race. A
  * service start, scheduled work, or provider acceptance is not a completed
- * sync. The caller may return [SyncOutcome.COMPLETED_WINDOW] only after a
- * bounded receive window actually ran, its events were consumed and any
- * accepted messages were durably processed. Failure, inability to start, or an
- * unfinished window must return RETRY. Even a completed window does not prove
- * that a message existed, arrived, or produced a notification. No production
- * implementation of that callback is connected yet.
+ * sync. [sync] must return one [SyncResult] made by each [SyncItem] in the
+ * batch; a missing, duplicate or foreign result retries the whole batch. Results
+ * can arrive in any order and are matched by item identity, not by position or
+ * route string. [SyncOutcome.COMPLETED_WINDOW] is valid only after the item's
+ * bounded receive window ran, its events were consumed and accepted messages
+ * were durably processed. Recovery also needs durable continuation for any
+ * unfinished scan. A lease can expire while the callback is running; eventual
+ * processing must therefore be idempotent and revalidate live trust. Failure,
+ * inability to start, or an unfinished window must return RETRY. Even a
+ * completed window does not prove delivery or a displayed notification. No
+ * production implementation of that callback is connected yet.
  */
 internal class PushWakeDrain(
     private val inbox: PushWakeQueue,
     private val nowMs: () -> Long,
     private val inspect: suspend (String?) -> Inspection,
-    private val sync: suspend () -> SyncOutcome,
+    private val sync: suspend (SyncBatch) -> List<SyncResult>,
     private val recordFailure: () -> Unit,
 ) {
     enum class Inspection { ALLOW, DROP, RETRY }
     enum class SyncOutcome { COMPLETED_WINDOW, RETRY }
+
+    /** Bounded hints only; a null route is the generic recovery marker, not a peer. */
+    class SyncBatch internal constructor(routes: List<String?>) {
+        val items: List<SyncItem> = java.util.Collections.unmodifiableList(routes.map { SyncItem(it) })
+        override fun toString(): String = "PushWakeSyncBatch(redacted)"
+    }
+
+    /** Each item represents one lease; the same route can occur more than once. */
+    class SyncItem internal constructor(val route: String?) {
+        fun result(outcome: SyncOutcome): SyncResult = SyncResult(this, outcome)
+        override fun toString(): String = "PushWakeSyncItem(redacted)"
+    }
+
+    class SyncResult internal constructor(internal val item: SyncItem, internal val outcome: SyncOutcome) {
+        override fun toString(): String = "PushWakeSyncResult(redacted)"
+    }
 
     sealed interface Result {
         object Empty : Result
@@ -56,8 +80,10 @@ internal class PushWakeDrain(
             }
         }
         if (accepted.isNotEmpty()) {
-            val completedWindow = syncSafely() == SyncOutcome.COMPLETED_WINDOW
-            for (claim in accepted) {
+            val batch = SyncBatch(accepted.map { it.route })
+            val outcomes = syncSafely(batch)
+            for ((index, claim) in accepted.withIndex()) {
+                val completedWindow = outcomes?.get(index) == SyncOutcome.COMPLETED_WINDOW
                 if (!completed(inbox.complete(claim, completedWindow, nowMs()))) storageUnavailable = true
             }
         }
@@ -85,13 +111,37 @@ internal class PushWakeDrain(
         Inspection.RETRY
     }
 
-    private suspend fun syncSafely(): SyncOutcome = try {
-        sync()
-    } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (_: Exception) {
-        recordFailure()
-        SyncOutcome.RETRY
+    private suspend fun syncSafely(batch: SyncBatch): List<SyncOutcome>? {
+        val outcomes = try {
+            // Match at most MAX_BATCH results to the exact items issued for
+            // this batch. Do not log routes, callback data, or exception text.
+            val supplied = sync(batch)
+            if (supplied.size != batch.items.size) {
+                null
+            } else {
+                val matched = arrayOfNulls<SyncOutcome>(batch.items.size)
+                val seen = BooleanArray(batch.items.size)
+                var invalid = false
+                for (index in batch.items.indices) {
+                    val result = supplied[index]
+                    val target = batch.items.indexOfFirst { it === result.item }
+                    if (target < 0 || seen[target]) {
+                        invalid = true
+                        break
+                    }
+                    seen[target] = true
+                    matched[target] = result.outcome
+                }
+                if (invalid || matched.any { it == null }) null else matched.map { checkNotNull(it) }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            recordFailure()
+            return null
+        }
+        if (outcomes == null) recordFailure()
+        return outcomes
     }
 
     companion object {

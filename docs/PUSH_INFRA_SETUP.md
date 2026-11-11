@@ -66,10 +66,12 @@ Cloudflare ещё не выполнялся, а остальные значен�
    [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens)
    выберите **Create Token**, затем в разделе **Policies** — **Start from scratch →
    Start with an Account policy**. Задайте доступ только **Account → Workers
-   Scripts → Read** и ограничьте ресурсы конкретным нужным аккаунтом. В старом
-   интерфейсе этот вариант может называться **Create Custom Token**. Затем
-   проверьте сводку и выберите создание токена.
-   Скопируйте показанный токен: Cloudflare показывает его значение один раз.
+   Scripts → Read** и ограничьте ресурсы конкретным нужным аккаунтом. Для
+   разовой проверки можно выбрать срок **7 days**: после истечения потребуется
+   новый токен. Фильтр клиентского IP оставьте пустым, поскольку адреса runner
+   GitHub Actions могут меняться. В старом интерфейсе этот вариант может
+   называться **Create Custom Token**. Затем проверьте сводку и выберите создание
+   токена. Скопируйте показанный токен: Cloudflare показывает его значение один раз.
    Не используйте Global API Key и не давайте право **Edit** для этой проверки.
 2. Откройте [GitHub Environments](https://github.com/vzhem/APUMIR/settings/environments)
    → **apu-push-staging** → **Environment secrets**. Напротив

@@ -47,7 +47,10 @@ class PushWakeDrainInstrumentedTest {
     }
 
     private fun drain(inspect: suspend (String?) -> PushWakeDrain.Inspection, sync: suspend () -> PushWakeDrain.SyncOutcome) =
-        PushWakeDrain(inbox, clock::get, inspect, sync) { failures++ }
+        PushWakeDrain(inbox, clock::get, inspect, { batch ->
+            val outcome = sync()
+            batch.items.map { it.result(outcome) }
+        }) { failures++ }
 
     @Test fun mixedSignalsAreInspectedAndAllowedRoutesShareOneGenericSync() = runBlocking {
         val now = clock.get()
@@ -73,6 +76,50 @@ class PushWakeDrainInstrumentedTest {
         clock.set(result.readyAtMs)
         assertEquals(PushWakeDrain.Result.Empty, drain({ PushWakeDrain.Inspection.ALLOW }, { syncs++; completed }).run())
         assertEquals(2, syncs)
+    }
+
+    @Test fun batchOutcomesConsumeOnlyTheCorrespondingSqliteLeases() = runBlocking {
+        val now = clock.get()
+        inbox.enqueueRoute(a, now)
+        inbox.enqueueRoute(b, now)
+        inbox.enqueueRoute(c, now)
+        inbox.enqueueRecovery(now)
+        val batches = mutableListOf<List<String?>>()
+        val worker = PushWakeDrain(inbox, clock::get, { route ->
+            if (route == c) PushWakeDrain.Inspection.DROP else PushWakeDrain.Inspection.ALLOW
+        }, { batch ->
+            batches += batch.items.map { it.route }
+            batch.items.reversed().map { item ->
+                item.result(if (item.route == a) completed else PushWakeDrain.SyncOutcome.RETRY)
+            }
+        }) { failures++ }
+        val pending = worker.run() as PushWakeDrain.Result.Pending
+        assertEquals(now + PushWakeInbox.RETRY_MS, pending.readyAtMs)
+        assertEquals(listOf(listOf(null, a, b)), batches)
+        clock.set(pending.readyAtMs)
+        val retried = mutableListOf<String?>()
+        val retry = drain({ route -> retried += route; PushWakeDrain.Inspection.ALLOW }, { completed })
+        assertEquals(PushWakeDrain.Result.Empty, retry.run())
+        assertEquals(listOf(null, b), retried)
+        assertEquals(0, failures)
+    }
+
+    @Test fun duplicateBatchResultRetainsAllSqliteLeasesForRetry() = runBlocking {
+        val now = clock.get()
+        inbox.enqueueRoute(a, now)
+        inbox.enqueueRoute(b, now)
+        val worker = PushWakeDrain(inbox, clock::get, { PushWakeDrain.Inspection.ALLOW }, { batch ->
+            val first = batch.items.first().result(completed)
+            listOf(first, first) // Right count, but b has no result.
+        }) { failures++ }
+        val pending = worker.run() as PushWakeDrain.Result.Pending
+        assertEquals(now + PushWakeInbox.RETRY_MS, pending.readyAtMs)
+        assertEquals(1, failures)
+        clock.set(pending.readyAtMs)
+        val retried = mutableListOf<String?>()
+        assertEquals(PushWakeDrain.Result.Empty,
+            drain({ route -> retried += route; PushWakeDrain.Inspection.ALLOW }, { completed }).run())
+        assertEquals(listOf(a, b), retried)
     }
 
     @Test fun wakesArrivingWhileSyncRunsSurviveAndAreRedriven() = runBlocking {
