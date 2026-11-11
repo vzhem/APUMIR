@@ -113,6 +113,36 @@ class CoreStartupContracts(unittest.TestCase):
         self.assertNotIn("RustBridge", report)
         self.assertNotIn("KeyStore", report)
 
+    def test_engine_trace_uses_only_fixed_steps_without_changing_start_order(self):
+        bridge = text("data/RustBridge.kt")
+        init = bridge[bridge.index("    fun initialize("):bridge.index("    internal fun signingRouteCompatible")]
+        self.assertIn("ServiceStartupDiagnostics.progress.lifecycleEntered(ticket)", init)
+        self.assertIn("finally { ServiceStartupDiagnostics.progress.engineReturned(ticket) }", init)
+        startup = bridge[bridge.index("    private fun initializeLocked("):bridge.index("    internal fun requestRelayWakeYield()")]
+        for label, call in (
+            ("CLEANING_PREVIOUS", "engineSlot.stop()"),
+            ("RESERVING_SLOT", "engineSlot.startNew("),
+            ("PREPARING_CORE", "initializeCore()"),
+            ("CREATING_ENGINE", "createEngineDurable("),
+            ("APPLYING_POLICY", "applyOnlineHelperPolicy(e)"),
+            ("STARTING_ENGINE", "e.start()"),
+            ("READING_NODE", "e.nodeId()"),
+            ("READING_PUBLIC_KEY", "e.publicKey()"),
+        ):
+            with self.subTest(label=label):
+                self.assertLess(startup.index(f"note(EnginePhase.{label})"), startup.index(call))
+        self.assertIn("note(EnginePhase.ABORTING)", startup)
+        progress = text("data/diagnostics/ServiceStartupProgress.kt")
+        self.assertIn("expected !== token", progress)
+        self.assertIn("sample.enginePhase.name.lowercase()", progress)
+        self.assertIn("sample.enginePhaseMs[step]", progress)
+        self.assertNotIn("RustBridge", progress)
+        self.assertNotIn("KeyStore", progress)
+        self.assertNotIn("displayName", progress)
+        self.assertNotIn("existingPrivateKey", progress)
+        report = text("data/diagnostics/ServiceStartupDiagnostics.kt")
+        self.assertIn("ServiceStartupReport.render(progress.snapshot())", report)
+
     def test_preliminary_report_is_available_before_native_or_database_queries(self):
         collector = text("data/diagnostics/TransferDiagnostics.kt")
         collect = collector[collector.index("    suspend fun collect("):collector.index("    private fun snapshotOf(")]

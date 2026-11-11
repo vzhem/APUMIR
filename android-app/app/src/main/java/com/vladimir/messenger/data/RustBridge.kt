@@ -2,6 +2,8 @@ package com.vladimir.messenger.data
 
 import android.content.Context
 import android.util.Log
+import com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics
+import com.vladimir.messenger.data.diagnostics.ServiceStartupProgress.EnginePhase
 import com.vladimir.messenger.data.receipt.DeliveryAckWire
 import com.vladimir.messenger.data.security.MessageSealer
 import com.vladimir.messenger.data.security.OutgoingPayloadPolicy
@@ -176,12 +178,14 @@ object RustBridge {
         if (rejectMainThreadCall("initialize")) return false
         // Signal before joining the serialized queue. Never interrupt native lifecycle calls.
         requestRelayWakeYield()
-        val ticket = serviceStartupToken?.let { com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics.progress.lifecycleQueued(it) }
+        val ticket = serviceStartupToken?.let { ServiceStartupDiagnostics.progress.lifecycleQueued(it) }
         return try {
             lifecycle.start(serviceOwner, startupAllowed) {
-                com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics.progress.lifecycleEntered(ticket)
+                ServiceStartupDiagnostics.progress.lifecycleEntered(ticket)
                 val previous = engine
-                val started = initializeLocked(displayName, existingPublicKey, existingPrivateKey, relayDbPath)
+                val started = try {
+                    initializeLocked(displayName, existingPublicKey, existingPrivateKey, relayDbPath, ticket)
+                } finally { ServiceStartupDiagnostics.progress.engineReturned(ticket) }
                 CoreLifecycleQueue.StartResult(started, engine !== previous, engine != null)
             }
         } catch (ex: Exception) {
@@ -207,12 +211,16 @@ object RustBridge {
         existingPublicKey: String?,
         existingPrivateKey: String?,
         relayDbPath: String?,
+        startupTicket: Any? = null,
     ): Boolean {
+        fun note(stage: EnginePhase) = ServiceStartupDiagnostics.progress.engineStage(startupTicket, stage)
         if (engineSlot.unsettled()) {
             // A previous failure may have left an inaccessible handle without
             // a service owner. Retry once on the lifecycle queue before startup.
+            note(EnginePhase.CLEANING_PREVIOUS)
             Log.w(TAG, "Retrying unresolved native engine cleanup")
             if (!engineSlot.stop()) return false
+            note(EnginePhase.CHECKING_EXISTING)
         }
         val current = engine
         if (current != null) {
@@ -231,10 +239,12 @@ object RustBridge {
                 return true
             }
             engineRunning = false
+            note(EnginePhase.CLEANING_PREVIOUS)
             if (!engineSlot.stop()) return false
         }
         engineRunning = false
         var startedNodeId: String? = null
+        note(EnginePhase.RESERVING_SLOT)
         return engineSlot.startNew(
             allow = {
                 val matches = IdentitySigningKeyStore.matchesInstalledRoute(existingPublicKey)
@@ -242,6 +252,7 @@ object RustBridge {
                 matches
             },
             create = {
+                note(EnginePhase.PREPARING_CORE)
                 if (!coreInitialized) {
                     val initResult = initializeCore()
                     Log.i(TAG, "initializeCore(): $initResult")
@@ -249,6 +260,7 @@ object RustBridge {
                 }
                 Log.i(TAG, "Rust version: ${getVersion()}")
                 com.vladimir.messenger.data.pairing.DevicePairingController.prepareLocal()
+                note(EnginePhase.CREATING_ENGINE)
                 if (!relayDbPath.isNullOrBlank()) {
                     Log.i(TAG, "Creating durable engine, relayDbPath=$relayDbPath")
                     createEngineDurable(displayName, existingPublicKey ?: "", existingPrivateKey ?: "", relayDbPath)
@@ -262,22 +274,30 @@ object RustBridge {
             },
             prepareAndStart = { e ->
                 // Consent and path policy must precede native start/binding sockets.
+                note(EnginePhase.APPLYING_POLICY)
                 applyOnlineHelperPolicy(e)
                 applyPathPolicy(e)
+                note(EnginePhase.STARTING_ENGINE)
                 if (!e.start()) {
+                    note(EnginePhase.ABORTING)
                     Log.e(TAG, "Engine.start() returned false")
                     false
                 } else {
+                    note(EnginePhase.READING_NODE)
                     startedNodeId = runCatching { e.nodeId() }.getOrNull()
                     val matches = com.vladimir.messenger.data.security.ExistingRoutingIdentity
                         .matchesRunning(existingPublicKey, startedNodeId)
-                    if (!matches) Log.e(TAG, "Started engine has a different routing identity; stopping it")
+                    if (!matches) {
+                        note(EnginePhase.ABORTING)
+                        Log.e(TAG, "Started engine has a different routing identity; stopping it")
+                    }
                     matches
                 }
             },
             beforePublish = { e ->
                 // Complete the potentially blocking FFI read before changing
                 // any caches; the provisional handle is still unavailable.
+                note(EnginePhase.READING_PUBLIC_KEY)
                 val publicKey = runCatching { e.publicKey() }.getOrNull()
                 Log.i(TAG, "Engine started. NodeId: $startedNodeId")
                 shadowNodeId = null
@@ -291,6 +311,7 @@ object RustBridge {
                 // not synchronously on the critical startup path.
             },
             recordFailure = { error ->
+                note(EnginePhase.ABORTING)
                 engineRunning = false
                 Log.e(TAG, "Failed to initialize engine", error)
             },
