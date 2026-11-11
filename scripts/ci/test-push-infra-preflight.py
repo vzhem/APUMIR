@@ -115,6 +115,28 @@ class CredentialTests(unittest.TestCase):
         values[preflight.CLIENT_CONFIG_NAME] = test_client("another-project")
         self.fails(values, "project_mismatch")
 
+    def test_project_mismatch_stops_before_key_or_network_without_leaking_values(self):
+        values = self.config()
+        values[preflight.CLIENT_CONFIG_NAME] = test_client("another-project-456")
+        env = {**values, "GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": preflight.REPO,
+               "GITHUB_REF": "refs/heads/" + preflight.BRANCH}
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with mock.patch.dict(os.environ, env, clear=True), \
+             mock.patch.object(preflight, "check_cloudflare") as cloudflare, \
+             mock.patch.object(preflight.subprocess, "run") as openssl, \
+             contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            self.assertEqual(1, preflight.main(["--check-secrets"]))
+            cloudflare.assert_not_called()
+            openssl.assert_not_called()
+            for name in values:
+                self.assertNotIn(name, os.environ)
+        self.assertEqual(f"::error title=Push infrastructure preflight::{preflight.MESSAGES['project_mismatch']}\n",
+                         stdout.getvalue())
+        output = stdout.getvalue() + stderr.getvalue()
+        for secret in ("another-project-456", "test-project-123", "synthetic_token_with_no_access",
+                       "synthetic-client-key", self.key):
+            self.assertNotIn(secret, output)
+
     def test_invalid_service_account_rejected(self):
         for field, value, code in (("type", "not_service_account", "fcm_json_invalid"),
                                    ("project_id", "../../x", "fcm_identity_invalid"),
