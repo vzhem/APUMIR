@@ -97,7 +97,10 @@ def read_job_log():
         "GH_NO_UPDATE_NOTIFIER": "1",
         "NO_COLOR": "1",
     }
-    return capture_bounded(["gh", "api", f"repos/{REPOSITORY}/actions/jobs/{JOB_ID}/logs"], env)
+    # Recent gh versions reject ANSI escape sequences even on a pipe unless
+    # explicitly allowed. Here stdout is never a terminal or a workflow log:
+    # it is bounded in memory and only a fixed category can be printed.
+    return capture_bounded(["gh", "api", "--allow-escape-sequences", f"repos/{REPOSITORY}/actions/jobs/{JOB_ID}/logs"], env)
 
 
 def main():

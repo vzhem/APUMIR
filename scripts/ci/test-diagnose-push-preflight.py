@@ -69,7 +69,8 @@ class DiagnosticTests(unittest.TestCase):
              mock.patch.object(diagnostic, "capture_bounded", return_value=b"fake log") as read:
             self.assertEqual(b"fake log", diagnostic.read_job_log())
         command, env = read.call_args.args
-        self.assertEqual(["gh", "api", f"repos/{diagnostic.REPOSITORY}/actions/jobs/{diagnostic.JOB_ID}/logs"], command)
+        self.assertEqual(["gh", "api", "--allow-escape-sequences",
+                          f"repos/{diagnostic.REPOSITORY}/actions/jobs/{diagnostic.JOB_ID}/logs"], command)
         self.assertEqual("fake-token", env["GH_TOKEN"])
         self.assertNotIn("GH_DEBUG", env)
         self.assertNotIn("HTTPS_PROXY", env)
