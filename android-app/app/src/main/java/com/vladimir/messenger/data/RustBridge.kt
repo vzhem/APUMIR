@@ -55,6 +55,7 @@ object RustBridge {
     // start is queued after the previous service's asynchronous shutdown, so lifecycle work
     // can never race into two native engines or accidentally cancel a required stop.
     private val lifecycleThread = AtomicReference<Thread?>()
+    private val relayWakeYield = RelayWakeYield()
     private val lifecycleExecutor = Executors.newSingleThreadExecutor { task ->
         Thread(task, "apu-core-lifecycle").also { thread ->
             thread.isDaemon = true
@@ -79,8 +80,8 @@ object RustBridge {
         try {
             return future.get()
         } catch (e: InterruptedException) {
-            // In particular, cancelling a WorkManager relay wake interrupts its bounded sleep,
-            // whose finally block stops the worker-owned engine before the queue advances.
+            // Cancelling a WorkManager relay wake interrupts its optional wait;
+            // its finally block stops the worker-owned engine before the queue advances.
             future.cancel(true)
             Thread.currentThread().interrupt()
             throw e
@@ -204,10 +205,15 @@ object RustBridge {
         existingPublicKey: String? = null,
         existingPrivateKey: String? = null,
         relayDbPath: String? = null,
+        recordServiceStartup: Boolean = false,
     ): Boolean {
         if (rejectMainThreadCall("initialize")) return false
+        // Signal before joining the serialized queue. Never interrupt native lifecycle calls.
+        requestRelayWakeYield()
+        val ticket = if (recordServiceStartup) com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics.progress.lifecycleQueued() else null
         return try {
             onLifecycleThread {
+                com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics.progress.lifecycleEntered(ticket)
                 initializeLocked(displayName, existingPublicKey, existingPrivateKey, relayDbPath)
             }
         } catch (ex: Exception) {
@@ -338,11 +344,15 @@ object RustBridge {
      * A service stop is requested on the Android main thread. Queue the actual native stop so
      * onDestroy never waits for a QUIC/relay call holding the engine's internal mutex.
      */
+    /** End a worker-owned wait early; engine ownership stays on the lifecycle executor. */
+    internal fun requestRelayWakeYield() = relayWakeYield.request()
+
     fun shutdown() {
         if (isMainThread()) {
             shutdownAsync()
             return
         }
+        requestRelayWakeYield()
         try {
             onLifecycleThread { shutdownLocked() }
         } catch (ex: Exception) {
@@ -351,6 +361,7 @@ object RustBridge {
     }
 
     fun shutdownAsync() {
+        requestRelayWakeYield()
         enqueueLifecycle { shutdownLocked() }
     }
 
@@ -386,8 +397,9 @@ object RustBridge {
     /**
      * M8-E slice 1: одно bounded receive-only окно для WorkManager.
      *
-     * The entire wake window is one serialized lifecycle task: a foreground service cannot
-     * create another native engine while this worker owns the bounded engine instance.
+     * The wake remains one serialized lifecycle task. Service startup/stop can
+     * shorten only the optional waiting window; worker-owned shutdown still
+     * completes before the next lifecycle task can use an engine.
      */
     fun runBoundedRelayWake(
         displayName: String,
@@ -403,10 +415,13 @@ object RustBridge {
             return RelayWakeResult(false, false, "disabled", 0L)
         }
 
+        val yieldToken = relayWakeYield.snapshot()
         return try {
             onLifecycleThread {
                 val current = engine
-                if (current != null && runCatching { current.isRunning() }.getOrDefault(false)) {
+                if (relayWakeYield.requestedSince(yieldToken)) {
+                    RelayWakeResult(false, false, "yielded", 0L)
+                } else if (current != null && runCatching { current.isRunning() }.getOrDefault(false)) {
                     engineRunning = true
                     val actual = runCatching { current.nodeId() }.getOrNull()
                     if (!com.vladimir.messenger.data.security.ExistingRoutingIdentity.matchesRunning(existingPublicKey, actual)) {
@@ -431,7 +446,9 @@ object RustBridge {
                 } else {
                     try {
                         val gossipTriggered = triggerGossipDiscovery()
-                        Thread.sleep(activeWindowMillis)
+                        if (relayWakeYield.await(yieldToken, activeWindowMillis)) {
+                            Log.i(TAG, "Relay wake yielded its wait to a lifecycle request")
+                        }
                         RelayWakeResult(
                             engineStartedByWorker = true,
                             gossipTriggered = gossipTriggered,
@@ -451,6 +468,15 @@ object RustBridge {
 
     /** Event consumers must not wait for an unrelated native lifecycle or network call. */
     fun isRunningCached(): Boolean = engineRunning && engine != null
+
+    /** Diagnostics must distinguish an unreadable native state from a confirmed stop. */
+    internal fun runningForDiagnostics(): Boolean? {
+        val current = engine ?: return false
+        return try { current.isRunning() } catch (error: Exception) {
+            Log.w(TAG, "Native engine state is unavailable for diagnostics", error)
+            null
+        }
+    }
 
     /** Main-thread reads are cache-only; a native state check can wait on the engine lock. */
     fun isRunning(): Boolean {

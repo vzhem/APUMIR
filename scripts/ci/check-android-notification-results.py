@@ -9,6 +9,8 @@ OUTBOX_CLASS = "com.vladimir.messenger.data.repository.OutboxFairnessInstrumente
 PUSH_CLASS = "com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest"
 REGISTRATION_CLASS = "com.vladimir.messenger.data.push.PushRegistrationStoreInstrumentedTest"
 PUSH_INTEGRATION_CLASS = "com.vladimir.messenger.data.push.PushWakeIntegrationInstrumentedTest"
+PUSH_INBOX_CLASS = "com.vladimir.messenger.data.push.PushWakeInboxInstrumentedTest"
+PUSH_DRAIN_CLASS = "com.vladimir.messenger.data.push.PushWakeDrainInstrumentedTest"
 FIREBASE_CLASS = "com.vladimir.messenger.data.push.FirebaseClientConfigurationInstrumentedTest"
 EXPECTED_NOTIFICATION = {
     "migrationFortyToFortyOnePreservesHistoryAndRoomValidatesSchema",
@@ -52,6 +54,22 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, OUTBOX_CLASS: {
     "quotaAndFailedEntropyDoNotEvictOrCreateARegistration",
 }, PUSH_INTEGRATION_CLASS: {
     "realFfiAndDeviceJournalsMatchWorkerVectorsWithoutProviderNetwork",
+}, PUSH_INBOX_CLASS: {
+    "routeAndOverflowRecoverySurviveReopenWithoutPrivateFields",
+    "newWakeDuringLeaseCannotBeErasedByTheOldCompletion",
+    "abandonedLeaseRecoversAndLateOwnerCannotDeleteReplacement",
+    "expiryAndReinsertionCannotReuseAnOldLease",
+    "failedWorkRespectsBackoffAndDoesNotLoseANewerWake",
+    "recoveryEventsCoalesceWithoutBeingLostDuringAnActiveSync",
+    "rollbackOfWallClockCannotLeaveAnAbandonedLeaseStuckForDays",
+    "concurrentInstancesCoalesceAndStillPreserveAnInflightWake",
+    "malformedRoutesBadClockAndExhaustedLeaseSequenceFailClosed",
+}, PUSH_DRAIN_CLASS: {
+    "mixedSignalsAreInspectedAndAllowedRoutesShareOneGenericSync",
+    "wakesArrivingWhileSyncRunsSurviveAndAreRedriven",
+    "inspectAndSyncFailuresRetryWithoutBlockingOtherRoutes",
+    "cancellationKeepsLeaseAndRecoveryCanRetryAfterDeadline",
+    "eachPassIsBoundedAndUnprocessedRoutesRemainPending",
 }, FIREBASE_CLASS: {
     "configuredSdkHasAutoInitDisabledWithoutTokenRequest",
     "wakeCryptoFfiRejectsInvalidInputWithoutStartingPush",

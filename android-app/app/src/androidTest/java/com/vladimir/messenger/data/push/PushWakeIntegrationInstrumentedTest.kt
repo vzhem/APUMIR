@@ -56,6 +56,7 @@ class PushWakeIntegrationInstrumentedTest {
         val suffix = UUID.randomUUID().toString()
         val registrationDb = File(context.noBackupFilesDir, "push-integration-registration-$suffix.sqlite")
         val epochDb = File(context.noBackupFilesDir, "push-integration-epoch-$suffix.sqlite")
+        val wakeDb = File(context.noBackupFilesDir, "push-integration-inbox-$suffix.sqlite")
         val registrationAlias = "apu-push-integration-registration-$suffix"
         val epochAlias = "apu-push-integration-epoch-$suffix"
         val random = object : SecureRandom() {
@@ -64,6 +65,7 @@ class PushWakeIntegrationInstrumentedTest {
         }
         val journal = PushRegistrationStore(context, registrationDb, registrationAlias, random = random)
         val epochs = PushEpochStore(context, epochDb, epochAlias)
+        val inbox = PushWakeInbox(context, wakeDb)
         val aliceId = "pk_" + "1".repeat(32)
         val bobId = "pk_" + "2".repeat(32)
         val epoch = "09".repeat(16)
@@ -76,7 +78,9 @@ class PushWakeIntegrationInstrumentedTest {
         val pinDb = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
         try {
             installIdentitySigningSeed(1.toUByte(), aliceId, ByteArray(32) { 1 })
-            val alice = createFileExchangeBinding(createIdentitySigningBinding(100), ByteArray(32) { 3 }, 200)
+            val aliceIdentity = createIdentitySigningBinding(100)
+            val alice = createFileExchangeBinding(aliceIdentity, ByteArray(32) { 3 }, 200)
+            val changedAlice = createFileExchangeBinding(aliceIdentity, ByteArray(32) { 5 }, 200)
             installIdentitySigningSeed(1.toUByte(), bobId, ByteArray(32) { 2 })
             val bob = createFileExchangeBinding(createIdentitySigningBinding(100), ByteArray(32) { 4 }, 200)
             val pins = FileExchangePeerStore(pinDb.fileExchangePeerDao())
@@ -167,10 +171,55 @@ class PushWakeIntegrationInstrumentedTest {
             assertEquals(bobId, indexed.localId)
             assertEquals(aliceId, indexed.peerId)
             assertEquals(attempt.generation, indexed.generation)
-            // Match a provider-shaped data message against the actual journal
-            // and a fresh Rust-derived route. This still does not start FCM or
-            // prove atomicity against live identity/pin changes.
-            val wakeData = PushWakePayload.parse(mapOf("v" to "1", "route" to expectedRoute))!!
+            // Exercise provider-shaped data through the real local index and
+            // durable inbox, then rederive before admission. The scheduler is a
+            // counter, not WorkManager or FCM; identity/pin ABA is not covered.
+            var scheduled = 0
+            val intake = PushWakeIntake(
+                lookup = { candidate ->
+                    when (journal.findRoute(candidate)) {
+                        is PushRegistrationStore.RouteResult.Found -> PushWakeIntake.Hint.FOUND
+                        PushRegistrationStore.RouteResult.Missing -> PushWakeIntake.Hint.MISSING
+                        PushRegistrationStore.RouteResult.Unavailable -> PushWakeIntake.Hint.UNAVAILABLE
+                    }
+                },
+                enqueueRoute = inbox::enqueueRoute,
+                enqueueRecovery = inbox::enqueueRecovery,
+                pending = inbox::pending,
+                schedule = { scheduled++; true },
+                recordFailure = { error("unexpected fake scheduler failure") },
+            )
+            val receivedAt = 1_700_000_000_010L
+            assertEquals(PushWakeIntake.Result.IGNORED,
+                intake.onData(mapOf("v" to "1", "route" to "ab".repeat(32)), receivedAt))
+            assertEquals(PushWakeIntake.Result.QUEUED,
+                intake.onData(mapOf("v" to "1", "route" to expectedRoute), receivedAt))
+            assertEquals(1, scheduled)
+            inbox.close()
+            val claim = (inbox.claim(receivedAt) as PushWakeInbox.ClaimResult.Ready).claim
+            val wakeData = PushWakePayload.parse(mapOf("v" to "1", "route" to claim.route!!))!!
+            var borrowed: PushWakeInspector.LocalIdentity? = null
+            val inspector = PushWakeInspector(
+                journal = journal,
+                pins = pins,
+                localIdentity = { PushWakeInspector.LocalIdentity(bobId, bob, ByteArray(32) { 4 }).also { borrowed = it } },
+                recoveryAllowed = { PushWakeDrain.Inspection.DROP },
+                crypto = crypto,
+                recordFailure = { error("unexpected inspector failure") },
+            )
+            runBlocking {
+                assertEquals(PushWakeDrain.Inspection.ALLOW, inspector.inspect(claim.route))
+                assertTrue(borrowed!!.secret.all { it == 0.toByte() })
+                assertFalse(borrowed.toString().contains(bobId))
+                assertEquals(PushWakeDrain.Inspection.DROP, inspector.inspect(null))
+                assertEquals(PushWakeDrain.Inspection.DROP, inspector.inspect("ab".repeat(32)))
+                assertTrue(pins.forgetPin(aliceId))
+                assertEquals(PushWakeDrain.Inspection.DROP, inspector.inspect(claim.route))
+                assertTrue(pins.pinFirstSeen(changedAlice).newlyPinned)
+                assertEquals(PushWakeDrain.Inspection.DROP, inspector.inspect(claim.route))
+                assertTrue(pins.forgetPin(aliceId))
+                assertTrue(pins.pinFirstSeen(alice).newlyPinned)
+            }
             val freshReceiver = crypto.derive(bob, pinnedAlice, ByteArray(32) { 4 }, confirmed.epochHex, false)!!
             val freshRoute = try { freshReceiver.routeHex() } finally { freshReceiver.close() }
             assertTrue(PushWakeAdmission.isConsistent(wakeData, indexed.localId, indexed.peerId,
@@ -179,6 +228,7 @@ class PushWakeIntegrationInstrumentedTest {
                 indexed.generation, bobId, aliceId, bob, bob, confirmed, freshRoute))
             assertFalse(PushWakeAdmission.isConsistent(wakeData, indexed.localId, indexed.peerId,
                 indexed.generation, bobId, aliceId, bob, pinnedAlice, confirmed.beginRevocation(), freshRoute))
+            assertEquals(PushWakeInbox.Completion.COMPLETED, inbox.complete(claim, true, receivedAt))
             val plaintext = confirmed.announcement()!!
             // Exercise the actual sealer/FFI using the independently pinned
             // Room binding, without touching the application's real router.
@@ -230,17 +280,22 @@ class PushWakeIntegrationInstrumentedTest {
                 assertEquals("{\"owner\":\"$owner\",\"capability\":\"$capability\"}", wake!!.toJsonBytes().toString(Charsets.US_ASCII))
                 assertTrue(wake.isValid())
             } finally { sender.close() }
+            assertTrue(journal.beginRevocation(participants) is PushRegistrationStore.Result.Ready)
+            assertEquals(PushWakeIntake.Result.IGNORED,
+                intake.onData(mapOf("v" to "1", "route" to expectedRoute), receivedAt + 1))
+            assertEquals(PushWakeDrain.Inspection.DROP, runBlocking { inspector.inspect(expectedRoute) })
         } finally {
             clearIdentitySigningSeed()
             pinDb.close()
             journal.close()
             epochs.close()
+            inbox.close()
             KeyStore.getInstance("AndroidKeyStore").apply {
                 load(null)
                 deleteEntry(registrationAlias)
                 deleteEntry(epochAlias)
             }
-            listOf(registrationDb, epochDb).forEach { file ->
+            listOf(registrationDb, epochDb, wakeDb).forEach { file ->
                 context.deleteDatabase(file.absolutePath)
                 File(file.absolutePath + "-wal").delete()
                 File(file.absolutePath + "-shm").delete()

@@ -22,11 +22,20 @@ object CoreStatus {
 
     fun report(text: String) {
         _stage.value = text
+        when (text) {
+            "Готовим ключи безопасности…" -> com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics.progress.preparingKeys()
+            "Поднимаем ядро и сеть…" -> com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics.progress.coreRequested()
+        }
     }
 
-    fun markStarting() { _ready.value = false }
+    fun markStarting() {
+        com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics.progress.start()
+        _stage.value = "Поднимаем ядро…"
+        _ready.value = false
+    }
 
     fun markReady() {
+        com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics.progress.finished()
         com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.tracker.coreReady()
         com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.phase(com.vladimir.messenger.data.diagnostics.DiagnosticPhase.CORE_READY)
         _ready.value = true

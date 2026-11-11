@@ -112,6 +112,7 @@ jobs:
         run: |
           python3 scripts/ci/check-online-helper.py
           python3 scripts/ci/check-diagnostics-report.py
+          python3 scripts/ci/check-core-startup.py
           python3 scripts/ci/check-initial-sync-contract.py
           python3 scripts/ci/check-launcher-icon.py
           python3 scripts/ci/check-delivery-cadence.py

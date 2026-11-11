@@ -239,6 +239,7 @@ data class DiagnosticsFacts(
     val liveDirectSwarmPeers: Int? = null,
     /** Решение Rust policy в момент снимка, не свидетельство фактического HTTP-запроса. */
     val externalTransportAllowed: Boolean? = null,
+    val coreRunningKnown: Boolean = true,
 )
 
 /** Агрегаты обычных сообщений; file chunks intentionally stay on file-transfer diagnostics. */
@@ -768,19 +769,7 @@ object DiagnosticsReport {
         }
 
         // ── Ядро ────────────────────────────────────────────────────────────
-        lines += if (facts.coreRunning) {
-            DiagnosticsLine(
-                DiagnosticsLevel.OK,
-                "Ядро",
-                "работает, пиров ${facts.connectedPeers}, очередь событий ${facts.pendingEvents}",
-            )
-        } else {
-            DiagnosticsLine(
-                DiagnosticsLevel.BAD,
-                "Ядро",
-                "не запущено (${facts.coreStage.ifBlank { "нет этапа" }})",
-            )
-        }
+        lines += CoreDiagnosticStage.summary(facts)
 
         if (facts.installedSigningMode != "unknown" || facts.fileExchangeMode != "unknown") {
             // A later read-only Keystore check cannot repair a missing identity
@@ -1064,16 +1053,9 @@ object DiagnosticsReport {
 
     private fun StringBuilder.appendCore(facts: DiagnosticsFacts) {
         appendLine("[ядро]")
-        appendLine("running=${facts.coreRunning}")
+        appendLine("running=${if (facts.coreRunningKnown) facts.coreRunning else "unknown"}")
         appendLine("build=${facts.coreBuild}")
-        // Ядро рапортует стадию «Поднимаем ядро и сеть…» и одновременно
-        // ready=true — в отчёте это выглядело противоречием. Когда ядро готово,
-        // так и пишем, иначе показываем стадию и что она ещё идёт.
-        if (facts.coreReady) {
-            appendLine("stage=готово (ядро поднято)")
-        } else {
-            appendLine("stage=${facts.coreStage.ifBlank { "нет данных" }} → ещё поднимается")
-        }
+        appendLine("stage=${CoreDiagnosticStage.describe(facts.coreReady, facts.coreRunning, facts.coreRunningKnown, facts.coreStage)}")
         appendLine("ready=${facts.coreReady}")
         appendLine("network=${networkText(facts.networkStatus)}")
         appendLine("connected_peers=${facts.connectedPeers} (не число подтверждённых прямых соседей)")

@@ -20,6 +20,7 @@ class DiagnosticsReportTest {
         networkInternet: Boolean = true,
         networkVpn: Boolean = false,
         coreRunning: Boolean = true,
+        coreRunningKnown: Boolean = true,
         coreReady: Boolean = true,
         coreStage: String = "Ядро поднято",
         networkStatus: String = "connected",
@@ -84,6 +85,7 @@ class DiagnosticsReportTest {
         batteryExempt = batteryExempt,
         deviceIdle = false,
         coreRunning = coreRunning,
+        coreRunningKnown = coreRunningKnown,
         coreBuild = "p2p_core 0.1.0 · сборка v11.74.182 · 2 брокера",
         coreStage = coreStage,
         coreReady = coreReady,
@@ -1097,6 +1099,24 @@ class DiagnosticsReportTest {
             logcat = emptyList(),
         )
         assertTrue(starting.contains("stage=Поднимаем ядро и сеть… → ещё поднимается"))
+
+        for (lastStage in listOf("Ядро в ограниченном режиме", "Зеркальный режим: сеть ведёт партнёр", "Поднимаем ядро и сеть…")) {
+            val stopped = DiagnosticsReport.render(
+                facts = facts(coreRunning = false, coreReady = true, coreStage = lastStage),
+                journal = emptyList(), logcat = emptyList(),
+            )
+            assertTrue(stopped.contains("stage=ядро не запущено; последний этап: $lastStage"))
+            assertFalse(stopped.contains("stage=готово (ядро поднято)"))
+        }
+        val unknown = DiagnosticsReport.render(
+            facts = facts(coreRunning = false, coreRunningKnown = false, coreReady = true),
+            journal = emptyList(), logcat = emptyList(),
+        )
+        assertTrue(unknown.contains("running=unknown"))
+        assertTrue(unknown.contains("stage=состояние ядра неизвестно"))
+        assertFalse(unknown.contains("stage=готово (ядро поднято)"))
+        assertTrue(DiagnosticsReport.summaryLines(facts(coreRunning = false, coreRunningKnown = false))
+            .any { it.title == "Ядро" && it.level == DiagnosticsLevel.WARN })
     }
 
     /**

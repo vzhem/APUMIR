@@ -26,6 +26,7 @@ internal object ServiceLifecycleHooks {
 
     /** Служба уничтожена: [planned] — остановилась сама, а не её убили. */
     fun onDestroyed(context: Context, planned: Boolean) {
+        com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics.progress.stopped()
         runCatching { EmergencyKeepAlive.onServiceStopped(context, intentional = planned) }
     }
 

@@ -112,7 +112,8 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertIn("DiagnosticsPrivacy.redact", collector)
 
     def test_report_has_every_section_the_owner_reads(self):
-        report = source(DIAG / "DiagnosticsReport.kt") + source(DIAG / "UpdateDiagnosticsReport.kt")
+        report = (source(DIAG / "DiagnosticsReport.kt") + source(DIAG / "UpdateDiagnosticsReport.kt")
+                  + source(DIAG / "CoreDiagnosticStage.kt"))
         for section in (
             "[сводка]",
             "[окружение]",

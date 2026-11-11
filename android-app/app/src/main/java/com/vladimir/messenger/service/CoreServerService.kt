@@ -605,9 +605,7 @@ class CoreServerService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        OperationalDiagnostics.tracker.coreStarting()
-        CoreStatus.markStarting()
-        OperationalDiagnostics.phase(DiagnosticPhase.SERVICE_START)
+        CoreStartupCoordinator.serviceCreated()
         Log.i(TAG, "CoreServerService created")
         TransferDiagnostics.record("core", "служба ядра запускается")
         // CPU бодрствует только на время работы (события/файлы/звонок), а не
@@ -1047,7 +1045,7 @@ class CoreServerService : Service() {
             // Собственный SQLite-файл relay custody (app-private, WAL).
             CoreStatus.report("Поднимаем ядро и сеть…")
             val relayDbPath = File(filesDir, "apu_relay.sqlite").absolutePath
-            val ok = RustBridge.initialize(displayName, existingPubKey, existingPrivKey, relayDbPath)
+            val ok = RustBridge.initialize(displayName, existingPubKey, existingPrivKey, relayDbPath, recordServiceStartup = true)
             if (ok) {
                 val nodeId = RustBridge.nodeId()
                 Log.i(TAG, "Engine OK. NodeId=$nodeId")
