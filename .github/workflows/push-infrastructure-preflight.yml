@@ -32,32 +32,6 @@ jobs:
       - name: Test preflight with fabricated data, offline
         run: python3 scripts/ci/test-push-infra-preflight.py
 
-  # One-off diagnosis of the already approved job. It has actions:read only,
-  # receives no environment secrets, and emits one fixed category, never logs.
-  # The ordinary credentialed preflight is NOT triggered by this marker.
-  diagnose-previous:
-    if: >-
-      github.event_name == 'push' && github.repository == 'vzhem/APUMIR' &&
-      github.ref == 'refs/heads/arena/1266946d-apumir' &&
-      contains(github.event.head_commit.message, '[diagnose-push-43051443974]')
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      actions: read
-    steps:
-      - name: Check out this exact commit without retaining Git credentials
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: Test redacted diagnostics offline
-        run: python3 scripts/ci/test-diagnose-push-preflight.py
-      - name: Read only the fixed failure category of the previously approved job
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/ci/diagnose-push-preflight.py
-
   protection-check:
     needs: offline-tests
     if: >-

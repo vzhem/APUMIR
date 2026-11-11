@@ -96,24 +96,29 @@ def credentials(values, validate_key=rsa_key_valid):
         raise PreflightError("config_missing")
     token, account, raw_fcm, raw_client = (values[name] for name in names)
     if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9._-]{16,512}", token):
-        raise PreflightError("config_invalid")
+        raise PreflightError("cloudflare_token_invalid")
     if not isinstance(account, str) or not re.fullmatch(r"[0-9a-f]{32}", account):
-        raise PreflightError("config_invalid")
+        raise PreflightError("cloudflare_account_invalid")
     if client_validator.validate(raw_client) != "valid":
         raise PreflightError("client_invalid")
     client = parsed_json(raw_client, 65_536)
-    service = parsed_json(raw_fcm, 16_384)
+    try:
+        service = parsed_json(raw_fcm, 16_384)
+    except PreflightError:
+        # Report only which fixed configuration needs attention, never JSON
+        # excerpts, field values, exception text or provider responses.
+        raise PreflightError("fcm_json_invalid") from None
     if not isinstance(client, dict) or not isinstance(service, dict) or service.get("type") != "service_account":
-        raise PreflightError("config_invalid")
+        raise PreflightError("fcm_json_invalid")
     project = service.get("project_id")
     email = service.get("client_email")
     private_key = service.get("private_key")
     if not isinstance(project, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{4,62}", project):
-        raise PreflightError("config_invalid")
+        raise PreflightError("fcm_identity_invalid")
     if not isinstance(email, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+", email):
-        raise PreflightError("config_invalid")
+        raise PreflightError("fcm_identity_invalid")
     if not email.endswith("@" + project + ".iam.gserviceaccount.com"):
-        raise PreflightError("config_invalid")
+        raise PreflightError("fcm_identity_invalid")
     if client.get("project_info", {}).get("project_id") != project:
         raise PreflightError("project_mismatch")
     if not validate_key(private_key):
@@ -227,6 +232,10 @@ MESSAGES = {
     "environment": "The GitHub environment is absent or does not have the required reviewer and branch protection.",
     "config_missing": "One or more required GitHub environment secrets or the existing Android client configuration are missing.",
     "config_invalid": "The Cloudflare or Firebase service-account configuration is malformed.",
+    "cloudflare_token_invalid": "The Cloudflare API token format is invalid; check APU_PUSH_CLOUDFLARE_TOKEN without sharing its value.",
+    "cloudflare_account_invalid": "The Cloudflare account ID format is invalid; check APU_PUSH_CLOUDFLARE_ACCOUNT_ID without sharing its value.",
+    "fcm_json_invalid": "The Firebase service-account JSON is invalid; check APU_PUSH_FCM_SERVICE_ACCOUNT without sharing its value.",
+    "fcm_identity_invalid": "The Firebase service-account project or email format is invalid; check APU_PUSH_FCM_SERVICE_ACCOUNT without sharing its value.",
     "client_invalid": "The existing Firebase Android client configuration is missing or invalid.",
     "project_mismatch": "The Firebase service account and Android client configuration belong to different projects.",
     "key_invalid": "The Firebase service-account RSA private key could not be checked.",

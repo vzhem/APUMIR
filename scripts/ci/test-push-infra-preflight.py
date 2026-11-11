@@ -83,14 +83,14 @@ class CredentialTests(unittest.TestCase):
                 self.fails(values, "config_missing")
 
     def test_cloudflare_account_and_token_are_strict(self):
-        for name, value in ((preflight.CF_ACCOUNT_NAME, "../../escape"),
-                            (preflight.CF_ACCOUNT_NAME, "0" * 31),
-                            (preflight.CF_TOKEN_NAME, "token\nsecret"),
-                            (preflight.CF_TOKEN_NAME, "short")):
+        for name, value, code in ((preflight.CF_ACCOUNT_NAME, "../../escape", "cloudflare_account_invalid"),
+                                  (preflight.CF_ACCOUNT_NAME, "0" * 31, "cloudflare_account_invalid"),
+                                  (preflight.CF_TOKEN_NAME, "token\nsecret", "cloudflare_token_invalid"),
+                                  (preflight.CF_TOKEN_NAME, "short", "cloudflare_token_invalid")):
             with self.subTest(name=name, value=value):
                 values = self.config()
                 values[name] = value
-                self.fails(values, "config_invalid")
+                self.fails(values, code)
 
     def test_invalid_or_secret_android_client_rejected(self):
         for raw in ("{}", self.config()[preflight.FCM_ACCOUNT_NAME],
@@ -106,15 +106,16 @@ class CredentialTests(unittest.TestCase):
         self.fails(values, "project_mismatch")
 
     def test_invalid_service_account_rejected(self):
-        for field, value in (("type", "not_service_account"), ("project_id", "../../x"),
-                             ("client_email", "wrong@other-project.iam.gserviceaccount.com"),
-                             ("client_email", "bad\nemail")):
+        for field, value, code in (("type", "not_service_account", "fcm_json_invalid"),
+                                   ("project_id", "../../x", "fcm_identity_invalid"),
+                                   ("client_email", "wrong@other-project.iam.gserviceaccount.com", "fcm_identity_invalid"),
+                                   ("client_email", "bad\nemail", "fcm_identity_invalid")):
             with self.subTest(field=field, value=value):
                 values = self.config()
                 service = json.loads(values[preflight.FCM_ACCOUNT_NAME])
                 service[field] = value
                 values[preflight.FCM_ACCOUNT_NAME] = json.dumps(service)
-                self.fails(values, "config_invalid")
+                self.fails(values, code)
 
     def test_duplicate_malformed_oversized_and_nonfinite_json_rejected(self):
         for raw in ('{"type":"service_account","type":"service_account"}', "[]", "{broken}",
@@ -122,7 +123,30 @@ class CredentialTests(unittest.TestCase):
             with self.subTest(case=raw[:40]):
                 values = self.config()
                 values[preflight.FCM_ACCOUNT_NAME] = raw
-                self.fails(values, "config_invalid")
+                self.fails(values, "fcm_json_invalid")
+
+    def test_new_diagnostics_never_emit_values_or_contact_cloudflare(self):
+        sentinel = "SECRET_SENTINEL_MUST_NOT_APPEAR!"
+        bad_identity = json.loads(self.config()[preflight.FCM_ACCOUNT_NAME])
+        bad_identity["project_id"] = sentinel
+        cases = (
+            (preflight.CF_TOKEN_NAME, sentinel, "cloudflare_token_invalid"),
+            (preflight.CF_ACCOUNT_NAME, sentinel, "cloudflare_account_invalid"),
+            (preflight.FCM_ACCOUNT_NAME, "{" + sentinel, "fcm_json_invalid"),
+            (preflight.FCM_ACCOUNT_NAME, json.dumps(bad_identity), "fcm_identity_invalid"),
+        )
+        for name, value, code in cases:
+            env = {**self.config(), name: value, "GITHUB_ACTIONS": "true",
+                   "GITHUB_REPOSITORY": preflight.REPO, "GITHUB_REF": "refs/heads/" + preflight.BRANCH}
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with self.subTest(code=code), mock.patch.dict(os.environ, env, clear=True), \
+                 mock.patch.object(preflight, "check_cloudflare") as cloudflare, \
+                 contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                self.assertEqual(1, preflight.main(["--check-secrets"]))
+                cloudflare.assert_not_called()
+            self.assertEqual(f"::error title=Push infrastructure preflight::{preflight.MESSAGES[code]}\n", stdout.getvalue())
+            self.assertNotIn(sentinel, stdout.getvalue() + stderr.getvalue())
+            self.assertNotIn(self.key, stdout.getvalue() + stderr.getvalue())
 
     def test_invalid_key_rejected(self):
         values = self.config()
