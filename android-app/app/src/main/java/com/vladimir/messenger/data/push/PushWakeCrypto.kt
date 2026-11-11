@@ -116,6 +116,22 @@ internal class PushWakeCrypto(
             PushWakeRequest(hex(owner), hex(capability))
         } else null
 
+        /**
+         * Build a put only for the sender's matching, currently offered epoch.
+         * [id], [expiresAt] and [envelope] must already be stored together for
+         * retries; this method does not persist, send or prove delivery.
+         */
+        fun mailboxPut(
+            localBinding: ByteArray, pinnedPeerBinding: ByteArray, state: PushEpochProtocol.State,
+            id: String, expiresAt: Long, envelope: String, current: () -> Boolean,
+        ): PushMailboxPutRequest? {
+            if (closed || !localIsSender) return null
+            return PushMailboxPutBuilder(recordFailure).build(
+                owner, capability, localHash, peerHash, epochHash, { !closed }, current,
+                localBinding, pinnedPeerBinding, state, id, expiresAt, envelope,
+            )
+        }
+
         /** Prepare only an owner-signed pull for this registered receiver route. */
         fun mailboxPull(
             localBinding: ByteArray, pinnedPeerBinding: ByteArray, state: PushRegistrationState.State,

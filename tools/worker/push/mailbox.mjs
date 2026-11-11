@@ -3,9 +3,10 @@
 // cryptographically opened here. All quotas/retention are provisional and the
 // HTTP interface remains disabled until explicitly configured and reviewed.
 import { hexFromBytes, sha256 } from "./protocol.mjs";
+import { MAX_MAILBOX_TTL_MS, mailboxPutId, validMailboxPut } from "./mailbox-protocol.mjs";
 
 export const MAILBOX_LIMITS = Object.freeze({
-  ttlMs: 7 * 24 * 60 * 60_000,
+  ttlMs: MAX_MAILBOX_TTL_MS,
   routeRows: 4096, ownerRows: 12_000, shardRows: 50_000,
   routeBytes: 2 * 1024 * 1024, ownerBytes: 16 * 1024 * 1024, shardBytes: 64 * 1024 * 1024,
   pullBatch: 4,
@@ -84,23 +85,25 @@ export class CiphertextMailbox {
 
   /** Store and enqueue wakes in one SQLite transaction, without provider I/O. */
   async put(body, route, requestedAt) {
+    if (!validMailboxPut(body, requestedAt, this.limits.ttlMs) ||
+        await mailboxPutId(body.expiresAt, body.envelope) !== body.id) return { status: 400 };
     const digest = hexFromBytes(await sha256(new TextEncoder().encode(body.envelope)));
     let result;
     try {
       result = await this.shard.wakes.mutate(requestedAt, (now) => {
         if (!this.shard.mailboxEnabled()) return { status: 503 };
-        let old = this.rows(`SELECT owner, digest, envelope, expires_at FROM mailbox_messages
+        // Hashing, scheduling and the transaction may have waited beyond the
+        // cutoff. Never create or revive an expired request, even if no row or
+        // tombstone remains. Revalidate on the actual transaction clock.
+        if (!validMailboxPut(body, now, this.limits.ttlMs)) return { status: 400 };
+        const old = this.rows(`SELECT owner, digest, envelope, expires_at FROM mailbox_messages
           WHERE route = ? AND message_id = ?`, route, body.id)[0];
-        if (old && Number(old.expires_at) <= now) {
-          this.sql.exec("DELETE FROM mailbox_targets WHERE route = ? AND message_id = ?", route, body.id);
-          this.sql.exec("DELETE FROM mailbox_messages WHERE route = ? AND message_id = ?", route, body.id);
-          old = null;
-        }
         const targets = this.targets(body.owner, route, now);
         // Knowing a public owner key and guessing unknown capabilities must not
         // consume that owner's shared budget or create per-route rate rows.
         if (!old && !targets.length) return { status: 404 };
-        if (old && (old.owner !== body.owner || old.digest !== digest || old.envelope !== null && old.envelope !== body.envelope)) {
+        if (old && (old.owner !== body.owner || old.digest !== digest || Number(old.expires_at) !== body.expiresAt ||
+            old.envelope !== null && old.envelope !== body.envelope)) {
           return { status: 409 };
         }
         if (!this.shard.consume("mailbox-put-route:" + route, 120, 60 * 60_000, now) ||
@@ -117,7 +120,7 @@ export class CiphertextMailbox {
         // APUSEAL1 fields are validated ASCII, so characters equal UTF-8 bytes.
         const bytes = body.envelope.length;
         if (!this.withinQuota(body.owner, route, bytes)) return { status: 429 };
-        const expiresAt = now + this.limits.ttlMs;
+        const expiresAt = body.expiresAt;
         this.sql.exec(`INSERT INTO mailbox_messages(route, owner, message_id, digest, envelope, bytes, expires_at)
           VALUES (?, ?, ?, ?, ?, ?, ?)`, route, body.owner, body.id, digest, body.envelope, bytes, expiresAt);
         for (const device of targets) {

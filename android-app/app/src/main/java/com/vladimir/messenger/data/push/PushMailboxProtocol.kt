@@ -1,6 +1,7 @@
 package com.vladimir.messenger.data.push
 
 // java.util.Base64 is available on API 26, the application's minSdk, and on the JVM.
+import java.security.MessageDigest
 import java.util.Base64
 
 /**
@@ -23,6 +24,30 @@ internal object PushMailboxProtocol {
             HEX_32.matches(capability) && capability.any { it != '0' }
     fun validSignature(value: String): Boolean = HEX_64.matches(value)
     fun validTimestamp(value: Long): Boolean = value in 1..MAX_SAFE_INTEGER
+
+    /**
+     * Outside id is the first 16 bytes of a domain-separated SHA-256 of the
+     * immutable expiry and wire. It is NOT an authenticated original message id.
+     * The ciphertext must have fresh encryption randomness. Persist all three
+     * values before the first put; never extend the cutoff or re-seal a retry.
+     * The Worker checks the cutoff on its own clock, including at commit time.
+     */
+    fun putId(expiresAt: Long, envelope: String): String? {
+        if (!validTimestamp(expiresAt) || !validEnvelope(envelope)) return null
+        val digest = MessageDigest.getInstance("SHA-256")
+        digest.update("apu-mailbox-put-id-v1\n".toByteArray(Charsets.US_ASCII))
+        digest.update(expiresAt.toString().toByteArray(Charsets.US_ASCII))
+        digest.update('\n'.code.toByte())
+        val wire = envelope.toByteArray(Charsets.US_ASCII)
+        val hash = try {
+            digest.update(wire)
+            digest.update('\n'.code.toByte())
+            digest.digest()
+        } finally { wire.fill(0) }
+        return try {
+            hash.take(16).joinToString("") { "%02x".format(it.toInt() and 255) }.takeIf(::validId)
+        } finally { hash.fill(0) }
+    }
 
     /** Same bounded, canonical structure accepted by the experimental Worker. */
     fun validEnvelope(value: String): Boolean {
@@ -69,13 +94,14 @@ internal class PushMailboxPutRequest(
     private val owner: String,
     private val capability: String,
     private val id: String,
+    internal val expiresAt: Long,
     private val envelope: String,
 ) {
     internal fun isValid(): Boolean = PushMailboxProtocol.validRoute(owner, capability) &&
-        PushMailboxProtocol.validId(id) && PushMailboxProtocol.validEnvelope(envelope)
+        PushMailboxProtocol.validId(id) && PushMailboxProtocol.putId(expiresAt, envelope) == id
 
     internal fun toJsonBytes(): ByteArray = (
-        "{\"owner\":\"$owner\",\"capability\":\"$capability\",\"id\":\"$id\",\"envelope\":\"$envelope\"}"
+        "{\"owner\":\"$owner\",\"capability\":\"$capability\",\"id\":\"$id\",\"expiresAt\":$expiresAt,\"envelope\":\"$envelope\"}"
         ).toByteArray(Charsets.US_ASCII)
 
     override fun toString(): String = "PushMailboxPutRequest(redacted)"

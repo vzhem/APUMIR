@@ -314,6 +314,21 @@ class PushWakeIntegrationInstrumentedTest {
                 assertNotNull(wake)
                 assertEquals("{\"owner\":\"$owner\",\"capability\":\"$capability\"}", wake!!.toJsonBytes().toString(Charsets.US_ASCII))
                 assertTrue(wake.isValid())
+                // Build only from an actual FFI/AES message for this offered
+                // epoch and independently pinned recipient. No persistence or
+                // provider traffic is exercised by this device test.
+                val messageWire = PushMailboxMessageSealer(recordFailure = { error("unexpected mailbox sealer failure") }).seal(
+                    "12345678-1234-1234-1234-123456789abc", aliceId, bobId, 1_700_000_000_000,
+                    "Device test", alice, pinnedBob, ByteArray(32) { 3 },
+                ) { true }!!
+                val cutoff = 1_700_604_800_000L
+                val outsideId = PushMailboxProtocol.putId(cutoff, messageWire)!!
+                val put = sender.mailboxPut(alice, pinnedBob, received, outsideId, cutoff, messageWire) { true }!!
+                assertTrue(put.isValid())
+                assertNull(sender.mailboxPut(alice, pinnedBob, received, outsideId, cutoff + 1, messageWire) { true })
+                // The earlier wire was Bob -> Alice, not Alice -> Bob.
+                val backwardsId = PushMailboxProtocol.putId(cutoff, wire)!!
+                assertNull(sender.mailboxPut(alice, pinnedBob, received, backwardsId, cutoff, wire) { true })
             } finally { sender.close() }
             assertTrue(journal.beginRevocation(participants) is PushRegistrationStore.Result.Ready)
             assertEquals(PushWakeIntake.Result.IGNORED,
@@ -370,6 +385,14 @@ class PushWakeIntegrationInstrumentedTest {
                 senderBinding, recipientPin, ByteArray(32) { 4 }) { true }!!
             assertEquals(0, sealFailures)
             assertTrue(PushMailboxProtocol.validEnvelope(wire))
+            val cutoff = 1_700_604_800_000L
+            val outsideId = PushMailboxProtocol.putId(cutoff, wire)!!
+            assertTrue(PushMailboxPutRequest("ab".repeat(32), "cd".repeat(32), outsideId, cutoff, wire).isValid())
+            assertFalse(PushMailboxPutRequest("ab".repeat(32), "cd".repeat(32), outsideId, cutoff + 1, wire).isValid())
+            val fakeKey = ByteArray(204) { 1 }.also { it[1] = 0; it[2] = 1 }
+            val vectorWire = SealedWire.encode(fakeKey, ByteArray(12) { 1 }, ByteArray(32) { 1 })
+            assertEquals("bbdfc6257694ab5da289e92b67093da1", PushMailboxProtocol.putId(cutoff, vectorWire))
+            fakeKey.fill(0)
 
             // A malicious authenticated sender can still place false metadata
             // inside a valid envelope. Construct one explicitly to test that

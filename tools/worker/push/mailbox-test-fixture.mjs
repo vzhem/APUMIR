@@ -1,6 +1,6 @@
 // Test-only helpers: the fake envelope is merely structurally valid and is
 // deliberately NOT produced by the application's authenticated encryption.
-import { createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign } from "node:crypto";
 import { mailboxAccessPayload } from "./mailbox-protocol.mjs";
 import { registrationPayload } from "./protocol.mjs";
 
@@ -21,6 +21,15 @@ export function fakeEnvelope(fill = 1, cipherBytes = 32) {
   key[0] = 1; key[1] = 0; key[2] = 1;
   return ["APUSEAL1", key.toString("base64"), Buffer.alloc(12, fill).toString("base64"),
     Buffer.alloc(cipherBytes, fill).toString("base64")].join("|");
+}
+
+// Independent Node implementation for the Kotlin/Worker vector. This hash
+// binds only the outside id and deadline; it is NOT authentication.
+export function mailboxId(expiresAt, envelope) {
+  return createHash("sha256").update(`apu-mailbox-put-id-v1\n${expiresAt}\n${envelope}\n`, "ascii").digest("hex").slice(0, 32);
+}
+export function mailboxPut(owner, capability, envelope = fakeEnvelope(), expiresAt = Date.now() + 6 * 24 * 60 * 60_000) {
+  return { owner, capability, id: mailboxId(expiresAt, envelope), expiresAt, envelope };
 }
 
 export async function registration(keys, changes = {}) {

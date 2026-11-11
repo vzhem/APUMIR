@@ -50,6 +50,7 @@ internal class PushMailboxHttpClient(
                     200, 201 -> {
                         val parsed = PushMailboxResponseCodec.put(response.body) ?: return PutResult.Unavailable
                         when {
+                            parsed.expiresAt != request.expiresAt -> PutResult.Unavailable
                             response.status == 201 && (parsed.state != "stored" || !parsed.wakeQueued) -> PutResult.Unavailable
                             parsed.state == "stored" -> PutResult.Stored(parsed.expiresAt, parsed.wakeQueued)
                             parsed.state == "handled" -> PutResult.Handled(parsed.expiresAt)

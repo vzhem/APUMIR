@@ -3,7 +3,7 @@
 // before enabling; provider or storage acceptance is not message delivery.
 import { fcmConfigured, FcmV1 } from "./fcm.mjs";
 import { rateIdentity, routeFor, shardFor, validRegistration, validWake, verifyRegistration } from "./protocol.mjs";
-import { MAX_MAILBOX_BODY_BYTES, validMailboxAccess, validMailboxPut, verifyMailboxAccess } from "./mailbox-protocol.mjs";
+import { MAX_MAILBOX_BODY_BYTES, mailboxPutId, validMailboxAccess, validMailboxPut, verifyMailboxAccess } from "./mailbox-protocol.mjs";
 import { CiphertextMailbox } from "./mailbox.mjs";
 import { WakeQueue } from "./wake-queue.mjs";
 
@@ -32,10 +32,11 @@ function configured(env) {
   return serviceEnabled(env) && env.PUSH_SHARDS;
 }
 
-function validRequest(path, body, nowSeconds) {
+function validRequest(path, body, nowMs) {
+  const nowSeconds = Math.floor(nowMs / 1000);
   if (path === "/v1/wake") return validWake(body);
   if (path === "/v1/registration") return validRegistration(body, nowSeconds);
-  if (path === "/v1/mailbox/put") return validMailboxPut(body);
+  if (path === "/v1/mailbox/put") return validMailboxPut(body, nowMs);
   if (path === "/v1/mailbox/pull") return validMailboxAccess(body, "pull", nowSeconds);
   if (path === "/v1/mailbox/ack") return validMailboxAccess(body, "ack", nowSeconds);
   return false;
@@ -47,7 +48,7 @@ function mailboxResponse(result) {
     const { status, ...body } = result;
     return json(body, status);
   }
-  const error = ({ 403: "unauthorised", 404: "route unavailable", 409: "conflict", 429: "rate limited", 503: "mailbox unavailable" })[result.status] || "mailbox unavailable";
+  const error = ({ 400: "bad request", 403: "unauthorised", 404: "route unavailable", 409: "conflict", 429: "rate limited", 503: "mailbox unavailable" })[result.status] || "mailbox unavailable";
   return json({ error }, result.status);
 }
 
@@ -90,8 +91,11 @@ export default {
     let body;
     try { body = await readJson(request, path === "/v1/mailbox/put" ? MAX_MAILBOX_BODY_BYTES : MAX_BODY_BYTES); }
     catch (_) { return json({ error: "bad request" }, 400); }
-    const now = Math.floor(Date.now() / 1000);
+    const now = Date.now();
     if (!validRequest(path, body, now)) return json({ error: "bad request" }, 400);
+    if (path === "/v1/mailbox/put" && await mailboxPutId(body.expiresAt, body.envelope) !== body.id) {
+      return json({ error: "bad request" }, 400);
+    }
     // Cloudflare supplies this header; a missing value uses a shared fail-safe
     // bucket. It is HMACed before it leaves this worker and is never persisted.
     const identity = await rateIdentity(env.PUSH_RATE_KEY, request.headers.get("cf-connecting-ip"));
@@ -192,7 +196,7 @@ export class PushShard {
     try { body = await readJson(request, path === "/v1/mailbox/put" ? MAX_MAILBOX_BODY_BYTES : MAX_BODY_BYTES); }
     catch (_) { return json({ error: "bad request" }, 400); }
     const now = Date.now();
-    if (!validRequest(path, body, Math.floor(now / 1000))) return json({ error: "bad request" }, 400);
+    if (!validRequest(path, body, now)) return json({ error: "bad request" }, 400);
     const rateId = request.headers.get("x-apu-rate-id") || "";
     if (!/^[0-9a-f]{64}$/.test(rateId)) return json({ error: "bad request" }, 400);
     const allowed = this.state.storage.transactionSync(() => {

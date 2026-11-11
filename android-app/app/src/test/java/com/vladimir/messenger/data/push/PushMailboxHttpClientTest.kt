@@ -25,7 +25,9 @@ class PushMailboxHttpClientTest {
         return "APUSEAL1|${b64.encodeToString(key)}|${b64.encodeToString(ByteArray(12) { fill })}|" +
             b64.encodeToString(ByteArray(cipherBytes) { fill })
     }
-    private fun put(value: String = envelope(), itemId: String = id) = PushMailboxPutRequest(owner, cap, itemId, value)
+    private fun put(value: String = envelope(), itemId: String? = null, cutoff: Long = expiry) = PushMailboxPutRequest(
+        owner, cap, itemId ?: PushMailboxProtocol.putId(cutoff, value) ?: id, cutoff, value,
+    )
     private fun pull(after: String = "-") = PushMailboxPullRequest(owner, cap, device, now, after, signature)
     private fun ack(items: List<PushMailboxReceipt> = listOf(PushMailboxReceipt(id, receipt))) =
         PushMailboxAckRequest(owner, cap, device, now, items, signature)
@@ -53,7 +55,8 @@ class PushMailboxHttpClientTest {
         result as PushMailboxHttpClient.PutResult.Stored
         assertEquals(expiry, result.expiresAt)
         assertTrue(result.wakeQueued)
-        assertEquals("{\"owner\":\"$owner\",\"capability\":\"$cap\",\"id\":\"$id\",\"envelope\":\"${envelope()}\"}", sent)
+        val outsideId = PushMailboxProtocol.putId(expiry, envelope())!!
+        assertEquals("{\"owner\":\"$owner\",\"capability\":\"$cap\",\"id\":\"$outsideId\",\"expiresAt\":$expiry,\"envelope\":\"${envelope()}\"}", sent)
         assertTrue(sentRef.isNotEmpty() && sentRef.all { it == 0.toByte() })
         assertTrue(responseRef.isNotEmpty() && responseRef.all { it == 0.toByte() })
         assertFalse(request.toString().contains(cap))
@@ -74,6 +77,9 @@ class PushMailboxHttpClientTest {
         status = 200
         val existing = client.put(put()) as PushMailboxHttpClient.PutResult.Stored
         assertFalse(existing.wakeQueued)
+        json = stored().replace("\"expiresAt\":$expiry", "\"expiresAt\":${expiry + 1}")
+        assertTrue(client.put(put()) is PushMailboxHttpClient.PutResult.Unavailable)
+        json = stored("stored", false)
         for ((code, expected) in listOf(
             404 to PushMailboxHttpClient.PutResult.RouteUnavailable,
             409 to PushMailboxHttpClient.PutResult.Conflict,
@@ -142,7 +148,8 @@ class PushMailboxHttpClientTest {
             put("plaintext"), put(envelope().replace("APUSEAL1", "APUSEAL2")),
             put(envelope(1, 16)), put(envelope(1, 64 * 1024 + 17)), put(envelope(), "0".repeat(32)),
             put("APUSEAL1|" + "|".repeat(PushMailboxProtocol.MAX_ENVELOPE_CHARS - 9)),
-            PushMailboxPutRequest(owner.uppercase(), cap, id, envelope()),
+            PushMailboxPutRequest(owner.uppercase(), cap, id, expiry, envelope()),
+            put(envelope(), "11".repeat(16)), put(envelope(), cutoff = 0),
         )
         bad.forEach { assertEquals(PushMailboxHttpClient.PutResult.Rejected, client.put(it)) }
         assertTrue(PushMailboxProtocol.validEnvelope(envelope(1, 64 * 1024 + 16)))
@@ -155,6 +162,18 @@ class PushMailboxHttpClientTest {
         invalidItems.forEach { assertEquals(PushMailboxHttpClient.AckResult.REJECTED, client.ack(ack(it))) }
         assertEquals(PushMailboxHttpClient.PullResult.Rejected, client.pull(pull("0".repeat(32))))
         assertEquals(0, calls)
+    }
+
+    @Test fun putIdBindsCiphertextAndImmutableCutoffToTheIndependentWorkerVector() {
+        val wire = envelope()
+        val expected = "bbdfc6257694ab5da289e92b67093da1"
+        assertEquals(expected, PushMailboxProtocol.putId(expiry, wire))
+        assertTrue(expected != PushMailboxProtocol.putId(expiry + 1, wire))
+        assertTrue(expected != PushMailboxProtocol.putId(expiry, envelope(2)))
+        assertEquals(null, PushMailboxProtocol.putId(0, wire))
+        assertEquals(null, PushMailboxProtocol.putId(PushMailboxProtocol.MAX_SAFE_INTEGER + 1, wire))
+        assertEquals(null, PushMailboxProtocol.putId(expiry, "plaintext"))
+        assertFalse(put().toString().contains(expected))
     }
 
     @Test fun envelopeRequiresCanonicalBase64AndExactSeparators() {

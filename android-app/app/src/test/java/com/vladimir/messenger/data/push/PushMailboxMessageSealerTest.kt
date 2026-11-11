@@ -203,6 +203,7 @@ class PushMailboxMessageSealerTest {
         val first = sealer.sealMessage()!!
         val second = sealer.sealMessage()!!
         assertNotEquals(first, second)
+        assertNotEquals(PushMailboxProtocol.putId(time, first), PushMailboxProtocol.putId(time, second))
         assertFalse(keys[0].contentEquals(keys[1]))
         assertFalse(SealedWire.decode(first)!!.iv.contentEquals(SealedWire.decode(second)!!.iv))
         keys.forEach { it.fill(0) }

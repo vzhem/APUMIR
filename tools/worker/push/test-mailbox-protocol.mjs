@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mailboxAccessPayload, validMailboxAccess, validMailboxEnvelope, validMailboxPut, verifyMailboxAccess } from "./mailbox-protocol.mjs";
-import { access, fakeEnvelope, identity, randomHex } from "./mailbox-test-fixture.mjs";
+import { MAX_MAILBOX_TTL_MS, mailboxAccessPayload, mailboxPutId, validMailboxAccess, validMailboxEnvelope, validMailboxPut, verifyMailboxAccess } from "./mailbox-protocol.mjs";
+import { access, fakeEnvelope, identity, mailboxId, mailboxPut } from "./mailbox-test-fixture.mjs";
 
 const capability = "e684e7708138f2e247613a7784c120d6154816a7bd1d88a54c53f155d8e9617a";
 const vectorKey = identity(2);
@@ -71,10 +71,27 @@ test("only a bounded canonical APUSEAL1 structure is accepted; structural checks
   assert.equal(Buffer.from(noncanonical, "base64").equals(Buffer.from(parts[3], "base64")), true);
   assert.equal(validMailboxEnvelope([parts[0], parts[1], parts[2], noncanonical].join("|")), false, "noncanonical Base64 pad bits");
   assert.equal(validMailboxEnvelope(wire.replace("APUSEAL1|", "APUSEAL1|\n")), false);
-  const put = { owner: vectorKey.owner, capability, id: randomHex(16), envelope: wire };
-  assert.ok(validMailboxPut(put));
+  const now = 1_700_000_000_000;
+  const put = mailboxPut(vectorKey.owner, capability, wire, now + MAX_MAILBOX_TTL_MS);
+  assert.ok(validMailboxPut(put, now));
   for (const changed of [{ id: "0".repeat(32) }, { capability: "0".repeat(64) },
-    { envelope: "plaintext" }, { extra: "plaintext" }]) {
-    assert.equal(validMailboxPut({ ...put, ...changed }), false);
+    { envelope: "plaintext" }, { extra: "plaintext" }, { expiresAt: now },
+    { expiresAt: now - 1 }, { expiresAt: now + MAX_MAILBOX_TTL_MS + 1 },
+    { expiresAt: "1700604800000" }, { expiresAt: 1.5 }, { expiresAt: Number.MAX_SAFE_INTEGER + 1 }]) {
+    assert.equal(validMailboxPut({ ...put, ...changed }, now), false);
   }
+  assert.equal(validMailboxPut(put, 0), false);
+  assert.equal(validMailboxPut(put, put.expiresAt), false);
+});
+
+test("outside id independently binds ciphertext and immutable cutoff across Worker and Kotlin", async () => {
+  const wire = fakeEnvelope();
+  const expiry = 1_700_604_800_000;
+  const expected = "bbdfc6257694ab5da289e92b67093da1";
+  assert.equal(mailboxId(expiry, wire), expected); // node:crypto, independent of WebCrypto
+  assert.equal(await mailboxPutId(expiry, wire), expected);
+  assert.notEqual(await mailboxPutId(expiry + 1, wire), expected);
+  assert.notEqual(await mailboxPutId(expiry, fakeEnvelope(2)), expected);
+  assert.equal(await mailboxPutId(0, wire), null);
+  assert.equal(await mailboxPutId(expiry, "plaintext"), null);
 });

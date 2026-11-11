@@ -17,8 +17,8 @@ import uniffi.p2p_core.fileExchangeBindingNodeId
  * inside the ciphertext, not trusted to the server's outside metadata.
  *
  * This is intentionally not connected to an outbox or network. The caller MUST
- * persist the resulting wire AND a fresh outside mailbox id before its first
- * put, retry identical bytes, and stop retrying at the original expiry. It must
+ * persist the resulting wire, an immutable expiry and the derived outside
+ * mailbox id before its first put, and retry only the identical triple. It must
  * also coordinate pin, identity, restore, epoch and message mutations; [current]
  * and array snapshots alone do not prevent ABA. Neither successful sealing nor
  * server acceptance proves delivery. JVM strings and FFI/Cipher internals may

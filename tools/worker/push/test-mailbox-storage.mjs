@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { PushShard } from "./worker.mjs";
 import { CiphertextMailbox, MAILBOX_LIMITS } from "./mailbox.mjs";
-import { fakeEnvelope, randomHex } from "./mailbox-test-fixture.mjs";
+import { fakeEnvelope, mailboxPut, randomHex } from "./mailbox-test-fixture.mjs";
 
 const owner = "12".repeat(32), route = "34".repeat(32), capability = "98".repeat(32);
 const deviceA = "56".repeat(16), deviceB = "67".repeat(16);
@@ -48,7 +48,14 @@ function make(t) {
   return { db, sql, storage, shard, env, rows, register, getAlarm: () => alarm };
 }
 
-const putBody = (id = randomHex(16), envelope = fakeEnvelope()) => ({ owner, capability, id, envelope });
+const putBody = (salt = randomHex(16), envelope = fakeEnvelope(), expiresAt = Date.now() + 6 * 24 * 60 * 60_000) => {
+  // Vary the fake signature bytes so separate test messages get distinct ids.
+  const fields = envelope.split("|");
+  const key = Buffer.from(fields[1], "base64");
+  Buffer.from(salt, "hex").copy(key, key.length - 16);
+  fields[1] = key.toString("base64");
+  return mailboxPut(owner, capability, fields.join("|"), expiresAt);
+};
 const pull = (shard, dev = deviceA, after = "-") => shard.mailbox.pull({ owner, device: dev, after }, route, Date.now());
 const ack = (shard, dev, items) => shard.mailbox.ack({ owner, device: dev, items }, route, Date.now());
 
@@ -61,7 +68,7 @@ test("ciphertext and per-device wake commit together, survive object recreation,
   assert.equal(accepted.status, 201);
   assert.equal(accepted.state, "stored");
   assert.equal(accepted.wakeQueued, true);
-  assert.ok(accepted.expiresAt >= now + MAILBOX_LIMITS.ttlMs && accepted.expiresAt <= Date.now() + MAILBOX_LIMITS.ttlMs);
+  assert.equal(accepted.expiresAt, body.expiresAt, "server must not extend the immutable cutoff");
   assert.equal(rows("SELECT count(*) AS n FROM mailbox_messages")[0].n, 1);
   assert.equal(rows("SELECT count(*) AS n FROM mailbox_targets")[0].n, 2);
   assert.equal(rows("SELECT count(*) AS n FROM pending_wakes")[0].n, 2);
@@ -88,11 +95,11 @@ test("ciphertext and per-device wake commit together, survive object recreation,
   assert.equal(tombstone.envelope, null);
   assert.equal(tombstone.bytes, 0);
   assert.equal((await restarted.mailbox.put(body, route, Date.now())).state, "handled");
-  assert.equal((await restarted.mailbox.put({ ...body, envelope: fakeEnvelope(2) }, route, Date.now())).status, 409);
+  assert.equal((await restarted.mailbox.put({ ...body, envelope: fakeEnvelope(2) }, route, Date.now())).status, 400);
   assert.equal(ack(restarted, deviceB, [{ id: second.id, receipt: second.receipt }]).status, 204);
 });
 
-test("concurrent duplicate puts serialize; conflicting id never replaces ciphertext", async (t) => {
+test("concurrent duplicate puts serialize; a changed ciphertext cannot reuse the id", async (t) => {
   const { shard, rows, register } = make(t);
   register();
   const body = putBody();
@@ -101,7 +108,7 @@ test("concurrent duplicate puts serialize; conflicting id never replaces ciphert
   assert.equal(rows("SELECT count(*) AS n FROM mailbox_messages")[0].n, 1);
   assert.equal(rows("SELECT count(*) AS n FROM mailbox_targets")[0].n, 1);
   assert.equal(rows("SELECT generation FROM pending_wakes")[0].generation, 2);
-  assert.equal((await shard.mailbox.put({ ...body, envelope: fakeEnvelope(8) }, route, Date.now())).status, 409);
+  assert.equal((await shard.mailbox.put({ ...body, envelope: fakeEnvelope(8) }, route, Date.now())).status, 400);
   assert.equal(pull(shard).items[0].envelope, body.envelope);
 });
 
@@ -125,21 +132,67 @@ test("queue exhaustion or an exception after inserting rolls back ciphertext, ta
   assert.equal((await shard.mailbox.put(body, route, Date.now())).status, 201);
 });
 
-test("after expiry the same id gets a fresh receipt; an old acknowledgement cannot remove it", async (t) => {
-  const { shard, sql, rows, register } = make(t);
+test("expired requests cannot resurrect after tombstone cleanup, and stale receipts cannot remove a new id", async (t) => {
+  const { shard, storage, rows, register } = make(t);
   register();
-  const body = putBody();
-  await shard.mailbox.put(body, route, Date.now());
-  const old = pull(shard).items[0];
-  sql.exec("UPDATE mailbox_messages SET expires_at = ? WHERE route = ? AND message_id = ?", Date.now() - 1, route, body.id);
+  const deadline = Date.now() + 5_000;
+  const body = putBody(randomHex(16), fakeEnvelope(), deadline);
   assert.equal((await shard.mailbox.put(body, route, Date.now())).status, 201);
+  const old = pull(shard).items[0];
+  assert.equal(ack(shard, deviceA, [{ id: old.id, receipt: old.receipt }]).status, 204);
+  assert.equal(rows("SELECT envelope FROM mailbox_messages")[0].envelope, null);
+  const afterExpiry = deadline + 1;
+  storage.transactionSync(() => shard.mailbox.cleanup(afterExpiry));
+  assert.equal(rows("SELECT count(*) AS n FROM mailbox_messages")[0].n, 0);
+  assert.equal((await shard.mailbox.put(body, route, afterExpiry)).status, 400);
+  assert.equal(rows("SELECT count(*) AS n FROM mailbox_messages")[0].n, 0);
+  // Altering only the cutoff while keeping the old id is invalid; a new
+  // envelope/cutoff combination gets a distinct id and independent receipt.
+  assert.equal((await shard.mailbox.put({ ...body, expiresAt: afterExpiry + 10_000 }, route, afterExpiry)).status, 400);
+  const next = mailboxPut(owner, capability, body.envelope, afterExpiry + 10_000);
+  assert.notEqual(next.id, body.id);
+  assert.equal((await shard.mailbox.put(next, route, afterExpiry)).status, 201);
   const fresh = pull(shard).items[0];
   assert.notEqual(fresh.receipt, old.receipt);
   assert.equal(ack(shard, deviceA, [{ id: old.id, receipt: old.receipt }]).status, 204);
   assert.equal(pull(shard).items[0].receipt, fresh.receipt);
-  assert.equal(rows("SELECT envelope FROM mailbox_messages")[0].envelope, body.envelope);
   assert.equal(ack(shard, deviceA, [{ id: fresh.id, receipt: fresh.receipt }]).status, 204);
   assert.equal(pull(shard).items.length, 0);
+});
+
+test("cutoff is rechecked inside the transaction and inconsistent stored deadlines fail closed", async (t) => {
+  const { shard, sql, rows, register } = make(t);
+  register();
+  const body = putBody(randomHex(16), fakeEnvelope(), Date.now() + 30_000);
+  const mutate = shard.wakes.mutate.bind(shard.wakes);
+  shard.wakes.mutate = (at, action) => mutate(at, () => action(body.expiresAt));
+  assert.equal((await shard.mailbox.put(body, route, Date.now())).status, 400);
+  assert.equal(rows("SELECT count(*) AS n FROM mailbox_messages")[0].n, 0);
+  assert.equal(rows("SELECT count(*) AS n FROM mailbox_targets")[0].n, 0);
+  assert.equal(rows("SELECT count(*) AS n FROM pending_wakes")[0].n, 0);
+  shard.wakes.mutate = mutate;
+  assert.equal((await shard.mailbox.put(body, route, Date.now())).status, 201);
+  sql.exec("UPDATE mailbox_messages SET expires_at = ? WHERE route = ? AND message_id = ?", body.expiresAt - 1, route, body.id);
+  assert.equal((await shard.mailbox.put(body, route, Date.now())).status, 409);
+  assert.equal(rows("SELECT envelope FROM mailbox_messages")[0].envelope, body.envelope);
+});
+
+test("cutoff remains enforced if safety-alarm persistence waits past expiry", async (t) => {
+  const initial = 1_700_000_000_000;
+  t.mock.timers.enable({ apis: ["Date"], now: initial });
+  const { shard, rows, register } = make(t);
+  register();
+  const body = putBody(randomHex(16), fakeEnvelope(), initial + 1_000);
+  const safetyAlarm = shard.wakes.safetyAlarm.bind(shard.wakes);
+  shard.wakes.safetyAlarm = async (now) => {
+    await safetyAlarm(now);
+    // Model an arbitrarily delayed getAlarm/setAlarm without a flaky wall-clock sleep.
+    t.mock.timers.setTime(body.expiresAt);
+  };
+  assert.equal((await shard.mailbox.put(body, route, initial)).status, 400);
+  for (const table of ["mailbox_messages", "mailbox_targets", "pending_wakes"]) {
+    assert.equal(rows(`SELECT count(*) AS n FROM ${table}`)[0].n, 0, table);
+  }
 });
 
 test("cursor allows skipping an unacknowledged item, survives acknowledgements and fails closed after expiry", async (t) => {
@@ -202,7 +255,8 @@ test("unknown routes cannot consume a public owner's budget; revoked device cann
 test("disabled mailbox refuses a pending put and still cleans expired storage in bounded batches", async (t) => {
   const { shard, env, sql, rows, register, getAlarm } = make(t);
   register();
-  const pending = shard.mailbox.put(putBody(), route, Date.now());
+  const earliestAlarmBase = Date.now();
+  const pending = shard.mailbox.put(putBody(), route, earliestAlarmBase);
   env.MAILBOX_ENABLED = "false";
   assert.equal((await pending).status, 503);
   assert.equal(rows("SELECT count(*) AS n FROM mailbox_messages")[0].n, 0);
@@ -216,7 +270,9 @@ test("disabled mailbox refuses a pending put and still cleans expired storage in
   await shard.alarm();
   assert.equal(rows("SELECT count(*) AS n FROM mailbox_messages")[0].n, 2);
   assert.equal(rows("SELECT count(*) AS n FROM mailbox_targets")[0].n, 2);
-  assert.ok(getAlarm() >= now + 60_000 && getAlarm() <= Date.now() + 61_000);
+  // A safety alarm from the pending put may already be a few milliseconds
+  // earlier than the cleanup alarm; reschedule intentionally never delays it.
+  assert.ok(getAlarm() >= earliestAlarmBase + 60_000 && getAlarm() <= Date.now() + 61_000);
   await shard.alarm();
   assert.equal(rows("SELECT count(*) AS n FROM mailbox_messages")[0].n, 0);
   assert.equal(rows("SELECT count(*) AS n FROM mailbox_targets")[0].n, 0);

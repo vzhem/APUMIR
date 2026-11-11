@@ -1,7 +1,7 @@
 // Experimental mailbox protocol. Structural checks are NOT proof of encryption
 // or of the sender's identity; the receiving client must open the envelope,
 // authenticate its original pinned peer and persist before acknowledging it.
-import { bytesFromHex, validWake } from "./protocol.mjs";
+import { bytesFromHex, hexFromBytes, sha256, validWake } from "./protocol.mjs";
 
 const encoder = new TextEncoder();
 const HEX16 = /^[0-9a-f]{32}$/;
@@ -11,6 +11,7 @@ const MAX_CLOCK_SKEW_SECONDS = 300;
 const MAX_ITEMS = 16;
 export const MAX_MAILBOX_WIRE_CHARS = 192 * 1024;
 export const MAX_MAILBOX_BODY_BYTES = MAX_MAILBOX_WIRE_CHARS + 1024;
+export const MAX_MAILBOX_TTL_MS = 7 * 24 * 60 * 60_000;
 
 function exactFields(value, expected) {
   return value !== null && typeof value === "object" && !Array.isArray(value) &&
@@ -49,10 +50,31 @@ export function validMailboxEnvelope(wire) {
   return bindingSize >= 1 && bindingSize <= 512 && key.length === bindingSize + 203;
 }
 
-export function validMailboxPut(value) {
-  return exactFields(value, ["owner", "capability", "id", "envelope"]) &&
+// The sender chooses an immutable cutoff before the first attempt. The server
+// checks it again INSIDE the storage transaction, including on retries: an old
+// request cannot recreate ciphertext after its tombstone has been collected.
+// The server clock is authoritative; a badly skewed sender clock may cause a
+// refusal or shorter retention rather than silently extending the cutoff.
+export function validMailboxPut(value, nowMs, maxTtlMs = MAX_MAILBOX_TTL_MS) {
+  return exactFields(value, ["owner", "capability", "id", "expiresAt", "envelope"]) &&
     validWake({ owner: value.owner, capability: value.capability }) && nonzeroId(value.id) &&
-    validMailboxEnvelope(value.envelope);
+    Number.isSafeInteger(nowMs) && nowMs > 0 && Number.isSafeInteger(maxTtlMs) &&
+    maxTtlMs > 0 && maxTtlMs <= MAX_MAILBOX_TTL_MS && Number.isSafeInteger(value.expiresAt) &&
+    value.expiresAt > nowMs && value.expiresAt - nowMs <= maxTtlMs && validMailboxEnvelope(value.envelope);
+}
+
+/**
+ * Statelessly bind the outside id to BOTH the ciphertext and its cutoff. The
+ * first 16 SHA-256 bytes are not a user message ID or an authentication tag.
+ * Ciphertexts must have fresh encryption randomness; callers must persist the
+ * wire, cutoff and resulting id before any network attempt. Changing either
+ * value necessarily gives a different id (barring a 128-bit hash collision).
+ */
+export async function mailboxPutId(expiresAt, envelope) {
+  if (!Number.isSafeInteger(expiresAt) || expiresAt < 1 || !validMailboxEnvelope(envelope)) return null;
+  const digest = await sha256(encoder.encode(`apu-mailbox-put-id-v1\n${expiresAt}\n${envelope}\n`));
+  const id = hexFromBytes(digest.subarray(0, 16));
+  return nonzeroId(id) ? id : null;
 }
 
 /** The signature covers the action, owner, secret route, device, time and cursor/receipts. */

@@ -17,6 +17,7 @@ EXPECTED = {
         "pullMatchesSignedWorkerVectorAndReturnsOnlyABoundedCheckedPage",
         "acknowledgementsAreSortedSnapshotAndOnlyMeanServerAcceptedAnOperation",
         "invalidRequestsNeverReachTheNetworkAndInputIsBounded",
+        "putIdBindsCiphertextAndImmutableCutoffToTheIndependentWorkerVector",
         "envelopeRequiresCanonicalBase64AndExactSeparators",
         "malformedDuplicateOversizedAndAmbiguousResponsesFailClosed",
         "failureAndCancellationDoNotLeakOrTurnIntoSuccess",
@@ -68,6 +69,12 @@ EXPECTED = {
         "changingBindingWhileResolvingItsNodeIdIsRejectedAndCleared",
         "zeroEntropyExceptionsAndCancellationNeverCreateAResult",
         "eachSealingGeneratesANewKeyAndNonceRatherThanAStableRetryWire",
+    },
+    PREFIX + "PushMailboxPutBuilderTest": {
+        "senderBuildsOnlyTheStoredTripleForTheMatchingOfferedEpoch",
+        "wrongPinIdentityEpochOrCutoffCannotProduceARequest",
+        "changedCallerBuffersOrClosedMaterialDuringBuildFailClosed",
+        "callbackFailureAndCancellationDoNotLeakOrTurnIntoSuccess",
     },
     PREFIX + "PushMailboxDrainTest": {
         "ackFollowsDurableCommitsAndUsesSortedServerReceipts",

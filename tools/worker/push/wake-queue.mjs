@@ -50,10 +50,12 @@ export class WakeQueue {
   // alarm is still scheduled (the platform can delay its actual execution).
   async mutate(requestedAt, operation) {
     return this.locked(async () => {
-      // Time may have elapsed while another request held the scheduling lock.
-      const now = Math.max(requestedAt, Date.now());
-      await this.safetyAlarm(now);
-      return this.storage.transactionSync(() => operation(now));
+      // Waiting for the scheduling lock AND persisting the safety alarm may
+      // both take time. Re-read the clock inside the synchronous transaction:
+      // a mailbox cutoff must not be checked against the pre-await time.
+      const alarmTime = Math.max(requestedAt, Date.now());
+      await this.safetyAlarm(alarmTime);
+      return this.storage.transactionSync(() => operation(Math.max(alarmTime, Date.now())));
     });
   }
 

@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Miniflare } from "miniflare";
 import { routeFor, shardFor } from "./protocol.mjs";
-import { access, fakeEnvelope, identity, randomHex, registration } from "./mailbox-test-fixture.mjs";
+import { access, fakeEnvelope, identity, mailboxPut, randomHex, registration } from "./mailbox-test-fixture.mjs";
 
 const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const bindings = {
@@ -67,7 +67,7 @@ test("signed device pull/ack is isolated per target and FCM contains no cipherte
   const regA = await registration(receiver), regB = await registration(receiver, { capability: regA.capability });
   assert.equal((await post(worker, "/v1/registration", regA)).status, 204);
   assert.equal((await post(worker, "/v1/registration", regB)).status, 204);
-  const body = { owner: receiver.owner, capability: regA.capability, id: randomHex(16), envelope: fakeEnvelope() };
+  const body = mailboxPut(receiver.owner, regA.capability);
   const response = await post(worker, "/v1/mailbox/put", body);
   assert.equal(response.status, 201);
   assert.equal(response.headers.get("cache-control"), "no-store");
@@ -98,7 +98,7 @@ test("signed device pull/ack is isolated per target and FCM contains no cipherte
   const retry = await post(worker, "/v1/mailbox/put", body);
   assert.equal(retry.status, 200);
   assert.deepEqual(await retry.json(), { state: "handled", expiresAt: stored.expiresAt, wakeQueued: false });
-  assert.equal((await post(worker, "/v1/mailbox/put", { ...body, envelope: fakeEnvelope(2) })).status, 409);
+  assert.equal((await post(worker, "/v1/mailbox/put", { ...body, envelope: fakeEnvelope(2) })).status, 400);
 
   const notifications = await waitForFcm([regA.token, regB.token]);
   for (const call of notifications) {
@@ -112,7 +112,7 @@ test("HTTP handles large sealed structures, pagination, replay, malformed and un
   const receiver = identity(), reg = await registration(receiver);
   assert.equal((await post(worker, "/v1/registration", reg)).status, 204);
   const base = { owner: receiver.owner, capability: reg.capability };
-  const bodies = Array.from({ length: 5 }, (_, i) => ({ ...base, id: randomHex(16), envelope: fakeEnvelope(i + 1, i ? 32 : 64 * 1024 + 16) }));
+  const bodies = Array.from({ length: 5 }, (_, i) => mailboxPut(base.owner, base.capability, fakeEnvelope(i + 1, i ? 32 : 64 * 1024 + 16)));
   for (const body of bodies) assert.equal((await post(worker, "/v1/mailbox/put", body)).status, 201);
   const first = await (await post(worker, "/v1/mailbox/pull", requestFor(receiver, reg, "pull"))).json();
   assert.deepEqual(first.items.map((item) => item.id), bodies.slice(0, 4).map((body) => body.id));
@@ -133,13 +133,39 @@ test("HTTP handles large sealed structures, pagination, replay, malformed and un
   assert.equal(huge.status, 400);
 });
 
+test("HTTP and direct shard reject expired, excessive or changed put cutoffs", async () => {
+  const receiver = identity(), reg = await registration(receiver);
+  assert.equal((await post(worker, "/v1/registration", reg)).status, 204);
+  const wire = fakeEnvelope();
+  const valid = mailboxPut(receiver.owner, reg.capability, wire);
+  const invalid = [
+    mailboxPut(receiver.owner, reg.capability, wire, Date.now() - 1),
+    mailboxPut(receiver.owner, reg.capability, wire, Date.now() + 8 * 24 * 60 * 60_000),
+    { ...valid, expiresAt: valid.expiresAt + 1 },
+    { ...valid, envelope: fakeEnvelope(9) },
+  ];
+  const namespace = await worker.getDurableObjectNamespace("PUSH_SHARDS");
+  const shard = namespace.get(namespace.idFromName("apu-push-shard-v1:" + await shardFor(reg.owner)));
+  for (const body of invalid) {
+    assert.equal((await post(worker, "/v1/mailbox/put", body)).status, 400);
+    const direct = await shard.fetch("https://push-internal.invalid/v1/mailbox/put", {
+      method: "POST", headers: { "content-type": "application/json", "x-apu-rate-id": "ab".repeat(32) },
+      body: JSON.stringify(body),
+    });
+    assert.equal(direct.status, 400);
+  }
+  const stored = await post(worker, "/v1/mailbox/put", valid);
+  assert.equal(stored.status, 201);
+  assert.equal((await stored.json()).expiresAt, valid.expiresAt);
+});
+
 test("mailbox switch is independent and the shard cannot be bypassed", async () => {
   const receiver = identity(), reg = await registration(receiver);
   const disabled = new Miniflare(options({ bindings: { ...bindings, MAILBOX_ENABLED: "false" } }));
   try {
     await disabled.ready;
     assert.equal((await post(disabled, "/v1/registration", reg)).status, 204, "wake registration remains independent");
-    const body = { owner: reg.owner, capability: reg.capability, id: randomHex(16), envelope: fakeEnvelope() };
+    const body = mailboxPut(reg.owner, reg.capability);
     assert.equal((await post(disabled, "/v1/mailbox/put", body)).status, 503);
     const namespace = await disabled.getDurableObjectNamespace("PUSH_SHARDS");
     const id = namespace.idFromName("apu-push-shard-v1:" + await shardFor(reg.owner));
@@ -155,7 +181,7 @@ test("a workerd restart retains ciphertext and receipt; after ack a later restar
   const directory = await mkdtemp(join(tmpdir(), "apu-mailbox-test-"));
   let runtime;
   const receiver = identity(), reg = await registration(receiver);
-  const body = { owner: receiver.owner, capability: reg.capability, id: randomHex(16), envelope: fakeEnvelope() };
+  const body = mailboxPut(receiver.owner, reg.capability);
   try {
     runtime = new Miniflare(options({ durableObjectsPersist: directory }));
     await runtime.ready;
@@ -184,13 +210,13 @@ test("a workerd restart retains ciphertext and receipt; after ack a later restar
   }
 });
 
-test("parallel HTTP retries are one stored item and a conflicting body cannot replace it", async () => {
+test("parallel HTTP retries are one stored item and a changed body cannot reuse its id", async () => {
   const receiver = identity(), reg = await registration(receiver);
   assert.equal((await post(worker, "/v1/registration", reg)).status, 204);
-  const body = { owner: receiver.owner, capability: reg.capability, id: randomHex(16), envelope: fakeEnvelope() };
+  const body = mailboxPut(receiver.owner, reg.capability);
   const responses = await Promise.all(Array.from({ length: 4 }, () => post(worker, "/v1/mailbox/put", body)));
   assert.deepEqual(responses.map((response) => response.status).sort(), [200, 200, 200, 201]);
-  assert.equal((await post(worker, "/v1/mailbox/put", { ...body, envelope: fakeEnvelope(9) })).status, 409);
+  assert.equal((await post(worker, "/v1/mailbox/put", { ...body, envelope: fakeEnvelope(9) })).status, 400);
   const result = await (await post(worker, "/v1/mailbox/pull", requestFor(receiver, reg, "pull"))).json();
   assert.equal(result.items.length, 1);
   assert.equal(result.items[0].envelope, body.envelope);
