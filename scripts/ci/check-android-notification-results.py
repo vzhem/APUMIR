@@ -56,6 +56,12 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, OUTBOX_CLASS: {
     "collidingRouteNeverEvictsAnotherRegistrationOrConfirmsTheWrongPeer",
     "damagedRouteIndexCannotBeUsedOrSilentlyReplaced",
     "versionOneMigrationPreservesCountersButRequiresAConfirmedRoute",
+    "recoveryPagesAreBoundedDurableAndRepeatableAfterConcurrentInsertion",
+    "recoveryPageNeverExceedsSixteenRoutesAndUsesKeysetContinuation",
+    "recoveryPageNeverReturnsAPartialPageAroundCorruptEncryptedState",
+    "recoveryPageDetectsMalformedAndPartialIndexEvenBeforeTheCursor",
+    "recoveryPageRejectsEmbeddedNullBeforeTheCursor",
+    "recoveryPageDoesNotRegenerateALostKeystoreKey",
     "quotaAndFailedEntropyDoNotEvictOrCreateARegistration",
 }, PUSH_INTEGRATION_CLASS: {
     "realFfiAndDeviceJournalsMatchWorkerVectorsWithoutProviderNetwork",

@@ -207,7 +207,7 @@ export class PushShard {
     await this.ensureAlarm();
     if (!allowed) return json({ error: "rate limited" }, 429);
     const route = await routeFor(body.owner, body.capability);
-    if (path === "/v1/registration") return this.register(body, route, now);
+    if (path === "/v1/registration") return this.register(body, route);
     if (path === "/v1/wake") return this.wake(body.owner, route, now);
     if (path === "/v1/mailbox/put") return mailboxResponse(await this.mailbox.put(body, route, now));
     const action = path === "/v1/mailbox/pull" ? "pull" : "ack";
@@ -220,9 +220,16 @@ export class PushShard {
     return mailboxResponse(action === "pull" ? this.mailbox.pull(body, route, current) : this.mailbox.ack(body, route, current));
   }
 
-  async register(body, route, now) {
+  async register(body, route) {
     if (!(await verifyRegistration(body))) return json({ error: "unauthorised" }, 403);
     const status = this.state.storage.transactionSync(() => {
+      // Signature verification and alarm/storage scheduling are asynchronous.
+      // A once-fresh signed operation must not revive a registration after its
+      // revoke tombstone expires while the request is waiting. Check the clock
+      // and kill switch at the actual write, not at the start of the request.
+      const now = Date.now();
+      if (!serviceEnabled(this.env)) return 503;
+      if (!validRegistration(body, Math.floor(now / 1000))) return 400;
       const previous = this.rows("SELECT owner, sequence FROM registrations WHERE route = ? AND device = ?", route, body.device)[0];
       if (previous && (previous.owner !== body.owner || Number(previous.sequence) >= body.sequence)) return 409;
       // Replayed signed operations must not exhaust a legitimate owner's quota.
@@ -239,7 +246,9 @@ export class PushShard {
       if (body.action === "revoke") this.wakes.discard(route, body.device);
       return 204;
     });
-    return status === 204 ? new Response(null, { status: 204, headers: { "cache-control": "no-store" } }) : json({ error: status === 409 ? "stale operation" : "rate limited" }, status);
+    if (status === 204) return new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
+    const error = ({ 400: "bad request", 409: "stale operation", 429: "rate limited", 503: "push unavailable" })[status] || "push unavailable";
+    return json({ error }, status);
   }
 
   async wake(owner, route, now) {

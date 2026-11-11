@@ -29,11 +29,13 @@ class PushRegistrationStoreInstrumentedTest {
     private val localId = "pk_" + "a".repeat(32)
     private val peerId = "pk_" + "b".repeat(32)
     private val otherId = "pk_" + "c".repeat(32)
+    private val laterId = "pk_" + "d".repeat(32)
     private val local = byteArrayOf(1, 2, 3)
     private val changedLocal = byteArrayOf(1, 2, 4)
     private val peer = byteArrayOf(4, 5, 6)
     private val changedPeer = byteArrayOf(4, 5, 7)
     private val other = byteArrayOf(7, 8, 9)
+    private val later = byteArrayOf(10, 11, 12)
     private val tokenHash = "ab".repeat(32)
     private val route = "12".repeat(32)
     private val otherRoute = "34".repeat(32)
@@ -68,6 +70,9 @@ class PushRegistrationStoreInstrumentedTest {
                 binding.contentEquals(local) || binding.contentEquals(changedLocal) -> localId
                 binding.contentEquals(peer) || binding.contentEquals(changedPeer) -> peerId
                 binding.contentEquals(other) -> otherId
+                binding.contentEquals(later) -> laterId
+                binding.size == 2 && binding[0] == 99.toByte() && binding[1].toInt() in 1..17 ->
+                    "pk_" + "%032x".format(binding[1].toInt())
                 else -> error("invalid binding")
             }
         },
@@ -280,6 +285,129 @@ class PushRegistrationStoreInstrumentedTest {
         val confirmed = ready(migrated.registered(participants(), retry.sequence, tokenHash, 1003, route))
         assertNotNull(confirmed.announcement())
         assertEquals(peerId, (migrated.findRoute(route) as PushRegistrationStore.RouteResult.Found).peerId)
+    }
+
+    @Test fun recoveryPagesAreBoundedDurableAndRepeatableAfterConcurrentInsertion() {
+        val journal = store()
+        assertEquals(PushRegistrationStore.RecoveryPage.Invalid, journal.recoveryPage(limit = 0))
+        assertEquals(PushRegistrationStore.RecoveryPage.Invalid, journal.recoveryPage(limit = 17))
+        assertEquals(PushRegistrationStore.RecoveryPage.Invalid, journal.recoveryPage(after = "BAD"))
+        assertFalse(dbFile.exists()) // invalid parameters never create a journal
+        assertTrue((journal.recoveryPage() as PushRegistrationStore.RecoveryPage.Ready).routes.isEmpty())
+        val first = ready(journal.reserve(participants(), 1000))
+        assertTrue((journal.recoveryPage() as PushRegistrationStore.RecoveryPage.Ready).routes.isEmpty())
+        ready(journal.registered(participants(), first.sequence, tokenHash, 1001, route))
+        val secondParticipant = participants(peerBinding = other, id = otherId)
+        val second = ready(journal.reserve(secondParticipant, 1000))
+        ready(journal.registered(secondParticipant, second.sequence, tokenHash, 1001, otherRoute))
+        val page = journal.recoveryPage(limit = 1) as PushRegistrationStore.RecoveryPage.Ready
+        assertEquals(listOf(route), page.routes)
+        assertEquals(route, page.next)
+        assertFalse(page.toString().contains(route))
+        // A route inserted before a continuation cursor needs the next full
+        // pass; the page is never authority that all routes were visited.
+        val earlierRoute = "01".repeat(32)
+        val thirdParticipant = participants(peerBinding = later, id = laterId)
+        val third = ready(journal.reserve(thirdParticipant, 1000))
+        ready(journal.registered(thirdParticipant, third.sequence, tokenHash, 1001, earlierRoute))
+        val continuation = journal.recoveryPage(page.next, 1) as PushRegistrationStore.RecoveryPage.Ready
+        assertEquals(listOf(otherRoute), continuation.routes)
+        assertNull(continuation.next)
+        journal.close()
+        val reopened = store()
+        val all = reopened.recoveryPage() as PushRegistrationStore.RecoveryPage.Ready
+        assertEquals(listOf(earlierRoute, route, otherRoute), all.routes)
+        assertNull(all.next)
+        var changed = false
+        try { (all.routes as MutableList<String>).add(route); changed = true }
+        catch (_: UnsupportedOperationException) { /* Read-only page snapshot is expected. */ }
+        assertFalse(changed)
+        ready(reopened.beginRevocation(participants()))
+        assertEquals(listOf(earlierRoute, otherRoute),
+            (reopened.recoveryPage() as PushRegistrationStore.RecoveryPage.Ready).routes)
+        assertEquals(PushRegistrationStore.RouteResult.Missing, reopened.findRoute(route))
+    }
+
+    @Test fun recoveryPageNeverExceedsSixteenRoutesAndUsesKeysetContinuation() {
+        val journal = store()
+        val expected = (1..17).map { number -> "%02x".format(number).repeat(32) }
+        for (number in 1..17) {
+            val peer = participants(
+                peerBinding = byteArrayOf(99, number.toByte()),
+                id = "pk_" + "%032x".format(number),
+            )
+            val reserved = ready(journal.reserve(peer, 1000))
+            ready(journal.registered(peer, reserved.sequence, tokenHash, 1001, expected[number - 1]))
+        }
+        val first = journal.recoveryPage() as PushRegistrationStore.RecoveryPage.Ready
+        assertEquals(expected.take(16), first.routes)
+        assertEquals(expected[15], first.next)
+        val last = store().recoveryPage(first.next) as PushRegistrationStore.RecoveryPage.Ready
+        assertEquals(expected.takeLast(1), last.routes)
+        assertNull(last.next)
+        assertTrue((journal.recoveryPage(expected.last()) as PushRegistrationStore.RecoveryPage.Ready).routes.isEmpty())
+    }
+
+    @Test fun recoveryPageNeverReturnsAPartialPageAroundCorruptEncryptedState() {
+        val journal = store()
+        val first = ready(journal.reserve(participants(), 1000))
+        ready(journal.registered(participants(), first.sequence, tokenHash, 1001, route))
+        val secondParticipant = participants(peerBinding = other, id = otherId)
+        val second = ready(journal.reserve(secondParticipant, 1000))
+        ready(journal.registered(secondParticipant, second.sequence, tokenHash, 1001, otherRoute))
+        journal.close()
+        SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use {
+            it.execSQL("UPDATE registrations SET address=zeroblob(40) WHERE route='$otherRoute'")
+        }
+        val reopened = store()
+        // Even a damaged lookahead fails the whole page; no partial result is
+        // safe to mark as a completed recovery pass.
+        assertEquals(PushRegistrationStore.RecoveryPage.Unavailable, reopened.recoveryPage(limit = 1))
+        assertEquals(PushRegistrationStore.RouteResult.Unavailable, reopened.findRoute(otherRoute))
+    }
+
+    @Test fun recoveryPageDetectsMalformedAndPartialIndexEvenBeforeTheCursor() {
+        val journal = store()
+        val attempt = ready(journal.reserve(participants(), 1000))
+        ready(journal.registered(participants(), attempt.sequence, tokenHash, 1001, route))
+        journal.close()
+        SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use {
+            it.execSQL("UPDATE registrations SET route='bad'")
+        }
+        val reopened = store()
+        assertEquals(PushRegistrationStore.RecoveryPage.Unavailable, reopened.recoveryPage(after = otherRoute))
+        reopened.close()
+        SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use {
+            it.execSQL("UPDATE registrations SET route=NULL")
+        }
+        assertEquals(PushRegistrationStore.RecoveryPage.Unavailable, store().recoveryPage())
+    }
+
+    @Test fun recoveryPageRejectsEmbeddedNullBeforeTheCursor() {
+        val journal = store()
+        val attempt = ready(journal.reserve(participants(), 1000))
+        ready(journal.registered(participants(), attempt.sequence, tokenHash, 1001, route))
+        journal.close()
+        SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use {
+            // SQLite text length/GLOB stop at NUL, while its byte length can
+            // still be 64. This damaged route also sorts before the cursor.
+            it.execSQL("UPDATE registrations SET route='" + "0".repeat(32) + "' || char(0) || '" + "f".repeat(31) + "'")
+            it.rawQuery("SELECT length(route), length(CAST(route AS BLOB)) FROM registrations", null).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(32, cursor.getInt(0))
+                assertEquals(64, cursor.getInt(1))
+            }
+        }
+        assertEquals(PushRegistrationStore.RecoveryPage.Unavailable, store().recoveryPage(after = otherRoute))
+    }
+
+    @Test fun recoveryPageDoesNotRegenerateALostKeystoreKey() {
+        val journal = store()
+        val attempt = ready(journal.reserve(participants(), 1000))
+        ready(journal.registered(participants(), attempt.sequence, tokenHash, 1001, route))
+        KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(alias) }
+        assertEquals(PushRegistrationStore.RecoveryPage.Unavailable, journal.recoveryPage())
+        assertFalse(KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.containsAlias(alias))
     }
 
     @Test fun quotaAndFailedEntropyDoNotEvictOrCreateARegistration() {

@@ -55,6 +55,36 @@ DNS или другим аккаунтам. Право чтения списка
 [API tokens для CI](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/)
 и [Workers permissions](https://developers.cloudflare.com/workers/authorization/).
 
+### Если проверка отклонила формат Cloudflare-токена
+
+Сообщение `cloudflare_token_invalid` означает, что полученное значение
+`APU_PUSH_CLOUDFLARE_TOKEN` не прошло **локальную проверку формата**; запрос в
+Cloudflare ещё не выполнялся, а остальные значения могли ещё не проверяться.
+
+1. Если надёжно сохранили созданный для APU токен, скопируйте его значение
+   целиком. Если значение потеряно, создайте отдельный новый токен: в
+   [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens)
+   выберите **Create Token**, затем в разделе **Policies** — **Start from scratch →
+   Start with an Account policy**. Задайте доступ только **Account → Workers
+   Scripts → Read** и ограничьте ресурсы конкретным нужным аккаунтом. В старом
+   интерфейсе этот вариант может называться **Create Custom Token**. Затем
+   проверьте сводку и выберите создание токена.
+   Скопируйте показанный токен: Cloudflare показывает его значение один раз.
+   Не используйте Global API Key и не давайте право **Edit** для этой проверки.
+2. Откройте [GitHub Environments](https://github.com/vzhem/APUMIR/settings/environments)
+   → **apu-push-staging** → **Environment secrets**. Напротив
+   `APU_PUSH_CLOUDFLARE_TOKEN` нажмите **Update**; если такой записи нет,
+   выберите **Add secret** с этим именем.
+3. Вставьте **только сам токен**: без `Bearer ` перед ним, кавычек, команды,
+   адреса, пробелов и переносов строки. Не подставляйте Account ID вместо
+   токена. Сохраните и напишите агенту «готово»; значение и скриншоты с ним в
+   чат не отправляйте. Остальные секреты самостоятельно менять не нужно.
+
+Новые пользовательские и аккаунтные API-токены могут начинаться с `cfut_` и
+`cfat_` соответственно; старые действующие токены могут не иметь префикса.
+Это не проверка действительности токена или его прав. Подробности:
+[форматы Cloudflare API-токенов](https://developers.cloudflare.com/fundamentals/api/get-started/token-formats/).
+
 ## 3. Серверная учётная запись Firebase
 
 Это отдельная техническая учётная запись, от имени которой сервер в будущем
@@ -65,22 +95,27 @@ DNS или другим аккаунтам. Право чтения списка
    `com.vladimir.messenger` и скачивали `google-services.json`. Если не уверены,
    выберите проект, где есть это приложение; последующая проверка сверит проект
    с уже сохранённой Android-конфигурацией.
-2. Нажмите **Create service account** / **Создать сервисный аккаунт**. В поле
-   имени напишите, например, `apu-push`, затем нажмите **Create and continue**.
-3. В поле **Select a role** выберите именно **Firebase Cloud Messaging API Admin**
+2. В этом же проекте проверьте, что [Firebase Cloud Messaging API](https://console.cloud.google.com/apis/library/fcm.googleapis.com)
+   включён (**API enabled**). Если он выключен, нажмите **Enable**. Старый
+   Cloud Messaging API (Legacy) включать не нужно. Сам preflight не проверит
+   включение API и право отправки.
+3. Вернитесь на страницу **Service Accounts** и нажмите **Create service account** /
+   **Создать сервисный аккаунт**. В поле имени напишите, например, `apu-push`,
+   затем нажмите **Create and continue**.
+4. В поле **Select a role** выберите именно **Firebase Cloud Messaging API Admin**
    и нажмите **Continue**, затем **Done**. Это готовая роль для FCM: она шире
    одного права отправки, но не является ролью владельца или редактора всего
    проекта. **Owner** и **Editor** не выбирайте. При наличии возможности можно
    вместо неё создать свою роль только с `cloudmessaging.messages.create`.
-4. В списке нажмите на созданную учётную запись, откройте вкладку **Keys** и
+5. В списке нажмите на созданную учётную запись, откройте вкладку **Keys** и
    выберите **Add key → Create new key → JSON → Create**. На компьютер скачается
    файл `.json`. Это секретный ключ, храните его как пароль.
-5. Откройте скачанный файл обычным текстовым редактором и скопируйте **всё** его
+6. Откройте скачанный файл обычным текстовым редактором и скопируйте **всё** его
    содержимое. Откройте [настройки GitHub Environments](https://github.com/vzhem/APUMIR/settings/environments),
    выберите `apu-push-staging`, в разделе **Environment secrets** нажмите
    **Add secret**. Имя секрета: `APU_PUSH_FCM_SERVICE_ACCOUNT`. В поле значения
    вставьте весь текст файла и сохраните. Не вставляйте его в чат или файлы Git.
-6. После сохранения безопасно удалите временную локальную копию JSON. Не меняйте
+7. После сохранения безопасно удалите временную локальную копию JSON. Не меняйте
    уже существующий `APU_FIREBASE_ANDROID_CONFIG`: это другой, клиентский файл
    `google-services.json`. Серверный ключ нельзя добавлять в приложение или APK.
 

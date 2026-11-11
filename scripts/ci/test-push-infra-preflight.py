@@ -92,6 +92,16 @@ class CredentialTests(unittest.TestCase):
                 values[name] = value
                 self.fails(values, code)
 
+    def test_current_and_legacy_cloudflare_token_shapes_pass_only_format_validation(self):
+        # Synthetic shapes only; no checksum, provider authentication or permissions are tested.
+        for token in ("cfut_" + "A" * 48, "cfat_" + "B" * 48, "C" * 40):
+            with self.subTest(kind=token[:5]):
+                values = self.config()
+                values[preflight.CF_TOKEN_NAME] = token
+                result = preflight.credentials(values, validate_key=lambda _key: True)
+                self.assertEqual(token, result.token)
+                self.assertNotIn(token, repr(result))
+
     def test_invalid_or_secret_android_client_rejected(self):
         for raw in ("{}", self.config()[preflight.FCM_ACCOUNT_NAME],
                     test_client().replace("com.vladimir.messenger", "another.app")):

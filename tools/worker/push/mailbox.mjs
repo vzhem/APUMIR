@@ -3,7 +3,7 @@
 // cryptographically opened here. All quotas/retention are provisional and the
 // HTTP interface remains disabled until explicitly configured and reviewed.
 import { hexFromBytes, sha256 } from "./protocol.mjs";
-import { MAX_MAILBOX_TTL_MS, mailboxPutId, validMailboxPut } from "./mailbox-protocol.mjs";
+import { MAX_MAILBOX_TTL_MS, mailboxPutId, validMailboxAccess, validMailboxPut } from "./mailbox-protocol.mjs";
 
 export const MAILBOX_LIMITS = Object.freeze({
   ttlMs: MAX_MAILBOX_TTL_MS,
@@ -142,8 +142,14 @@ export class CiphertextMailbox {
   }
 
   /** Owner signature is checked by the shard before this transactional read. */
-  pull(body, route, now) {
+  pull(body, route, requestedAt) {
     return this.storage.transactionSync(() => {
+      // A transaction may wait after signature verification. Recheck at the
+      // actual read, including the kill switch and signed freshness; never use
+      // an earlier clock to expose data or to extend a registration's life.
+      const now = Math.max(requestedAt, Date.now());
+      if (!this.shard.mailboxEnabled()) return { status: 503 };
+      if (!validMailboxAccess(body, "pull", Math.floor(now / 1000))) return { status: 400 };
       if (!this.active(body.owner, route, body.device, now)) return { status: 403 };
       if (!this.shard.consume("mailbox-access:" + route + ":" + body.device, 600, 60 * 60_000, now) ||
           !this.shard.consume("mailbox-read-owner:" + body.owner, 2400, 60 * 60_000, now)) return { status: 429 };
@@ -164,8 +170,11 @@ export class CiphertextMailbox {
   }
 
   /** Idempotent and incarnation-bound; a stale receipt cannot remove a new row. */
-  ack(body, route, now) {
+  ack(body, route, requestedAt) {
     return this.storage.transactionSync(() => {
+      const now = Math.max(requestedAt, Date.now());
+      if (!this.shard.mailboxEnabled()) return { status: 503 };
+      if (!validMailboxAccess(body, "ack", Math.floor(now / 1000))) return { status: 400 };
       if (!this.active(body.owner, route, body.device, now)) return { status: 403 };
       if (!this.shard.consume("mailbox-access:" + route + ":" + body.device, 600, 60 * 60_000, now) ||
           !this.shard.consume("mailbox-read-owner:" + body.owner, 2400, 60 * 60_000, now)) return { status: 429 };

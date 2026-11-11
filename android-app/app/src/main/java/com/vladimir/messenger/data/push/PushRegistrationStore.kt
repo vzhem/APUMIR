@@ -75,6 +75,16 @@ internal class PushRegistrationStore(
         }
     }
 
+    sealed interface RecoveryPage {
+        object Invalid : RecoveryPage
+        object Unavailable : RecoveryPage
+        /** Opaque hints only, not authenticated messages or permission to sync. */
+        class Ready internal constructor(routes: List<String>, val next: String?) : RecoveryPage {
+            val routes: List<String> = java.util.Collections.unmodifiableList(routes.toList())
+            override fun toString(): String = "PushRecoveryPage(redacted)"
+        }
+    }
+
     private sealed interface IndexChange {
         object Keep : IndexChange
         object Clear : IndexChange
@@ -137,6 +147,64 @@ internal class PushRegistrationStore(
         } catch (error: Exception) {
             Log.w(TAG, "Push route index unavailable: ${error.javaClass.simpleName}")
             RouteResult.Unavailable
+        }
+    }
+
+    /**
+     * Bounded keyset enumeration for a future lost-FCM/full-mailbox recovery.
+     * Results are only index hints: every route still needs live identity, pin,
+     * journal and freshly derived-route checks before any network or UI effect.
+     * The cursor is not authority and must be protected with the matching local
+     * recovery state. Concurrent insertions before it require a later full pass.
+     * An absent/rolled-back database still cannot be distinguished from a new
+     * installation. This method does not schedule or contact any provider.
+     */
+    fun recoveryPage(after: String? = null, limit: Int = 16): RecoveryPage = synchronized(LOCK) {
+        if (limit !in 1..16 || after != null && !ROUTE.matches(after)) return@synchronized RecoveryPage.Invalid
+        try {
+            val db = db()
+            db.beginTransaction()
+            try {
+                // Do not silently skip a malformed/partial index even when it
+                // sorts before the requested cursor. The journal is bounded to
+                // 2048 entries and no ciphertext or node id is loaded here.
+                // SQLite's text functions stop at NUL, so both text and byte
+                // lengths are required before accepting a 64-byte route.
+                val damaged = db.rawQuery(
+                    "SELECT 1 FROM registrations WHERE (route IS NULL AND address IS NOT NULL) OR " +
+                        "(route IS NOT NULL AND (typeof(route)<>'text' OR length(route)<>64 OR " +
+                        "length(CAST(route AS BLOB))<>64 OR route GLOB '*[^0-9a-f]*' OR " +
+                        "typeof(address)<>'blob' OR length(address) NOT BETWEEN 30 AND 256)) LIMIT 1",
+                    null,
+                ).use { it.moveToFirst() }
+                if (damaged) return@synchronized RecoveryPage.Unavailable
+                val routes = db.rawQuery(
+                    "SELECT CASE WHEN length(CAST(route AS BLOB))=64 THEN route ELSE NULL END " +
+                        "FROM registrations WHERE route IS NOT NULL AND route>? ORDER BY route LIMIT ?",
+                    arrayOf(after ?: "", (limit + 1).toString()),
+                ).use { cursor ->
+                    buildList {
+                        while (cursor.moveToNext()) add(cursor.getString(0) ?: error("invalid route index"))
+                    }
+                }
+                // Check the lookahead too: never return a partial page around a
+                // corrupt record. This authenticates the index, not the peer.
+                for (route in routes) {
+                    if (!ROUTE.matches(route) || findRoute(route) !is RouteResult.Found) {
+                        return@synchronized RecoveryPage.Unavailable
+                    }
+                }
+                val selected = routes.take(limit)
+                val next = if (routes.size > limit) selected.last() else null
+                db.setTransactionSuccessful()
+                RecoveryPage.Ready(selected, next)
+            } finally { db.endTransaction() }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            // No route, address, state or exception text in diagnostics.
+            Log.w(TAG, "Push recovery index unavailable: ${error.javaClass.simpleName}")
+            RecoveryPage.Unavailable
         }
     }
 

@@ -56,8 +56,15 @@ const putBody = (salt = randomHex(16), envelope = fakeEnvelope(), expiresAt = Da
   fields[1] = key.toString("base64");
   return mailboxPut(owner, capability, fields.join("|"), expiresAt);
 };
-const pull = (shard, dev = deviceA, after = "-") => shard.mailbox.pull({ owner, device: dev, after }, route, Date.now());
-const ack = (shard, dev, items) => shard.mailbox.ack({ owner, device: dev, items }, route, Date.now());
+// Direct storage tests use a structurally valid placeholder signature; the
+// separate HTTP/workerd tests exercise actual Ed25519 verification.
+const accessBody = (dev, fields) => ({
+  owner, capability, device: dev, issuedAt: Math.floor(Date.now() / 1000), signature: "00".repeat(64), ...fields,
+});
+const pull = (shard, dev = deviceA, after = "-") => shard.mailbox.pull(accessBody(dev, { after }), route, Date.now());
+const ack = (shard, dev, items) => shard.mailbox.ack(
+  accessBody(dev, { items: items.slice().sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0) }), route, Date.now(),
+);
 
 test("ciphertext and per-device wake commit together, survive object recreation, and retire only after every target", async (t) => {
   const { shard, storage, env, rows, register, getAlarm } = make(t);
@@ -193,6 +200,66 @@ test("cutoff remains enforced if safety-alarm persistence waits past expiry", as
   for (const table of ["mailbox_messages", "mailbox_targets", "pending_wakes"]) {
     assert.equal(rows(`SELECT count(*) AS n FROM ${table}`)[0].n, 0, table);
   }
+});
+
+test("pull and ack recheck signed freshness inside the storage transaction", async (t) => {
+  const initial = 1_700_000_000_000;
+  t.mock.timers.enable({ apis: ["Date"], now: initial });
+  const { shard, storage, rows, register } = make(t);
+  register();
+  const body = putBody();
+  assert.equal((await shard.mailbox.put(body, route, initial)).status, 201);
+  const item = pull(shard).items[0];
+  const read = accessBody(deviceA, { after: "-" });
+  const acknowledge = accessBody(deviceA, { items: [{ id: item.id, receipt: item.receipt }] });
+  const rateCount = Number(rows("SELECT count FROM rate_limits WHERE bucket=?", "mailbox-access:" + route + ":" + deviceA)[0].count);
+  const transaction = storage.transactionSync.bind(storage);
+  storage.transactionSync = (operation) => {
+    // Signature was checked while fresh, then storage access waited >5 min.
+    t.mock.timers.setTime(initial + 301_000);
+    return transaction(operation);
+  };
+  assert.equal(shard.mailbox.pull(read, route, initial).status, 400);
+  assert.equal(shard.mailbox.ack(acknowledge, route, initial).status, 400);
+  assert.equal(rows("SELECT count(*) AS n FROM mailbox_targets")[0].n, 1);
+  assert.equal(rows("SELECT envelope FROM mailbox_messages")[0].envelope, body.envelope);
+  assert.equal(Number(rows("SELECT count FROM rate_limits WHERE bucket=?", "mailbox-access:" + route + ":" + deviceA)[0].count), rateCount);
+  // A new, freshly signed-shaped request can still finish the same message.
+  assert.equal(pull(shard).items[0].id, item.id);
+  assert.equal(ack(shard, deviceA, [{ id: item.id, receipt: item.receipt }]).status, 204);
+});
+
+test("kill switches and expired registrations are rechecked before pull or ack", async (t) => {
+  const initial = 1_700_000_000_000;
+  t.mock.timers.enable({ apis: ["Date"], now: initial });
+  for (const disabled of ["PUSH_ENABLED", "MAILBOX_ENABLED"]) {
+    const { shard, storage, env, rows, register } = make(t);
+    register();
+    const body = putBody();
+    assert.equal((await shard.mailbox.put(body, route, initial)).status, 201);
+    const item = pull(shard).items[0];
+    const read = accessBody(deviceA, { after: "-" });
+    const acknowledge = accessBody(deviceA, { items: [{ id: item.id, receipt: item.receipt }] });
+    const transaction = storage.transactionSync.bind(storage);
+    storage.transactionSync = (operation) => { env[disabled] = "false"; return transaction(operation); };
+    assert.equal(shard.mailbox.pull(read, route, initial).status, 503);
+    assert.equal(shard.mailbox.ack(acknowledge, route, initial).status, 503);
+    assert.equal(rows("SELECT count(*) AS n FROM mailbox_targets")[0].n, 1);
+    assert.equal(rows("SELECT envelope FROM mailbox_messages")[0].envelope, body.envelope);
+  }
+  const { shard, storage, sql, rows, register } = make(t);
+  register();
+  const body = putBody();
+  assert.equal((await shard.mailbox.put(body, route, initial)).status, 201);
+  const item = pull(shard).items[0];
+  const read = accessBody(deviceA, { after: "-" });
+  const acknowledge = accessBody(deviceA, { items: [{ id: item.id, receipt: item.receipt }] });
+  sql.exec("UPDATE registrations SET expires_at=?", initial + 1_000);
+  const transaction = storage.transactionSync.bind(storage);
+  storage.transactionSync = (operation) => { t.mock.timers.setTime(initial + 1_001); return transaction(operation); };
+  assert.equal(shard.mailbox.pull(read, route, initial).status, 403);
+  assert.equal(shard.mailbox.ack(acknowledge, route, initial).status, 403);
+  assert.equal(rows("SELECT count(*) AS n FROM mailbox_targets")[0].n, 1);
 });
 
 test("cursor allows skipping an unacknowledged item, survives acknowledgements and fails closed after expiry", async (t) => {

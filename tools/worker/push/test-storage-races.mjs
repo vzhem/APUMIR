@@ -3,6 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
+import { identity, registration } from "./mailbox-test-fixture.mjs";
 import { PushShard } from "./worker.mjs";
 
 function makeShard() {
@@ -60,6 +61,61 @@ function makePendingDue(sql, now = Date.now()) {
   sql.exec("UPDATE pending_wakes SET next_at = ?", now - 1);
   sql.exec("DELETE FROM rate_limits WHERE bucket LIKE 'wake-%'");
 }
+
+function registrationRequest(body) {
+  return new Request("https://push-internal.invalid/v1/registration", {
+    method: "POST", headers: { "content-type": "application/json", "x-apu-rate-id": "ab".repeat(32) },
+    body: JSON.stringify(body),
+  });
+}
+
+test("registration delayed past a revoke tombstone cannot resurrect the old token", async (t) => {
+  const initial = 1_700_000_000_000;
+  t.mock.timers.enable({ apis: ["Date"], now: initial });
+  const { db, sql, shard, storage } = makeShard();
+  t.after(() => db.close());
+  const receiver = identity();
+  const first = await registration(receiver);
+  const revoke = await registration(receiver, { ...first, action: "revoke", sequence: 2, token: "" });
+  assert.equal((await shard.fetch(registrationRequest(first))).status, 204);
+  assert.equal((await shard.fetch(registrationRequest(revoke))).status, 204);
+  assert.equal(sql.exec("SELECT token FROM registrations").toArray()[0].token, null);
+  const getAlarm = storage.getAlarm.bind(storage);
+  storage.getAlarm = async () => {
+    // The request was fresh on entry, but alarm scheduling took longer than
+    // both the signed window and the independently retained tombstone.
+    t.mock.timers.setTime(initial + 16 * 60_000);
+    storage.transactionSync(() => shard.cleanup(Date.now()));
+    return getAlarm();
+  };
+  assert.equal((await shard.fetch(registrationRequest(first))).status, 400);
+  assert.equal(sql.exec("SELECT count(*) AS n FROM registrations").toArray()[0].n, 0);
+  assert.equal(sql.exec("SELECT count(*) AS n FROM pending_wakes").toArray()[0].n, 0);
+});
+
+test("registration uses the transaction clock at the freshness boundary", async (t) => {
+  const initial = 1_700_000_000_000;
+  t.mock.timers.enable({ apis: ["Date"], now: initial });
+  const { db, sql, shard, storage } = makeShard();
+  t.after(() => db.close());
+  const body = await registration(identity());
+  const getAlarm = storage.getAlarm.bind(storage);
+  storage.getAlarm = async () => { t.mock.timers.setTime(initial + 300_000); return getAlarm(); };
+  assert.equal((await shard.fetch(registrationRequest(body))).status, 204);
+  const stored = sql.exec("SELECT token, expires_at FROM registrations").toArray()[0];
+  assert.equal(stored.token, body.token);
+  assert.equal(stored.expires_at, initial + 300_000 + 30 * 24 * 60 * 60_000);
+});
+
+test("registration checks the kill switch again after async scheduling", async (t) => {
+  const { db, sql, shard, storage, env } = makeShard();
+  t.after(() => db.close());
+  const body = await registration(identity());
+  const getAlarm = storage.getAlarm.bind(storage);
+  storage.getAlarm = async () => { env.PUSH_ENABLED = "false"; return getAlarm(); };
+  assert.equal((await shard.fetch(registrationRequest(body))).status, 503);
+  assert.equal(sql.exec("SELECT count(*) AS n FROM registrations").toArray()[0].n, 0);
+});
 
 test("UNREGISTERED retires only the old token and preserves a replay tombstone", async () => {
   const { db, sql, shard } = makeShard();
