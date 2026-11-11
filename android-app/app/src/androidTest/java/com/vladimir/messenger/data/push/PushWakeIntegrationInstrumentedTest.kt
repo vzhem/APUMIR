@@ -17,12 +17,12 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import uniffi.p2p_core.clearIdentitySigningSeed
 import uniffi.p2p_core.createFileExchangeBinding
-import uniffi.p2p_core.createFileKeyEnvelope
 import uniffi.p2p_core.createIdentitySigningBinding
 import uniffi.p2p_core.identitySigningMode
 import uniffi.p2p_core.installIdentitySigningSeed
@@ -103,18 +103,16 @@ class PushWakeIntegrationInstrumentedTest {
             assertEquals(aliceId, indexed.peerId)
             assertEquals(attempt.generation, indexed.generation)
             val plaintext = confirmed.announcement()!!
-            // Match the existing sealed-message format, but deliberately do not
-            // mutate the real FileExchangePeerStore or app's message router.
-            val messageKey = ByteArray(32) { 7 }
-            val iv = ByteArray(12) { 8 }
-            val encrypted = Cipher.getInstance("AES/GCM/NoPadding").run {
-                init(Cipher.ENCRYPT_MODE, SecretKeySpec(messageKey, "AES"), GCMParameterSpec(128, iv))
-                doFinal(plaintext.toByteArray(Charsets.UTF_8))
-            }
-            val envelope = createFileKeyEnvelope(bob, alice, ByteArray(32) { 4 }, manifest(encrypted), messageKey)
-            messageKey.fill(0)
-            val wire = SealedWire.encode(envelope, iv, encrypted)
+            // Exercise the actual push sealer and Rust FFI without mutating
+            // the real FileExchangePeerStore or the app's message router.
+            val pushSealer = PushEpochEnvelope(recordFailure = { error("unexpected test envelope failure") })
+            assertNull(pushSealer.seal(confirmed, bob, bob, ByteArray(32) { 4 }))
+            val wire = pushSealer.seal(confirmed, bob, alice, ByteArray(32) { 4 })!!
             installIdentitySigningSeed(1.toUByte(), aliceId, ByteArray(32) { 1 })
+            var wrongIdentityFailures = 0
+            assertNull(PushEpochEnvelope(recordFailure = { wrongIdentityFailures++ })
+                .seal(confirmed, bob, alice, ByteArray(32) { 4 }))
+            assertEquals(1, wrongIdentityFailures)
             val parts = SealedWire.decode(wire)!!
             val openedSender = SealedWire.senderBinding(wire)!!
             assertArrayEquals(bob, openedSender)
@@ -126,7 +124,7 @@ class PushWakeIntegrationInstrumentedTest {
                 }
             } finally { openedKey.fill(0) }
             assertEquals(plaintext, opened)
-            val altered = encrypted.copyOf().also { it[0] = (it[0].toInt() xor 1).toByte() }
+            val altered = parts.ciphertext.copyOf().also { it[0] = (it[0].toInt() xor 1).toByte() }
             assertNotNull(runCatching {
                 openFileKeyEnvelope(parts.keyEnvelope, alice, ByteArray(32) { 3 }, manifest(altered))
             }.exceptionOrNull())

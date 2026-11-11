@@ -114,6 +114,13 @@ class SealedWireTest {
     }
 
     @Test
+    fun `manifest remains compatible with existing sealed messages`() {
+        val manifest = SealedWire.manifest(byteArrayOf(0, 1, 2, 0xff.toByte())).toString(Charsets.UTF_8)
+        assertEquals("apu-msg-v1|3d1f57c984978ef98a18378c8166c1cb8ede02c03eeb6aee7e2f121dfeee3e56", manifest)
+        assertFalse(manifest.contains("pk_"))
+    }
+
+    @Test
     fun `prefix is stable`() {
         // Смена префикса рассинхронизирует телефоны — фиксируем значение.
         assertEquals("APUSEAL1|", SealedWire.PREFIX)

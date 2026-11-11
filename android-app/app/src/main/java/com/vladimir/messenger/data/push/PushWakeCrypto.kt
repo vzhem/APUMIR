@@ -26,24 +26,45 @@ internal class PushWakeCrypto(
         epochHex: String,
         localIsSender: Boolean,
     ): Material? {
-        if (localBinding.size !in 1..512 || pinnedPeerBinding.size !in 1..512 ||
-            localSecret.size != 32 || localSecret.all { it == 0.toByte() } ||
-            localBinding.contentEquals(pinnedPeerBinding)
-        ) return null
+        if (localBinding.size !in 1..512 || pinnedPeerBinding.size !in 1..512 || localSecret.size != 32) return null
         val epoch = decodeHex(epochHex, 16) ?: return null
-        if (epoch.all { it == 0.toByte() }) { epoch.fill(0); return null }
         val local = localBinding.copyOf()
         val peer = pinnedPeerBinding.copyOf()
         val secret = localSecret.copyOf()
+        // Keep independent snapshots: FFI must not be allowed to relabel the
+        // resulting capability by changing its mutable input buffers.
+        val expectedLocal = local.copyOf()
+        val expectedPeer = peer.copyOf()
+        val expectedSecret = secret.copyOf()
+        val expectedEpoch = epoch.copyOf()
+        var epochHash: ByteArray? = null
+        var hashTransferred = false
         var output: ByteArray? = null
+        var outputSnapshot: ByteArray? = null
         return try {
+            if (secret.all { it == 0.toByte() } || epoch.all { it == 0.toByte() } || local.contentEquals(peer)) return null
+            val localHash = PushEpochProtocol.bindingHash(expectedLocal)
+            val peerHash = PushEpochProtocol.bindingHash(expectedPeer)
+            val expectedEpochHash = sha256(expectedEpoch)
+            epochHash = expectedEpochHash
             output = derive(local, peer, secret, epoch, localIsSender)
-            if (output.size != 64 || !hasNonZero(output, 0, 32) || !hasNonZero(output, 32, 64)) return null
-            Material(
-                owner = output.copyOfRange(0, 32), capability = output.copyOfRange(32, 64),
-                localHash = PushEpochProtocol.bindingHash(local), peerHash = PushEpochProtocol.bindingHash(peer),
-                epochHash = sha256(epoch), localIsSender = localIsSender, signer = sign, recordFailure = recordFailure,
+            if (!MessageDigest.isEqual(local, expectedLocal) || !MessageDigest.isEqual(peer, expectedPeer) ||
+                !MessageDigest.isEqual(secret, expectedSecret) || !MessageDigest.isEqual(epoch, expectedEpoch)
+            ) {
+                recordFailure()
+                return null
+            }
+            if (output.size != 64) return null
+            val checked = output.copyOf()
+            outputSnapshot = checked
+            if (!hasNonZero(checked, 0, 32) || !hasNonZero(checked, 32, 64)) return null
+            val material = Material(
+                owner = checked.copyOfRange(0, 32), capability = checked.copyOfRange(32, 64),
+                localHash = localHash, peerHash = peerHash, epochHash = expectedEpochHash,
+                localIsSender = localIsSender, signer = sign, recordFailure = recordFailure,
             )
+            hashTransferred = true
+            material
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -51,11 +72,17 @@ internal class PushWakeCrypto(
             recordFailure()
             null
         } finally {
+            if (!hashTransferred) epochHash?.fill(0)
             output?.fill(0)
+            outputSnapshot?.fill(0)
             epoch.fill(0)
             local.fill(0)
             peer.fill(0)
             secret.fill(0)
+            expectedEpoch.fill(0)
+            expectedLocal.fill(0)
+            expectedPeer.fill(0)
+            expectedSecret.fill(0)
         }
     }
 
@@ -97,7 +124,6 @@ internal class PushWakeCrypto(
             token: String,
         ): PushRegistrationRequest? {
             if (closed || localIsSender || localBinding.size !in 1..512 ||
-                PushEpochProtocol.bindingHash(localBinding) != localHash ||
                 state.ownerHash != localHash || state.peerHash != peerHash ||
                 state.sequence !in 1..PushRegistrationState.MAX_NUMBER ||
                 issuedAtSeconds !in 1..PushRegistrationState.MAX_NUMBER
@@ -113,19 +139,32 @@ internal class PushWakeCrypto(
             val tokenBytes = token.toByteArray(Charsets.UTF_8)
             val binding = localBinding.copyOf()
             val capabilityCopy = capability.copyOf()
+            val expectedBinding = binding.copyOf()
+            val expectedCapability = capabilityCopy.copyOf()
+            val expectedDevice = device.copyOf()
+            val expectedToken = tokenBytes.copyOf()
             var output: ByteArray? = null
+            var outputSnapshot: ByteArray? = null
             return try {
+                if (PushEpochProtocol.bindingHash(expectedBinding) != localHash) return null
                 val currentEpochHash = sha256(epoch)
                 val epochMatches = try { MessageDigest.isEqual(epochHash, currentEpochHash) } finally { currentEpochHash.fill(0) }
                 if (!epochMatches) return null
                 output = signer(binding, capabilityCopy, device, state.sequence.toULong(), issuedAtSeconds.toULong(), tokenBytes, revoke)
-                if (output.size != 96 || !MessageDigest.isEqual(owner, output.copyOfRange(0, 32)) ||
-                    !hasNonZero(output, 32, 96)
-                ) return null
+                if (!MessageDigest.isEqual(binding, expectedBinding) || !MessageDigest.isEqual(capabilityCopy, expectedCapability) ||
+                    !MessageDigest.isEqual(device, expectedDevice) || !MessageDigest.isEqual(tokenBytes, expectedToken)
+                ) {
+                    recordFailure()
+                    return null
+                }
+                if (closed || output.size != 96) return null
+                val checked = output.copyOf()
+                outputSnapshot = checked
+                if (!MessageDigest.isEqual(owner, checked.copyOfRange(0, 32)) || !hasNonZero(checked, 32, 96)) return null
                 PushRegistrationRequest(
                     action = if (revoke) "revoke" else "register", owner = hex(owner), capability = hex(capability),
                     device = state.deviceHex, sequence = state.sequence, issuedAt = issuedAtSeconds,
-                    token = token, signature = hex(output.copyOfRange(32, 96)),
+                    token = token, signature = hex(checked.copyOfRange(32, 96)),
                 ).takeIf { it.isValid() }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -135,11 +174,16 @@ internal class PushWakeCrypto(
                 null
             } finally {
                 output?.fill(0)
+                outputSnapshot?.fill(0)
                 epoch.fill(0)
                 device.fill(0)
                 tokenBytes.fill(0)
                 binding.fill(0)
                 capabilityCopy.fill(0)
+                expectedBinding.fill(0)
+                expectedCapability.fill(0)
+                expectedDevice.fill(0)
+                expectedToken.fill(0)
             }
         }
 

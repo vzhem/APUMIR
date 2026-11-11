@@ -190,6 +190,47 @@ class PushWakeCryptoTest {
         material.close()
     }
 
+    @Test fun modifiedDerivationInputsAreRejectedAndTemporaryBuffersAreWiped() {
+        repeat(4) { modified ->
+            val borrowed = mutableListOf<ByteArray>()
+            lateinit var result: ByteArray
+            var failures = 0
+            val crypto = PushWakeCrypto(derive = { a, b, s, e, _ ->
+                borrowed.addAll(listOf(a, b, s, e))
+                borrowed[modified][0] = (borrowed[modified][0].toInt() xor 0x40).toByte()
+                (bytes(owner) + bytes(capability)).also { result = it }
+            }, sign = { _, _, _, _, _, _, _ -> error("not used") }, recordFailure = { failures++ })
+            assertNull(crypto.derive(local, peer, secret, epoch, false))
+            assertEquals(1, failures)
+            assertTrue(borrowed.all { array -> array.all { it == 0.toByte() } })
+            assertTrue(result.all { it == 0.toByte() })
+            assertArrayEquals(byteArrayOf(2, 4, 6), local)
+            assertArrayEquals(byteArrayOf(1, 3, 5), peer)
+            assertArrayEquals(ByteArray(32) { 4 }, secret)
+        }
+    }
+
+    @Test fun modifiedSigningInputsNeverProduceARegistration() {
+        repeat(4) { modified ->
+            val borrowed = mutableListOf<ByteArray>()
+            lateinit var result: ByteArray
+            var failures = 0
+            val crypto = PushWakeCrypto(derive = { _, _, _, _, _ -> bytes(owner) + bytes(capability) },
+                sign = { binding, cap, dev, _, _, input, _ ->
+                    borrowed.addAll(listOf(binding, cap, dev, input))
+                    borrowed[modified][0] = (borrowed[modified][0].toInt() xor 0x40).toByte()
+                    (bytes(owner) + bytes(signature)).also { result = it }
+                }, recordFailure = { failures++ })
+            val material = crypto.derive(local, peer, secret, epoch, false)!!
+            try {
+                assertNull(material.registrationRequest(local, state().reserve()!!, 1000, token))
+                assertEquals(1, failures)
+                assertTrue(borrowed.all { array -> array.all { it == 0.toByte() } })
+                assertTrue(result.all { it == 0.toByte() })
+            } finally { material.close() }
+        }
+    }
+
     @Test fun badSignerOutputCannotProduceARequest() {
         var returned = byteArrayOf()
         var kind = 0
