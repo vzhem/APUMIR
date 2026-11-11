@@ -31,10 +31,11 @@ if [ "$storage_status" -ne 0 ]; then
 fi
 
 # Exercise Room upgrade, notification/restore, outbox fairness and experimental
-# push storage; never accept a green task that silently skipped acceptance cases.
+# push storage and a disposable native-engine ownership check; never accept a
+# green task that silently skipped acceptance cases.
 clear_report
 ./gradlew :app:connectedDebugAndroidTest --no-daemon \
-    -Pandroid.testInstrumentationRunnerArguments.class=com.vladimir.messenger.data.notification.NotificationArrivalInstrumentedTest,com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest,com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest,com.vladimir.messenger.data.push.PushRegistrationStoreInstrumentedTest,com.vladimir.messenger.data.push.PushWakeIntegrationInstrumentedTest,com.vladimir.messenger.data.push.PushWakeInboxInstrumentedTest,com.vladimir.messenger.data.push.PushWakeDrainInstrumentedTest,com.vladimir.messenger.data.push.FirebaseClientConfigurationInstrumentedTest \
+    -Pandroid.testInstrumentationRunnerArguments.class=com.vladimir.messenger.data.notification.NotificationArrivalInstrumentedTest,com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest,com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest,com.vladimir.messenger.data.push.PushRegistrationStoreInstrumentedTest,com.vladimir.messenger.data.push.PushWakeIntegrationInstrumentedTest,com.vladimir.messenger.data.push.PushWakeInboxInstrumentedTest,com.vladimir.messenger.data.push.PushWakeDrainInstrumentedTest,com.vladimir.messenger.data.push.FirebaseClientConfigurationInstrumentedTest,com.vladimir.messenger.data.CoreLifecycleOwnershipInstrumentedTest \
     2>&1 | tee "$reports/notification.log"
 notification_gradle=${PIPESTATUS[0]}
 python3 "$root/scripts/ci/check-android-notification-results.py" \
@@ -43,6 +44,12 @@ notification_verify=$?
 save_report notification
 notification_status=0
 if [ "$notification_gradle" -ne 0 ] || [ "$notification_verify" -ne 0 ]; then
+    notification_status=1
+fi
+# The ownership check starts a disposable native engine; reset process-local
+# engine caches before the unrelated navigation suite, even if the check failed.
+if ! adb shell am force-stop com.vladimir.messenger; then
+    echo '::error::Could not isolate navigation from the native lifecycle test'
     notification_status=1
 fi
 

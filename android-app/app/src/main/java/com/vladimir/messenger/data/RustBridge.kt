@@ -16,10 +16,6 @@ import uniffi.p2p_core.createEngineDurable
 import uniffi.p2p_core.createEngineWithKeys
 import uniffi.p2p_core.getVersion
 import uniffi.p2p_core.initializeCore
-import java.util.concurrent.Callable
-import java.util.concurrent.ExecutionException
-import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicReference
 
 object RustBridge {
 
@@ -51,17 +47,8 @@ object RustBridge {
     @Volatile
     private var coreInitialized: Boolean = false
 
-    // Engine start/stop operations share one FIFO executor. In particular, a new service
-    // start is queued after the previous service's asynchronous shutdown, so lifecycle work
-    // can never race into two native engines or accidentally cancel a required stop.
-    private val lifecycleThread = AtomicReference<Thread?>()
+    private val lifecycle = CoreLifecycleQueue { message, error -> Log.e(TAG, message, error) }
     private val relayWakeYield = RelayWakeYield()
-    private val lifecycleExecutor = Executors.newSingleThreadExecutor { task ->
-        Thread(task, "apu-core-lifecycle").also { thread ->
-            thread.isDaemon = true
-            lifecycleThread.set(thread)
-        }
-    }
 
     private fun isMainThread(): Boolean {
         val mainLooper = android.os.Looper.getMainLooper() ?: return false
@@ -74,39 +61,9 @@ object RustBridge {
         return true
     }
 
-    private fun <T> onLifecycleThread(block: () -> T): T {
-        if (Thread.currentThread() === lifecycleThread.get()) return block()
-        val future = lifecycleExecutor.submit(Callable<T> { block() })
-        try {
-            return future.get()
-        } catch (e: InterruptedException) {
-            // Cancelling a WorkManager relay wake interrupts its optional wait;
-            // its finally block stops the worker-owned engine before the queue advances.
-            future.cancel(true)
-            Thread.currentThread().interrupt()
-            throw e
-        } catch (e: ExecutionException) {
-            when (val cause = e.cause) {
-                is RuntimeException -> throw cause
-                is Error -> throw cause
-                else -> throw IllegalStateException("Core lifecycle task failed", cause)
-            }
-        }
-    }
+    private fun <T> onLifecycleThread(block: () -> T): T = lifecycle.call(block)
 
-    private fun enqueueLifecycle(block: () -> Unit) {
-        try {
-            lifecycleExecutor.execute {
-                try {
-                    block()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Asynchronous core lifecycle task failed", e)
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Could not queue core lifecycle task", e)
-        }
-    }
+    private fun enqueueLifecycle(block: () -> Unit) = lifecycle.enqueue(block)
 
     /**
      * Контекст приложения для шифрования переписки. Точка отправки не suspend
@@ -205,17 +162,18 @@ object RustBridge {
         existingPublicKey: String? = null,
         existingPrivateKey: String? = null,
         relayDbPath: String? = null,
-        serviceStartupToken: Any? = null, startupAllowed: (() -> Boolean)? = null,
+        serviceStartupToken: Any? = null, serviceOwner: Any? = null, startupAllowed: (() -> Boolean)? = null,
     ): Boolean {
         if (rejectMainThreadCall("initialize")) return false
         // Signal before joining the serialized queue. Never interrupt native lifecycle calls.
         requestRelayWakeYield()
         val ticket = serviceStartupToken?.let { com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics.progress.lifecycleQueued(it) }
         return try {
-            onLifecycleThread {
-                if (startupAllowed?.invoke() == false) return@onLifecycleThread false
+            lifecycle.start(serviceOwner, startupAllowed) {
                 com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics.progress.lifecycleEntered(ticket)
-                initializeLocked(displayName, existingPublicKey, existingPrivateKey, relayDbPath)
+                val previous = engine
+                val started = initializeLocked(displayName, existingPublicKey, existingPrivateKey, relayDbPath)
+                CoreLifecycleQueue.StartResult(started, engine !== previous, engine != null)
             }
         } catch (ex: Exception) {
             Log.e(TAG, "Failed to initialize engine", ex)
@@ -233,7 +191,7 @@ object RustBridge {
         return com.vladimir.messenger.data.security.ExistingRoutingIdentity.matchesRunning(expected, actual)
     }
 
-    /** Startup shares the sidecar monitor as well as [lifecycleExecutor]. */
+    /** Startup shares the sidecar monitor as well as the lifecycle queue. */
     private fun initializeLocked(
         displayName: String,
         existingPublicKey: String?,
@@ -366,7 +324,13 @@ object RustBridge {
         enqueueLifecycle { shutdownLocked() }
     }
 
+    internal fun shutdownServiceAsync(owner: Any) {
+        requestRelayWakeYield()
+        lifecycle.stopIfOwned(owner) { shutdownLocked() }
+    }
+
     private fun shutdownLocked() {
+        lifecycle.clearOwner()
         val current = engine
         if (current == null) {
             engineRunning = false

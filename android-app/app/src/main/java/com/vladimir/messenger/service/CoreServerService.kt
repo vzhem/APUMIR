@@ -2086,7 +2086,7 @@ class CoreServerService : Service() {
         eventPollingJob?.cancel()
         filePumpJob?.cancel()
         networkMonitor?.stop()
-        RustBridge.shutdownAsync()
+        RustBridge.shutdownServiceAsync(this)
         multicastGate?.release()
         callWorkWakeLock.stop()
         coreWorkWakeLock.releaseAll()

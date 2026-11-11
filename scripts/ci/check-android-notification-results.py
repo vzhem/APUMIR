@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail when Android notification, outbox or push-storage acceptance tests did not all run."""
+"""Fail when Android notification, outbox, push-storage or core-ownership tests did not all run."""
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -12,6 +12,7 @@ PUSH_INTEGRATION_CLASS = "com.vladimir.messenger.data.push.PushWakeIntegrationIn
 PUSH_INBOX_CLASS = "com.vladimir.messenger.data.push.PushWakeInboxInstrumentedTest"
 PUSH_DRAIN_CLASS = "com.vladimir.messenger.data.push.PushWakeDrainInstrumentedTest"
 FIREBASE_CLASS = "com.vladimir.messenger.data.push.FirebaseClientConfigurationInstrumentedTest"
+CORE_LIFECYCLE_CLASS = "com.vladimir.messenger.data.CoreLifecycleOwnershipInstrumentedTest"
 EXPECTED_NOTIFICATION = {
     "migrationFortyToFortyOnePreservesHistoryAndRoomValidatesSchema",
     "migrationFortyOneToFortyTwoPreservesRowsAndIndexesSentRetries",
@@ -74,6 +75,8 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, OUTBOX_CLASS: {
 }, FIREBASE_CLASS: {
     "configuredSdkHasAutoInitDisabledWithoutTokenRequest",
     "wakeCryptoFfiRejectsInvalidInputWithoutStartingPush",
+}, CORE_LIFECYCLE_CLASS: {
+    "staleServiceStopCannotStopARealEngineAdoptedByAnotherOwner",
 }}
 
 
@@ -105,7 +108,7 @@ def check(results: Path, log: Path, status: int) -> int:
     for error in errors:
         safe = error.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
         print(f"::error::{safe}")
-    print(f"::notice::Android notification, outbox and experimental push storage tests: {len(seen & expected)}/{len(expected)}")
+    print(f"::notice::Android notification, outbox, experimental push storage and core ownership tests: {len(seen & expected)}/{len(expected)}")
     return 1 if errors else 0
 
 

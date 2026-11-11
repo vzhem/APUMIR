@@ -99,6 +99,8 @@ APP_STARTUP_PROGRESS="$BASE/main/java/com/vladimir/messenger/data/diagnostics/Ap
 APP_STARTUP_PROGRESS_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/ApplicationStartupProgressTest.kt"
 RELAY_WAKE_YIELD="$BASE/main/java/com/vladimir/messenger/data/RelayWakeYield.kt"
 RELAY_WAKE_YIELD_TEST="$BASE/test/java/com/vladimir/messenger/data/RelayWakeYieldTest.kt"
+CORE_LIFECYCLE_QUEUE="$BASE/main/java/com/vladimir/messenger/data/CoreLifecycleQueue.kt"
+CORE_LIFECYCLE_QUEUE_TEST="$BASE/test/java/com/vladimir/messenger/data/CoreLifecycleQueueTest.kt"
 CORE_SERVICE_GATE="$BASE/main/java/com/vladimir/messenger/service/CoreServiceGate.kt"
 CORE_SERVICE_GATE_TEST="$BASE/test/java/com/vladimir/messenger/service/CoreServiceGateTest.kt"
 UPDATE_DIAG_REPORT="$BASE/main/java/com/vladimir/messenger/data/diagnostics/UpdateDiagnosticsReport.kt"
@@ -221,7 +223,7 @@ PYGEN
     -no-stdlib -no-reflect -jvm-target 17 -classpath "$CP" -d "$OUT/classes" \
     "$STORY_VIDEO_DRAFT" "$STORY_VIDEO_DRAFT_TEST" "$VIDEO_AVATAR_POLICY" "$VIDEO_AVATAR_POLICY_TEST" "$AVATAR_VIDEO_WIRE" "$AVATAR_VIDEO_WIRE_TEST" "$MODEL/Message.kt" "$MODEL/MessageStatus.kt" "$MODEL/MessageChannel.kt" "$OBSERVER" "$TEST" "$PIN_POLICY" "$PIN_TEST" "$SPLASH_MATH" "$SPLASH_TEST" "$SETTINGS_LAYOUT" "$SETTINGS_TEST" "$HEART_WIRE" "$HEART_TEST" "$GROUP_PERMS" "$GROUP_PERMS_TEST" \
     "$SLOW_MODE" "$SLOW_MODE_TEST" "$QUIET_HOURS" "$QUIET_HOURS_TEST" "$POST_MANIFEST" "$BASE/main/java/com/vladimir/messenger/data/group/GroupWallpaper.kt" "$BASE/test/java/com/vladimir/messenger/data/group/GroupWallpaperTest.kt" "$GROUP_WIRE" "$GROUP_SOS" "$SOS_MESSAGE" "$TEXT_COLOR_WIRE" "$STUB_DIR/TextColorPalette.kt" "$GROUP_WIRE_TEST" "$GROUP_WIRE_UPDATE_TEST" \
-    "$OP_HEALTH" "$OP_BOUNDED_READ" "$OP_CLEANUP" "$OP_HEALTH_TEST" "$STORY_QUEUE" "$STORY_QUEUE_TEST" "$RUNTIME_HEALTH" "$RUNTIME_HEALTH_TEST" "$DIAG_REPORT" "$CORE_DIAG_STAGE" "$STARTUP_PROGRESS" "$STARTUP_PROGRESS_TEST" "$APP_STARTUP_PROGRESS" "$APP_STARTUP_PROGRESS_TEST" "$RELAY_WAKE_YIELD" "$RELAY_WAKE_YIELD_TEST" "$CORE_SERVICE_GATE" "$CORE_SERVICE_GATE_TEST" "$UPDATE_DIAG_REPORT" "$RELAY_STORAGE" "$RELAY_STORAGE_TEST" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
+    "$OP_HEALTH" "$OP_BOUNDED_READ" "$OP_CLEANUP" "$OP_HEALTH_TEST" "$STORY_QUEUE" "$STORY_QUEUE_TEST" "$RUNTIME_HEALTH" "$RUNTIME_HEALTH_TEST" "$DIAG_REPORT" "$CORE_DIAG_STAGE" "$STARTUP_PROGRESS" "$STARTUP_PROGRESS_TEST" "$APP_STARTUP_PROGRESS" "$APP_STARTUP_PROGRESS_TEST" "$RELAY_WAKE_YIELD" "$RELAY_WAKE_YIELD_TEST" "$CORE_LIFECYCLE_QUEUE" "$CORE_LIFECYCLE_QUEUE_TEST" "$CORE_SERVICE_GATE" "$CORE_SERVICE_GATE_TEST" "$UPDATE_DIAG_REPORT" "$RELAY_STORAGE" "$RELAY_STORAGE_TEST" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
     "$STORY_FEEDBACK_WIRE" "$STORY_FEEDBACK_LEDGER" "$STORY_FEEDBACK_OUTBOX" \
     "$STORY_FEEDBACK_WIRE_TEST" "$STORY_FEEDBACK_LEDGER_TEST" "$STORY_FEEDBACK_OUTBOX_TEST" \
     "$APK_UPDATE" "$UPDATE_POLICY" "$UPDATE_POLICY_TEST" "$OFFICIAL_UPDATE_POLICY" "$OFFICIAL_UPDATE_POLICY_TEST" "$COMPLETED_APK_ADOPTION" "$COMPLETED_APK_ADOPTION_TEST" \
@@ -257,6 +259,7 @@ PYGEN
     com.vladimir.messenger.data.diagnostics.ServiceStartupProgressTest \
     com.vladimir.messenger.data.diagnostics.ApplicationStartupProgressTest \
     com.vladimir.messenger.data.RelayWakeYieldTest \
+    com.vladimir.messenger.data.CoreLifecycleQueueTest \
     com.vladimir.messenger.service.CoreServiceGateTest \
     com.vladimir.messenger.data.diagnostics.RelayStorageDiagnosticsTest \
     com.vladimir.messenger.data.diagnostics.RuntimeHealthTest \

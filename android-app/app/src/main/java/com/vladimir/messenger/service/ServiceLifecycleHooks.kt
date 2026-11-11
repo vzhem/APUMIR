@@ -30,9 +30,6 @@ internal object ServiceLifecycleHooks {
         com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.tracker.count(
             com.vladimir.messenger.data.diagnostics.OperationalCounter.SERVICE_DESTROYED,
         )
-        com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.phase(
-            com.vladimir.messenger.data.diagnostics.DiagnosticPhase.SERVICE_STOP,
-        )
     }
 
     /** Служба уничтожена: [planned] — остановилась сама, а не её убили. */

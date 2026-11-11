@@ -41,5 +41,7 @@ internal class RelayCustodyReconciler(
         return more
     }
 
-    private companion object { const val PAGE_SIZE = 32 }
+    private companion object {
+        const val PAGE_SIZE = 32
+    }
 }

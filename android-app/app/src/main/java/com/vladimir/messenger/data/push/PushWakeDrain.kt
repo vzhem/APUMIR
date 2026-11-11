@@ -94,5 +94,7 @@ internal class PushWakeDrain(
         SyncOutcome.RETRY
     }
 
-    companion object { const val MAX_BATCH = 16 }
+    companion object {
+        const val MAX_BATCH = 16
+    }
 }

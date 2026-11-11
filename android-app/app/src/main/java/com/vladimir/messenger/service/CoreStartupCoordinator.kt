@@ -32,14 +32,17 @@ internal object CoreStartupCoordinator {
 
     /** Retire before queueing shutdown, so stale work cannot start an engine after that stop. */
     fun serviceDestroyed(owner: Any) {
-        gate.retire(owner) { CoreStatus.markStopped() }
+        gate.retire(owner) {
+            CoreStatus.markStopped()
+            OperationalDiagnostics.phase(DiagnosticPhase.SERVICE_STOP)
+        }
     }
 
     suspend fun initialize(owner: Any, name: String, publicKey: String, privateKey: String?, path: String): Boolean {
         currentCoroutineContext().ensureActive()
         val token = gate.ifCurrent(owner) { ServiceStartupDiagnostics.progress.currentToken() }
             ?: throw CancellationException("Service startup is no longer active")
-        val started = RustBridge.initialize(name, publicKey, privateKey, path, token) { gate.isCurrent(owner) }
+        val started = RustBridge.initialize(name, publicKey, privateKey, path, token, owner) { gate.isCurrent(owner) }
         // The blocking native call may return after onDestroy or after a newer service starts.
         currentCoroutineContext().ensureActive()
         if (!gate.isCurrent(owner)) throw CancellationException("Service startup was superseded")

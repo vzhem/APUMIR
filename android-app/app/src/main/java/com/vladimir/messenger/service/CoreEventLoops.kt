@@ -72,7 +72,9 @@ internal class CoreEventLoops<E : Any>(
         }
     }
 
-    private companion object { const val RETRY_DELAY_MS = 1_000L }
+    private companion object {
+        const val RETRY_DELAY_MS = 1_000L
+    }
 }
 
 /** Prefer a bounded burst of message/receipt events, then give service events a turn. */
@@ -87,5 +89,7 @@ internal class MainEventFairness {
         } else 0
     }
 
-    companion object { const val MAX_INTERACTIVE_BURST = 8 }
+    companion object {
+        const val MAX_INTERACTIVE_BURST = 8
+    }
 }

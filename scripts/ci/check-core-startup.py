@@ -22,11 +22,22 @@ class CoreStartupContracts(unittest.TestCase):
     def test_worker_keeps_serial_ownership_and_yields_only_the_wait(self):
         bridge = text("data/RustBridge.kt")
         init = bridge[bridge.index("    fun initialize("):bridge.index("    internal fun signingRouteCompatible")]
-        self.assertLess(init.index("requestRelayWakeYield()"), init.index("onLifecycleThread {"))
-        self.assertLess(init.index("startupAllowed?.invoke()"), init.index("initializeLocked("))
+        self.assertLess(init.index("requestRelayWakeYield()"), init.index("lifecycle.start(serviceOwner, startupAllowed)"))
+        queue = text("data/CoreLifecycleQueue.kt")
+        self.assertLess(queue.index("allowed?.invoke()"), queue.index("val result = block()"))
+        self.assertIn("if (result.engineReplaced)", queue)
+        self.assertIn("engineOwner = if (result.enginePresent) owner ?: nonServiceOwner else null", queue)
+        self.assertIn("result.started && (owner != null || engineOwner == null)", queue)
+        self.assertIn("CoreLifecycleQueue.StartResult(started, engine !== previous, engine != null)", init)
+        self.assertIn("if (engineOwner === owner)", queue)
+        self.assertIn("lifecycle.stopIfOwned(owner) { shutdownLocked() }", bridge)
+        self.assertIn("lifecycle.clearOwner()", bridge)
+        coordinator = text("service/CoreStartupCoordinator.kt")
+        self.assertIn("path, token, owner) { gate.isCurrent(owner) }", coordinator)
         service = text("service/CoreServerService.kt")
         destroy = service[service.index("override fun onDestroy()"):service.index("override fun onTaskRemoved")]
-        self.assertLess(destroy.index("ServiceLifecycleHooks.onDestroying(this)"), destroy.index("RustBridge.shutdownAsync()"))
+        self.assertLess(destroy.index("ServiceLifecycleHooks.onDestroying(this)"), destroy.index("RustBridge.shutdownServiceAsync(this)"))
+        self.assertNotIn("RustBridge.shutdownAsync()", destroy)
         hooks = text("service/ServiceLifecycleHooks.kt")
         self.assertIn("CoreStartupCoordinator.serviceDestroyed(owner)", hooks)
         wake = bridge[bridge.index("    fun runBoundedRelayWake("):bridge.index("    fun isRunningCached()")]
@@ -42,7 +53,7 @@ class CoreStartupContracts(unittest.TestCase):
         self.assertIn('if (wake.custodyMode == "yielded")', worker)
         self.assertIn("lifecycle cleanup may still be running", worker)
         self.assertNotIn("Thread.sleep(", wake)
-        self.assertIn("newSingleThreadExecutor", bridge)
+        self.assertIn("newSingleThreadExecutor", queue)
         self.assertIn("generation !== token", text("data/RelayWakeYield.kt"))
 
     def test_application_start_timing_covers_pre_service_cleanup(self):
@@ -88,7 +99,9 @@ class CoreStartupContracts(unittest.TestCase):
         self.assertIn("CoreStatus.engineStarted.value && com.vladimir.messenger.data.RustBridge.isRunningCached()", runtime)
         coordinator = text("service/CoreStartupCoordinator.kt")
         self.assertIn("gate.ifCurrent(owner) { CoreStatus.markReady(engineStarted) }", coordinator)
-        self.assertIn("gate.retire(owner) { CoreStatus.markStopped() }", coordinator)
+        self.assertIn("gate.retire(owner) {", coordinator)
+        self.assertIn("CoreStatus.markStopped()", coordinator)
+        self.assertIn("OperationalDiagnostics.phase(DiagnosticPhase.SERVICE_STOP)", coordinator)
         self.assertIn("currentCoroutineContext().ensureActive()", coordinator)
 
 
