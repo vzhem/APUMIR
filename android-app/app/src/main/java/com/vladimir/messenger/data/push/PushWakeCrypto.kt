@@ -3,6 +3,7 @@ package com.vladimir.messenger.data.push
 import java.security.MessageDigest
 import java.util.concurrent.CancellationException
 import uniffi.p2p_core.derivePushWakeMaterial
+import uniffi.p2p_core.signPushMailboxAccess
 import uniffi.p2p_core.signPushWakeRegistration
 
 /**
@@ -17,6 +18,7 @@ import uniffi.p2p_core.signPushWakeRegistration
 internal class PushWakeCrypto(
     private val derive: (ByteArray, ByteArray, ByteArray, ByteArray, Boolean) -> ByteArray = ::derivePushWakeMaterial,
     private val sign: (ByteArray, ByteArray, ByteArray, ULong, ULong, ByteArray, Boolean) -> ByteArray = ::signPushWakeRegistration,
+    private val signMailbox: (ByteArray, ByteArray, ByteArray, ULong, ByteArray, ByteArray, Boolean) -> ByteArray = ::signPushMailboxAccess,
     private val recordFailure: () -> Unit,
 ) {
     fun derive(
@@ -61,7 +63,7 @@ internal class PushWakeCrypto(
             val material = Material(
                 owner = checked.copyOfRange(0, 32), capability = checked.copyOfRange(32, 64),
                 localHash = localHash, peerHash = peerHash, epochHash = expectedEpochHash,
-                localIsSender = localIsSender, signer = sign, recordFailure = recordFailure,
+                localIsSender = localIsSender, signer = sign, mailboxSigner = signMailbox, recordFailure = recordFailure,
             )
             hashTransferred = true
             material
@@ -95,6 +97,7 @@ internal class PushWakeCrypto(
         private val epochHash: ByteArray,
         private val localIsSender: Boolean,
         private val signer: (ByteArray, ByteArray, ByteArray, ULong, ULong, ByteArray, Boolean) -> ByteArray,
+        private val mailboxSigner: (ByteArray, ByteArray, ByteArray, ULong, ByteArray, ByteArray, Boolean) -> ByteArray,
         private val recordFailure: () -> Unit,
     ) : AutoCloseable {
         private var closed = false
@@ -112,6 +115,30 @@ internal class PushWakeCrypto(
         fun wakeRequest(): PushWakeRequest? = if (!closed && localIsSender) {
             PushWakeRequest(hex(owner), hex(capability))
         } else null
+
+        /** Prepare only an owner-signed pull for this registered receiver route. */
+        fun mailboxPull(
+            localBinding: ByteArray, pinnedPeerBinding: ByteArray, state: PushRegistrationState.State,
+            issuedAtSeconds: Long, after: String,
+        ): PushMailboxPullRequest? {
+            if (closed || localIsSender) return null
+            return PushMailboxAccessSigner(mailboxSigner, recordFailure).pull(
+                owner, capability, localHash, peerHash, epochHash, { !closed },
+                localBinding, pinnedPeerBinding, state, issuedAtSeconds, after,
+            )
+        }
+
+        /** A caller may ACK only after authenticated opening and durable local processing. */
+        fun mailboxAck(
+            localBinding: ByteArray, pinnedPeerBinding: ByteArray, state: PushRegistrationState.State,
+            issuedAtSeconds: Long, receipts: List<PushMailboxReceipt>,
+        ): PushMailboxAckRequest? {
+            if (closed || localIsSender) return null
+            return PushMailboxAccessSigner(mailboxSigner, recordFailure).ack(
+                owner, capability, localHash, peerHash, epochHash, { !closed },
+                localBinding, pinnedPeerBinding, state, issuedAtSeconds, receipts,
+            )
+        }
 
         /**
          * Sign only the matching, durably reserved operation for this receiver.

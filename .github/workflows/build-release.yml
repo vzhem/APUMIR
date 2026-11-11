@@ -193,6 +193,7 @@ jobs:
             engine::core::broker_settings::tests \
             crypto::push_capability::tests \
             crypto::push_registration::tests \
+            crypto::mailbox_access::tests \
             push_ffi::tests \
             network::mdns::tests::browse_round_never_replays_an_old_node_without_a_resolution \
             engine::core::tests::direct_personal_presence_emits_each_fresh_observation_but_not_stale_or_future \
@@ -395,6 +396,11 @@ jobs:
                   for name, count in broken:
                       out.write(f"- `{name}`: {count} failing\n")
           PY
+          if [ "$status" -eq 0 ]; then
+            python3 ../scripts/ci/check-push-mailbox-jvm-results.py app/build/test-results/testReleaseUnitTest
+            guard_status=$?
+            if [ "$guard_status" -ne 0 ]; then status="$guard_status"; fi
+          fi
           exit "$status"
 
       - name: Upload unit test report

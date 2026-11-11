@@ -167,6 +167,24 @@ class PushWakeIntegrationInstrumentedTest {
             val confirmed = (journal.registered(
                 participants, attempt.sequence, PushWakeCrypto.tokenFingerprint(token)!!, 1_700_000_000_001, expectedRoute,
             ) as PushRegistrationStore.Result.Ready).state
+            // Real restricted Rust signing and UniFFI against the same vectors as
+            // the Worker; still no HTTP, scheduler or real message commit here.
+            val mailboxReceiver = crypto.derive(bob, pinnedAlice, ByteArray(32) { 4 }, confirmed.epochHex, false)!!
+            try {
+                val pullSignature = "8283a87b9ae172188e4c7dd879bb456d0474eba22acf0f8f3b83d56b5f87f22533506e7a5eb3256263b65d3581c6c1d3f2502f4416347aab80212ba486b2d00f"
+                val resumedSignature = "5df1c4eaa4fb6b02de113ddfcdaba5f7cd5841538e23c160986babaf8c0e86239aa9d5d2f108edf4d16fd7e751f811d285613e419d5afcebeed6ec0c56dd3c0f"
+                val ackSignature = "9e5945387e6560401b96bf3ddedf5914f34f7665e0cd517b797498785535d9dae0972f64a26c661bf5578137616ca994408ae6fd23982422e1bf1a400e96e40e"
+                val first = PushMailboxReceipt("11".repeat(16), "22".repeat(16))
+                val second = PushMailboxReceipt("33".repeat(16), "44".repeat(16))
+                val pull = mailboxReceiver.mailboxPull(bob, pinnedAlice, confirmed, 1_700_000_000, "-")!!
+                assertEquals("{\"owner\":\"$owner\",\"capability\":\"$capability\",\"device\":\"$device\",\"issuedAt\":1700000000,\"after\":\"-\",\"signature\":\"$pullSignature\"}", pull.toJsonBytes().toString(Charsets.US_ASCII))
+                val resumed = mailboxReceiver.mailboxPull(bob, pinnedAlice, confirmed, 1_700_000_000, second.id)!!
+                assertEquals("{\"owner\":\"$owner\",\"capability\":\"$capability\",\"device\":\"$device\",\"issuedAt\":1700000000,\"after\":\"${second.id}\",\"signature\":\"$resumedSignature\"}", resumed.toJsonBytes().toString(Charsets.US_ASCII))
+                val ack = mailboxReceiver.mailboxAck(bob, pinnedAlice, confirmed, 1_700_000_000, listOf(first, second))!!
+                assertEquals("{\"owner\":\"$owner\",\"capability\":\"$capability\",\"device\":\"$device\",\"issuedAt\":1700000000,\"items\":[{\"id\":\"${first.id}\",\"receipt\":\"${first.receipt}\"},{\"id\":\"${second.id}\",\"receipt\":\"${second.receipt}\"}],\"signature\":\"$ackSignature\"}", ack.toJsonBytes().toString(Charsets.US_ASCII))
+                assertNull(mailboxReceiver.mailboxPull(bob, changedAlice, confirmed, 1_700_000_000, "-"))
+                assertNull(mailboxReceiver.mailboxAck(bob, pinnedAlice, confirmed, 1_700_000_000, listOf(second, first)))
+            } finally { mailboxReceiver.close() }
             val indexed = journal.findRoute(expectedRoute) as PushRegistrationStore.RouteResult.Found
             assertEquals(bobId, indexed.localId)
             assertEquals(aliceId, indexed.peerId)
@@ -235,6 +253,20 @@ class PushWakeIntegrationInstrumentedTest {
             val pushSealer = PushEpochEnvelope(recordFailure = { error("unexpected test envelope failure") })
             assertNull(pushSealer.seal(confirmed, bob, bob, ByteArray(32) { 4 }))
             val wire = pushSealer.seal(confirmed, bob, pinnedAlice, ByteArray(32) { 4 })!!
+            // The strict mailbox codec must accept the real app envelope, not
+            // just the synthetic Base64 fixtures used by the Worker tests.
+            assertTrue(PushMailboxProtocol.validEnvelope(wire))
+            val mailboxId = "11".repeat(16)
+            val mailboxReceipt = "22".repeat(16)
+            val mailboxPage = ("{\"items\":[{\"id\":\"$mailboxId\",\"envelope\":\"$wire\"," +
+                "\"expiresAt\":1700604800000,\"receipt\":\"$mailboxReceipt\"}],\"next\":\"$mailboxId\"}")
+                .toByteArray(Charsets.US_ASCII)
+            try {
+                val parsed = PushMailboxResponseCodec.page(mailboxPage)!!
+                assertEquals(wire, parsed.items.single().envelope)
+                assertEquals(mailboxReceipt, parsed.items.single().receipt)
+                assertEquals(mailboxId, parsed.next)
+            } finally { mailboxPage.fill(0) }
             installIdentitySigningSeed(1.toUByte(), aliceId, ByteArray(32) { 1 })
             var wrongIdentityFailures = 0
             assertNull(PushEpochEnvelope(recordFailure = { wrongIdentityFailures++ })
@@ -256,6 +288,8 @@ class PushWakeIntegrationInstrumentedTest {
             assertFalse(PushControlIngress.isReserved(wire))
             assertTrue(PushControlIngress.isReserved(opened))
             val altered = parts.ciphertext.copyOf().also { it[0] = (it[0].toInt() xor 1).toByte() }
+            // Passing mailbox structure checks is not authentication.
+            assertTrue(PushMailboxProtocol.validEnvelope(SealedWire.encode(parts.keyEnvelope, parts.iv, altered)))
             assertNotNull(runCatching {
                 openFileKeyEnvelope(parts.keyEnvelope, alice, ByteArray(32) { 3 }, manifest(altered))
             }.exceptionOrNull())

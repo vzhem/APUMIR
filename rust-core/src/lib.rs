@@ -17,7 +17,7 @@ pub mod storage;
 pub mod sync;
 pub mod resilience;
 mod push_ffi;
-pub use push_ffi::{derive_push_wake_material, sign_push_wake_registration};
+pub use push_ffi::{derive_push_wake_material, sign_push_mailbox_access, sign_push_wake_registration};
 
 use engine::core::{EngineConfig, P2PCore};
 use engine::events::CoreEvent;

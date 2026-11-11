@@ -13,6 +13,10 @@ test("receiver-access Ed25519 vectors bind route, action, cursor and each receip
   assert.equal(pull.signature, "8283a87b9ae172188e4c7dd879bb456d0474eba22acf0f8f3b83d56b5f87f22533506e7a5eb3256263b65d3581c6c1d3f2502f4416347aab80212ba486b2d00f");
   assert.ok(validMailboxAccess(pull, "pull", common.issuedAt));
   assert.ok(await verifyMailboxAccess(pull, "pull"));
+  const resumed = access(vectorKey, "pull", { ...common, after: "33".repeat(16) });
+  assert.equal(resumed.signature, "5df1c4eaa4fb6b02de113ddfcdaba5f7cd5841538e23c160986babaf8c0e86239aa9d5d2f108edf4d16fd7e751f811d285613e419d5afcebeed6ec0c56dd3c0f");
+  assert.ok(validMailboxAccess(resumed, "pull", common.issuedAt));
+  assert.ok(await verifyMailboxAccess(resumed, "pull"));
   assert.equal(await verifyMailboxAccess({ ...pull, after: "11".repeat(16) }, "pull"), false);
   assert.equal(await verifyMailboxAccess({ ...pull, device: "77".repeat(16) }, "pull"), false);
   assert.equal(await verifyMailboxAccess({ ...pull, capability: "99".repeat(32) }, "pull"), false);

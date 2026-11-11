@@ -112,6 +112,12 @@ namespace p2p_core {
     [Throws=CoreError]
     bytes sign_push_wake_registration(bytes local_binding, bytes capability, bytes device, u64 sequence, u64 issued_at_seconds, bytes token, boolean revoke);
 
+    // Restricted mailbox pull/ack signature, owner public key || signature.
+    // Pull: after is empty or 16 bytes, items empty. Ack: after empty, items
+    // contain 1..16 sorted (16-byte id, 16-byte receipt) pairs. No networking.
+    [Throws=CoreError]
+    bytes sign_push_mailbox_access(bytes local_binding, bytes capability, bytes device, u64 issued_at_seconds, bytes after, bytes items, boolean acknowledge);
+
     // F1 bounded functional crypto seam. File keys are borrowed for one call and wiped in Rust;
     // callers must keep them transient until the device-bound transfer key vault is wired.
     [Throws=CoreError]

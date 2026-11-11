@@ -64,7 +64,7 @@ internal class PushHttpClient(
 /** An exact hostname allowlist plus strict HTTPS; redirects are never followed. */
 internal class PushEndpoint private constructor(private val authority: String) {
     internal fun url(path: String): java.net.URL {
-        require(path == "/v1/registration" || path == "/v1/wake")
+        require(path in setOf("/v1/registration", "/v1/wake", "/v1/mailbox/put", "/v1/mailbox/pull", "/v1/mailbox/ack"))
         return URI("https://$authority$path").toURL()
     }
 

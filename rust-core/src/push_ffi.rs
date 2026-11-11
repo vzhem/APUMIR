@@ -7,6 +7,7 @@
 //! Zeroizing covers the Rust-owned inputs on every return/unwind, not copies in
 //! UniFFI, Java, cryptographic internals, or the returned capability buffer.
 
+use crate::crypto::mailbox_access::{sign_mailbox_access, MailboxAccess};
 use crate::crypto::push_capability::derive_push_capability;
 use crate::crypto::push_registration::{sign_push_registration, PushRegistrationAction};
 use crate::CoreError;
@@ -77,6 +78,33 @@ pub fn sign_push_wake_registration(
     Ok(output)
 }
 
+/// Returns owner public key || signature for a constrained mailbox pull/ack.
+/// Pull has an empty or 16-byte cursor and no items. Ack has an empty cursor
+/// and 1..=16 packed 16-byte (id, receipt) pairs, strictly ordered by id.
+/// This does not perform networking or authenticate the current peer pin.
+pub fn sign_push_mailbox_access(
+    local_binding: Vec<u8>,
+    capability: Vec<u8>,
+    device: Vec<u8>,
+    issued_at_seconds: u64,
+    after: Vec<u8>,
+    items: Vec<u8>,
+    acknowledge: bool,
+) -> Result<Vec<u8>, CoreError> {
+    let capability = Zeroizing::new(capability);
+    let after = Zeroizing::new(after);
+    let items = Zeroizing::new(items);
+    if !valid_binding(&local_binding) || (!acknowledge && !items.is_empty()) || (acknowledge && !after.is_empty()) {
+        return Err(bad("invalid mailbox access input"));
+    }
+    let access = if acknowledge { MailboxAccess::Ack { items: &items } } else { MailboxAccess::Pull { after: &after } };
+    let signed = sign_mailbox_access(&local_binding, &capability, &device, issued_at_seconds, access).map_err(bad)?;
+    let mut output = Vec::with_capacity(96);
+    output.extend_from_slice(&signed.owner_signing_public_key);
+    output.extend_from_slice(&signed.signature);
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,6 +145,28 @@ mod tests {
         assert_eq!(hex(&signature[32..]), "51d08645a428e7615aaf8cec4d606f9c2a0b65f98a3703844cd0a10156ba10c67971f74b6ee86a90374c37343bd714b82f18560c0b8c389e8297ae1ef178af03");
         sender.zeroize();
         receiver.zeroize();
+        clear_signing_identity();
+    }
+
+    #[test]
+    fn mailbox_ffi_accepts_only_the_constrained_pull_and_ack_formats() {
+        let _guard = signing_identity_registry_guard();
+        clear_signing_identity();
+        let bob = binding('2', 2, 4);
+        install_signing_identity(1, legacy('2'), &[2; 32]).unwrap();
+        let cap = vec![7; 32];
+        let device = vec![0x56; 16];
+        let pull = sign_push_mailbox_access(bob.clone(), cap.clone(), device.clone(), 1_700_000_000, vec![], vec![], false).unwrap();
+        assert_eq!(pull.len(), 96);
+        assert_eq!(hex(&pull[..32]), "8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394");
+        let mut item = vec![0x11; 16];
+        item.extend_from_slice(&[0x22; 16]);
+        assert_eq!(sign_push_mailbox_access(bob.clone(), cap.clone(), device.clone(), 1, vec![], item.clone(), true).unwrap().len(), 96);
+        assert!(sign_push_mailbox_access(bob.clone(), cap.clone(), device.clone(), 1, vec![], item.clone(), false).is_err());
+        assert!(sign_push_mailbox_access(bob.clone(), cap.clone(), device.clone(), 1, vec![1; 16], item.clone(), true).is_err());
+        assert!(sign_push_mailbox_access(bob.clone(), cap.clone(), device.clone(), 1, vec![], vec![], true).is_err());
+        install_signing_identity(1, legacy('1'), &[1; 32]).unwrap();
+        assert!(sign_push_mailbox_access(bob, cap, device, 1, vec![], item, true).is_err());
         clear_signing_identity();
     }
 

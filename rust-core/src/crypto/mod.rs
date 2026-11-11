@@ -56,6 +56,7 @@ pub mod handshake;
 pub mod identity;
 pub mod kdf;
 pub mod keys;
+pub mod mailbox_access;
 pub mod push_capability;
 pub mod push_registration;
 pub mod keystore;
