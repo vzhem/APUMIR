@@ -114,7 +114,7 @@ class PresenceWiring(unittest.TestCase):
         self.assertIn("DeliveryAssurance.currentProcessLastAliveMs()", worker)
         self.assertNotIn("shouldWakeNow(status.conditions, status.lastAliveMs", keep + worker)
         stopped = section(keep, "fun onServiceStopped", "fun onTaskRemoved")
-        self.assertIn("DeliveryAssurance.invalidateLastAlive()", stopped)
+        self.assertIn("if (!DeliveryAssurance.serviceStopped(owner))", stopped)
         self.assertIn("DeliveryWakePolicy.afterRefusal(", stopped)
         receiver = section(keep, "class EmergencyKeepAliveReceiver", "object EmergencyKeepAlive")
         self.assertNotIn("invalidateLastAlive()", receiver)

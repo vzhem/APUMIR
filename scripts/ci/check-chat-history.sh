@@ -113,6 +113,10 @@ PUSH_INBOX_MODEL="$OUT/stubs/com/vladimir/messenger/data/push/PushWakeInbox.kt"
 python3 "$ROOT/scripts/ci/generate-push-inbox-model.py" "$PUSH_SOURCE/PushWakeInbox.kt" "$PUSH_INBOX_MODEL"
 CORE_SERVICE_GATE="$BASE/main/java/com/vladimir/messenger/service/CoreServiceGate.kt"
 CORE_SERVICE_GATE_TEST="$BASE/test/java/com/vladimir/messenger/service/CoreServiceGateTest.kt"
+PROCESS_HEARTBEAT="$BASE/main/java/com/vladimir/messenger/service/ProcessHeartbeat.kt"
+PROCESS_HEARTBEAT_TEST="$BASE/test/java/com/vladimir/messenger/service/ProcessHeartbeatTest.kt"
+DELIVERY_WAKE_POLICY="$BASE/main/java/com/vladimir/messenger/service/DeliveryWakePolicy.kt"
+DELIVERY_WAKE_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/service/DeliveryWakePolicyTest.kt"
 UPDATE_DIAG_REPORT="$BASE/main/java/com/vladimir/messenger/data/diagnostics/UpdateDiagnosticsReport.kt"
 RELAY_STORAGE="$BASE/main/java/com/vladimir/messenger/data/diagnostics/RelayStorageDiagnostics.kt"
 RELAY_STORAGE_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/RelayStorageDiagnosticsTest.kt"
@@ -233,7 +237,7 @@ PYGEN
     -no-stdlib -no-reflect -jvm-target 17 -classpath "$CP" -d "$OUT/classes" \
     "$STORY_VIDEO_DRAFT" "$STORY_VIDEO_DRAFT_TEST" "$VIDEO_AVATAR_POLICY" "$VIDEO_AVATAR_POLICY_TEST" "$AVATAR_VIDEO_WIRE" "$AVATAR_VIDEO_WIRE_TEST" "$MODEL/Message.kt" "$MODEL/MessageStatus.kt" "$MODEL/MessageChannel.kt" "$OBSERVER" "$TEST" "$PIN_POLICY" "$PIN_TEST" "$SPLASH_MATH" "$SPLASH_TEST" "$SETTINGS_LAYOUT" "$SETTINGS_TEST" "$HEART_WIRE" "$HEART_TEST" "$GROUP_PERMS" "$GROUP_PERMS_TEST" \
     "$SLOW_MODE" "$SLOW_MODE_TEST" "$QUIET_HOURS" "$QUIET_HOURS_TEST" "$POST_MANIFEST" "$BASE/main/java/com/vladimir/messenger/data/group/GroupWallpaper.kt" "$BASE/test/java/com/vladimir/messenger/data/group/GroupWallpaperTest.kt" "$GROUP_WIRE" "$GROUP_SOS" "$SOS_MESSAGE" "$TEXT_COLOR_WIRE" "$STUB_DIR/TextColorPalette.kt" "$GROUP_WIRE_TEST" "$GROUP_WIRE_UPDATE_TEST" \
-    "$OP_HEALTH" "$OP_BOUNDED_READ" "$OP_CLEANUP" "$OP_HEALTH_TEST" "$STORY_QUEUE" "$STORY_QUEUE_TEST" "$RUNTIME_HEALTH" "$RUNTIME_HEALTH_TEST" "$DIAG_REPORT" "$CORE_DIAG_STAGE" "$STARTUP_PROGRESS" "$STARTUP_PROGRESS_TEST" "$APP_STARTUP_PROGRESS" "$APP_STARTUP_PROGRESS_TEST" "$RELAY_WAKE_YIELD" "$RELAY_WAKE_YIELD_TEST" "$CORE_LIFECYCLE_QUEUE" "$CORE_LIFECYCLE_QUEUE_TEST" "$CORE_ENGINE_SLOT" "$CORE_ENGINE_SLOT_TEST" "$PUSH_SCHEDULE_GATE" "$PUSH_SCHEDULE_GATE_TEST" "$CORE_SERVICE_GATE" "$CORE_SERVICE_GATE_TEST" "$UPDATE_DIAG_REPORT" "$RELAY_STORAGE" "$RELAY_STORAGE_TEST" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
+    "$OP_HEALTH" "$OP_BOUNDED_READ" "$OP_CLEANUP" "$OP_HEALTH_TEST" "$STORY_QUEUE" "$STORY_QUEUE_TEST" "$RUNTIME_HEALTH" "$RUNTIME_HEALTH_TEST" "$DIAG_REPORT" "$CORE_DIAG_STAGE" "$STARTUP_PROGRESS" "$STARTUP_PROGRESS_TEST" "$APP_STARTUP_PROGRESS" "$APP_STARTUP_PROGRESS_TEST" "$RELAY_WAKE_YIELD" "$RELAY_WAKE_YIELD_TEST" "$CORE_LIFECYCLE_QUEUE" "$CORE_LIFECYCLE_QUEUE_TEST" "$CORE_ENGINE_SLOT" "$CORE_ENGINE_SLOT_TEST" "$PUSH_SCHEDULE_GATE" "$PUSH_SCHEDULE_GATE_TEST" "$CORE_SERVICE_GATE" "$CORE_SERVICE_GATE_TEST" "$PROCESS_HEARTBEAT" "$PROCESS_HEARTBEAT_TEST" "$DELIVERY_WAKE_POLICY" "$DELIVERY_WAKE_POLICY_TEST" "$UPDATE_DIAG_REPORT" "$RELAY_STORAGE" "$RELAY_STORAGE_TEST" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
     "$PUSH_INBOX_MODEL" "$PUSH_SOURCE/PushWakeQueue.kt" "$PUSH_SOURCE/PushWakeDrain.kt" "$PUSH_TESTS/PushWakeDrainTest.kt" \
     "$PUSH_SOURCE/PushEpochProtocol.kt" "$PUSH_SOURCE/PushRegistrationState.kt" "$PUSH_SOURCE/PushWakeAdmission.kt" "$PUSH_TESTS/PushWakeAdmissionTest.kt" \
     "$PUSH_SOURCE/PushWakeIntake.kt" "$PUSH_TESTS/PushWakeIntakeTest.kt" "$PUSH_SOURCE/PushWakeDispatcher.kt" "$PUSH_TESTS/PushWakeDispatcherTest.kt" \
@@ -280,6 +284,8 @@ PYGEN
     com.vladimir.messenger.data.push.PushWakeDispatcherTest \
     com.vladimir.messenger.data.push.PushWakeDrainTest \
     com.vladimir.messenger.service.CoreServiceGateTest \
+    com.vladimir.messenger.service.ProcessHeartbeatTest \
+    com.vladimir.messenger.service.DeliveryWakePolicyTest \
     com.vladimir.messenger.data.diagnostics.RelayStorageDiagnosticsTest \
     com.vladimir.messenger.data.diagnostics.RuntimeHealthTest \
     com.vladimir.messenger.data.diagnostics.OperationalHealthTest \

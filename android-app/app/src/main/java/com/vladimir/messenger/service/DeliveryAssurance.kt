@@ -135,14 +135,16 @@ object DeliveryAssurance {
         }.getOrDefault(false)
     }
 
-    /** A real service start forces a new local heartbeat and updates UI history. */
-    fun serviceStarted(context: Context, nowMs: Long = System.currentTimeMillis()) {
-        heartbeat.started(nowMs) { prefs(context).edit().putLong(KEY_LAST_ALIVE_MS, it).apply() }
-    }
+    /** Register at onCreate so a refusal before onStartCommand still has an owner. */
+    internal fun serviceCreated(owner: Any) = heartbeat.created(owner)
 
-    /** Pulse only while the service is active; persisted UI history is throttled. */
-    fun markAlive(context: Context, nowMs: Long = System.currentTimeMillis()) {
-        heartbeat.pulse(nowMs) { prefs(context).edit().putLong(KEY_LAST_ALIVE_MS, it).apply() }
+    /** A real service start forces a new local heartbeat and updates UI history. */
+    internal fun serviceStarted(context: Context, owner: Any, nowMs: Long = System.currentTimeMillis()): Boolean =
+        heartbeat.started(owner, nowMs) { prefs(context).edit().putLong(KEY_LAST_ALIVE_MS, it).apply() }
+
+    /** Only the current service's pulse may extend its heartbeat. */
+    fun markAlive(context: Context, owner: Any, nowMs: Long = System.currentTimeMillis()) {
+        heartbeat.pulse(owner, nowMs) { prefs(context).edit().putLong(KEY_LAST_ALIVE_MS, it).apply() }
     }
 
     fun lastAliveMs(context: Context): Long = prefs(context).getLong(KEY_LAST_ALIVE_MS, 0L)
@@ -150,8 +152,9 @@ object DeliveryAssurance {
     /** Unlike the UI timestamp, this value cannot survive a process restart. */
     fun currentProcessLastAliveMs(): Long = heartbeat.lastForWake()
 
-    /** A late polling callback cannot make an actually stopped service live. */
-    fun invalidateLastAlive() = heartbeat.stopped()
+    internal fun isServiceOwner(owner: Any): Boolean = heartbeat.owns(owner)
+    internal fun serviceRefused(owner: Any): Boolean = heartbeat.refused(owner)
+    internal fun serviceStopped(owner: Any): Boolean = heartbeat.stopped(owner)
 
     /** Записать попытку пробуждения: число видно в настройках и диагностике. */
     fun noteWake(context: Context, nowMs: Long = System.currentTimeMillis()) {

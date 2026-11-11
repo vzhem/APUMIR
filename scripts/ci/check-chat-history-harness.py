@@ -118,6 +118,16 @@ class HistoryHarnessIsComplete(unittest.TestCase):
         self.assertIn("generate-push-inbox-model.py", script)
         self.assertIn('"$PUSH_INBOX_MODEL"', script)
 
+    def test_heartbeat_ownership_and_wake_policy_are_compiled_and_run(self):
+        files = compiled_files()
+        main = MAIN / "com/vladimir/messenger/service"
+        tests = ROOT / "android-app/app/src/test/java/com/vladimir/messenger/service"
+        script = SCRIPT.read_text()
+        for name in ("ProcessHeartbeat", "DeliveryWakePolicy"):
+            self.assertIn(main / (name + ".kt"), files)
+            self.assertIn(tests / (name + "Test.kt"), files)
+            self.assertIn("com.vladimir.messenger.service." + name + "Test", script)
+
     def test_push_inbox_stub_is_extracted_and_fails_on_unknown_shape(self):
         generator = runpy.run_path(str(ROOT / "scripts/ci/generate-push-inbox-model.py"))["generate"]
         source = (MAIN / "com/vladimir/messenger/data/push/PushWakeInbox.kt").read_text()

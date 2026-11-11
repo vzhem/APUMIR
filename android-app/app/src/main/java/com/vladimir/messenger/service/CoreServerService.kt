@@ -605,7 +605,7 @@ class CoreServerService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        CoreStartupCoordinator.serviceCreated(this)
+        ServiceLifecycleHooks.onCreated(this)
         Log.i(TAG, "CoreServerService created")
         TransferDiagnostics.record("core", "служба ядра запускается")
         // CPU бодрствует только на время работы (события/файлы/звонок), а не
@@ -721,7 +721,7 @@ class CoreServerService : Service() {
             // сервис молча не работал, и причина нигде не появлялась.
             OperationalDiagnostics.tracker.count(OperationalCounter.FOREGROUND_START_REFUSED)
             Log.w(TAG, "startForeground refused (sdk=" + Build.VERSION.SDK_INT + ")", e)
-            runCatching { EmergencyKeepAlive.onServiceRefused(applicationContext) }
+            runCatching { EmergencyKeepAlive.onServiceRefused(applicationContext, this@CoreServerService) }
             stopSelf()
             false
         }
@@ -737,7 +737,7 @@ class CoreServerService : Service() {
     override fun onTimeout(startId: Int, fgsType: Int) {
         OperationalDiagnostics.tracker.count(OperationalCounter.FOREGROUND_TIMEOUT)
         Log.w(TAG, "foreground timeout (type=" + fgsType + "); stopping and rescheduling")
-        runCatching { EmergencyKeepAlive.onServiceRefused(applicationContext) }
+        runCatching { EmergencyKeepAlive.onServiceRefused(applicationContext, this@CoreServerService) }
         stopSelf(startId)
     }
 
@@ -782,7 +782,7 @@ class CoreServerService : Service() {
         // сутки в Doze. Теперь сервис живёт и держит одну неточную страховку
         // в час; настойчивая лестница 5→15→30→60 минут включается только
         // когда сервис поднять не удалось (EmergencyKeepAlive.onServiceRefused).
-        EmergencyKeepAlive.onServiceStarted(applicationContext)
+        EmergencyKeepAlive.onServiceStarted(applicationContext, this@CoreServerService)
 
         // The keep-alive alarm (and network restarts) can deliver another start intent to the
         // same Service instance. Foreground notification/alarm maintenance above is safe to repeat;
@@ -2091,13 +2091,13 @@ class CoreServerService : Service() {
         callWorkWakeLock.stop()
         coreWorkWakeLock.releaseAll()
         // «Убили» — быстрый подъём; осознанный перезапуск (reconnect) сюда не относится.
-        ServiceLifecycleHooks.onDestroyed(applicationContext, planned = intentionalRestart)
+        ServiceLifecycleHooks.onDestroyed(applicationContext, this@CoreServerService, planned = intentionalRestart)
         super.onDestroy()
     }
 
     /** Смахивание из задач: запланировать локальную попытку восстановления. */
     override fun onTaskRemoved(rootIntent: Intent?) {
-        ServiceLifecycleHooks.onTaskRemoved(applicationContext)
+        ServiceLifecycleHooks.onTaskRemoved(applicationContext, this@CoreServerService)
         super.onTaskRemoved(rootIntent)
     }
 
@@ -2147,7 +2147,7 @@ class CoreServerService : Service() {
                 }
             } },
             refreshStatus = {
-                runCatching { DeliveryAssurance.markAlive(applicationContext) }
+                runCatching { DeliveryAssurance.markAlive(applicationContext, this@CoreServerService) }
                 updateNotification(notificationText(RustBridge.networkStatus(), RustBridge.connectedPeers()))
             },
             recordFailure = { where, error -> Log.e(TAG, "$where failed", error) },

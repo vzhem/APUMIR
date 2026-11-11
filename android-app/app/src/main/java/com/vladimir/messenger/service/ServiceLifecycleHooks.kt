@@ -24,6 +24,12 @@ import android.content.Context
  */
 internal object ServiceLifecycleHooks {
 
+    /** Android delivers creation in order; register ownership before foreground entry. */
+    fun onCreated(owner: Context) {
+        CoreStartupCoordinator.serviceCreated(owner)
+        EmergencyKeepAlive.onServiceCreated(owner)
+    }
+
     /** Retire the owner before native shutdown is enqueued; never wait for native here. */
     fun onDestroying(owner: Context) {
         CoreStartupCoordinator.serviceDestroyed(owner)
@@ -33,12 +39,12 @@ internal object ServiceLifecycleHooks {
     }
 
     /** Служба уничтожена: [planned] — остановилась сама, а не её убили. */
-    fun onDestroyed(context: Context, planned: Boolean) {
-        runCatching { EmergencyKeepAlive.onServiceStopped(context, intentional = planned) }
+    fun onDestroyed(context: Context, owner: Any, planned: Boolean) {
+        runCatching { EmergencyKeepAlive.onServiceStopped(context, owner, intentional = planned) }
     }
 
     /** Приложение убрали из списка задач: быстрый подъём. */
-    fun onTaskRemoved(context: Context) {
-        runCatching { EmergencyKeepAlive.onTaskRemoved(context) }
+    fun onTaskRemoved(context: Context, owner: Any) {
+        runCatching { EmergencyKeepAlive.onTaskRemoved(context, owner) }
     }
 }

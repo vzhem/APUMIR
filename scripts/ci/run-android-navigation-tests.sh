@@ -31,11 +31,11 @@ if [ "$storage_status" -ne 0 ]; then
 fi
 
 # Exercise Room upgrade, notification/restore, outbox fairness and experimental
-# push storage and a disposable native-engine ownership check; never accept a
-# green task that silently skipped acceptance cases.
+# push storage, heartbeat ownership and a disposable native-engine ownership
+# check; never accept a green task that silently skipped acceptance cases.
 clear_report
 ./gradlew :app:connectedDebugAndroidTest --no-daemon \
-    -Pandroid.testInstrumentationRunnerArguments.class=com.vladimir.messenger.data.notification.NotificationArrivalInstrumentedTest,com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest,com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest,com.vladimir.messenger.data.push.PushRegistrationStoreInstrumentedTest,com.vladimir.messenger.data.push.PushWakeIntegrationInstrumentedTest,com.vladimir.messenger.data.push.PushWakeInboxInstrumentedTest,com.vladimir.messenger.data.push.PushWakeDrainInstrumentedTest,com.vladimir.messenger.data.push.FirebaseClientConfigurationInstrumentedTest,com.vladimir.messenger.data.CoreLifecycleOwnershipInstrumentedTest \
+    -Pandroid.testInstrumentationRunnerArguments.class=com.vladimir.messenger.data.notification.NotificationArrivalInstrumentedTest,com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest,com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest,com.vladimir.messenger.data.push.PushRegistrationStoreInstrumentedTest,com.vladimir.messenger.data.push.PushWakeIntegrationInstrumentedTest,com.vladimir.messenger.data.push.PushWakeInboxInstrumentedTest,com.vladimir.messenger.data.push.PushWakeDrainInstrumentedTest,com.vladimir.messenger.data.push.FirebaseClientConfigurationInstrumentedTest,com.vladimir.messenger.data.CoreLifecycleOwnershipInstrumentedTest,com.vladimir.messenger.service.DeliveryHeartbeatInstrumentedTest \
     2>&1 | tee "$reports/notification.log"
 notification_gradle=${PIPESTATUS[0]}
 python3 "$root/scripts/ci/check-android-notification-results.py" \

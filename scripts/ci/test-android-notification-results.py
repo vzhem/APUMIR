@@ -45,6 +45,8 @@ class NotificationResultsTest(unittest.TestCase):
         self.assertEqual(1, self.run_report(missing_firebase))
         missing_lifecycle = [case for case in self.all_cases() if case[0] != checker.CORE_LIFECYCLE_CLASS]
         self.assertEqual(1, self.run_report(missing_lifecycle))
+        missing_heartbeat = [case for case in self.all_cases() if case[0] != checker.HEARTBEAT_CLASS]
+        self.assertEqual(1, self.run_report(missing_heartbeat))
 
     def test_skipped_and_failed_cases_fail(self):
         for tag in ("skipped", "failure", "error"):

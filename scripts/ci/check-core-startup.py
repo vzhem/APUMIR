@@ -15,7 +15,10 @@ class CoreStartupContracts(unittest.TestCase):
     def test_service_signals_yield_before_preparing_keys(self):
         service = text("service/CoreServerService.kt")
         create = service[service.index("override fun onCreate()"):service.index("override fun onStartCommand")]
-        self.assertIn("CoreStartupCoordinator.serviceCreated(this)", create)
+        self.assertIn("ServiceLifecycleHooks.onCreated(this)", create)
+        hooks = text("service/ServiceLifecycleHooks.kt")
+        self.assertIn("CoreStartupCoordinator.serviceCreated(owner)", hooks)
+        self.assertIn("EmergencyKeepAlive.onServiceCreated(owner)", hooks)
         coordinator = text("service/CoreStartupCoordinator.kt")
         self.assertLess(coordinator.index("RustBridge.requestRelayWakeYield()"), coordinator.index("CoreStatus.markStarting()"))
 

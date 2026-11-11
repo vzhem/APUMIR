@@ -122,10 +122,10 @@ class DeliveryWakeContract(unittest.TestCase):
                       "осознанная остановка — редкая страховка, а не круг из двух минут")
 
     def test_swiped_app_wakes_through_on_task_removed(self):
-        self.assertIn("fun onTaskRemoved(context: Context)", self.keep_alive)
+        self.assertIn("fun onTaskRemoved(context: Context, owner: Any)", self.keep_alive)
         self.assertIn("DeliveryWakePolicy.taskRemoved(", self.keep_alive)
-        self.assertIn("override fun onTaskRemoved", self.service,
-                      "служба обязана узнать, что приложение смахнули из задач")
+        self.assertIn("ServiceLifecycleHooks.onTaskRemoved(applicationContext, this@CoreServerService)", self.service,
+                      "смахивание должно относиться к владельцу службы")
 
     def test_refusals_use_the_shared_ladder(self):
         refused = self.keep_alive[self.keep_alive.find("fun onServiceRefused"):]
@@ -149,16 +149,18 @@ class DeliveryWakeContract(unittest.TestCase):
                          "до разблокировки личность и настройки закрыты — принимать нельзя")
 
     def test_service_calls_the_right_scenario(self):
-        self.assertIn("EmergencyKeepAlive.onServiceStarted(applicationContext)", self.service)
+        self.assertIn("EmergencyKeepAlive.onServiceStarted(applicationContext, this@CoreServerService)", self.service)
         self.assertEqual(
             2,
-            self.service.count("EmergencyKeepAlive.onServiceRefused(applicationContext)"),
-            "отказ startForeground и таймаут foreground — оба через лестницу",
+            self.service.count("EmergencyKeepAlive.onServiceRefused(applicationContext, this@CoreServerService)"),
+            "отказ startForeground и таймаут foreground — оба через лестницу с владельцем",
         )
-        self.assertIn("ServiceLifecycleHooks.onDestroyed(", self.service)
+        self.assertIn("ServiceLifecycleHooks.onCreated(this)", self.service)
+        self.assertIn("ServiceLifecycleHooks.onDestroyed(applicationContext, this@CoreServerService,", self.service)
         self.assertIn("ServiceLifecycleHooks.onTaskRemoved(", self.service)
         self.assertNotIn("scheduleNext(", self.service)
         hooks = HOOKS.read_text()
+        self.assertIn("EmergencyKeepAlive.onServiceCreated(owner)", hooks)
         self.assertIn("EmergencyKeepAlive.onServiceStopped(", hooks)
         self.assertIn("intentional = planned", hooks)
 
@@ -169,8 +171,20 @@ class DeliveryWakeContract(unittest.TestCase):
         self.assertIn("OperationalCounter.DELIVERY_WAKE_START", self.keep_alive)
 
     def test_alive_mark_is_written_by_the_running_service(self):
-        self.assertIn("DeliveryAssurance.markAlive(applicationContext)", self.service,
-                      "без метки жизни сторож не отличит «жив» от «убит»")
+        self.assertIn("DeliveryAssurance.markAlive(applicationContext, this@CoreServerService)", self.service,
+                      "метка жизни обязана относиться к конкретной службе")
+        self.assertIn("heartbeat.created(owner)", self.assurance)
+        self.assertIn("heartbeat.started(owner, nowMs)", self.assurance)
+        self.assertIn("heartbeat.pulse(owner, nowMs)", self.assurance)
+        self.assertIn("if (!DeliveryAssurance.serviceStopped(owner))", self.keep_alive)
+        self.assertIn("if (!DeliveryAssurance.serviceRefused(owner))", self.keep_alive)
+        self.assertIn("EmergencyKeepAlive.onExternalStartRefused(context)", self.keep_alive)
+        external = self.keep_alive[self.keep_alive.index("fun onExternalStartRefused"):]
+        external = external[:external.index("private fun scheduleAfterRefusal")]
+        self.assertNotIn("serviceStopped(", external)
+        self.assertNotIn("serviceRefused(", external)
+        hooks = HOOKS.read_text()
+        self.assertIn("EmergencyKeepAlive.onServiceStopped(context, owner, intentional = planned)", hooks)
 
     # -------------------------------------------------- сторож и разрешения
 
