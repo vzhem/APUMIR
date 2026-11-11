@@ -102,7 +102,12 @@ export class FcmV1 {
           token,
           // Only an opaque route is shared with the provider; no peer id, chat id, text or capability.
           data: { v: "1", route },
-          android: { priority: "HIGH", ttl: "3600s", collapse_key: "apu-wake", restricted_package_name: "com.vladimir.messenger" },
+          // Data messages are non-collapsible: one contact's stale route must
+          // not replace another contact's wake on the same installation. FCM
+          // can still discard all pending data messages after its 100-message
+          // limit; the future receiver must handle onDeletedMessages with a
+          // bounded full sync before this prototype can be enabled.
+          android: { priority: "HIGH", ttl: "3600s", restricted_package_name: "com.vladimir.messenger" },
         } }),
         signal: AbortSignal.timeout(10_000),
       });

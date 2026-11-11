@@ -53,6 +53,27 @@ test("parallel sends share one OAuth grant and only send opaque route data", asy
   assert.equal(sends, 4);
 });
 
+test("different routes to one installation are not sent with a shared collapse key", async () => {
+  const messages = [];
+  const client = new FcmV1(env, async (url, request) => {
+    if (url.includes("oauth2.googleapis.com")) return Response.json({ access_token: "access", expires_in: 3600 });
+    messages.push(JSON.parse(request.body).message);
+    return Response.json({ name: "fake" });
+  });
+  const otherRoute = "cd".repeat(32);
+  assert.equal(await client.send(token, route), "sent");
+  assert.equal(await client.send(token, otherRoute), "sent");
+  assert.deepEqual(messages.map((message) => message.data), [{ v: "1", route }, { v: "1", route: otherRoute }]);
+  for (const message of messages) {
+    assert.equal(message.token, token);
+    assert.equal(message.notification, undefined);
+    assert.equal(Object.hasOwn(message.android, "collapse_key"), false);
+    assert.equal(message.android.priority, "HIGH");
+    assert.equal(message.android.ttl, "3600s");
+    assert.equal(message.android.restricted_package_name, "com.vladimir.messenger");
+  }
+});
+
 test("oversized or unavailable provider responses fail closed without retiring the token", async () => {
   const oversized = new FcmV1(env, async () => new Response("x".repeat(20_000)));
   assert.equal(await oversized.send(token, route), "retry");

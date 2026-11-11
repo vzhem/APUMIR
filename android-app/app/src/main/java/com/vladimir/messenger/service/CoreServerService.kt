@@ -32,6 +32,7 @@ import com.vladimir.messenger.data.repository.ChatRepository
 import com.vladimir.messenger.data.repository.MtProxyRepository
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.file.FileExchangeKeyStore
+import com.vladimir.messenger.data.push.PushControlIngress
 import com.vladimir.messenger.data.security.MessageSealer
 import com.vladimir.messenger.data.security.SealedWire
 import com.vladimir.messenger.data.referral.ReferralRankStore
@@ -320,25 +321,6 @@ class CoreServerService : Service() {
     private suspend fun markMessageDelivered(messageId: String): Boolean {
         deferredDelivery.noteTransportAck(messageId)
         return applyOutgoingDeliveryAck(messageId, chatRepository::markOutgoingMessageDelivered, appDatabase.messageDao()::getMessageById, RustBridge::confirmMessageDelivered)
-    }
-
-    /**
-     * A successfully opened sealed message proves the sender's signed file/message
-     * binding. Learn it before sending the ACK: otherwise a receiver that missed
-     * HELLO can display the message but cannot send a sealed reply. A changed
-     * binding is reported, never overwritten automatically.
-     */
-    private suspend fun rememberOpenedMessageBinding(senderId: String, wire: String) {
-        when (fileTransferRouter.rememberOpenedMessageBinding(senderId, wire)) {
-            com.vladimir.messenger.data.file.FileTransferRouter.OpenedMessageBindingResult.KEY_CHANGED -> {
-                TransferDiagnostics.notePeerKeyChanged()
-                Log.w(TAG, "opened message binding differs from pinned peer binding")
-            }
-            com.vladimir.messenger.data.file.FileTransferRouter.OpenedMessageBindingResult.PINNED_NEW -> {
-                Log.i(TAG, "learned sender binding from opened message")
-            }
-            else -> Unit
-        }
     }
 
     /**
@@ -1193,7 +1175,7 @@ class CoreServerService : Service() {
             val cfUrl = prefs.getString("cloudflare_relay_url", ServiceHost.BASE) ?: ServiceHost.BASE
             cloudflareRelay = CloudflareRelay(cfUrl, nodeId ?: "", serviceScope)
             cloudflareRelay?.onMessageReceived = { senderId: String, payload: String ->
-                Log.i(TAG, "CF relay payload from $senderId: ${payload.take(50)}")
+                Log.i(TAG, "CF relay payload received from $senderId")
                 serviceScope.launch {
                     try {
                         // Тот же страж, что и у ядра: отправитель обязан быть
@@ -1215,6 +1197,8 @@ class CoreServerService : Service() {
 
                             is RelayEnvelope.Parsed.Message -> {
                                 val messageId = parsed.messageId
+                                val cfContent = if (SealedWire.isSealed(parsed.content)) MessageSealer.open(applicationContext, parsed.content) else parsed.content
+                                if (PushControlIngress.isReserved(cfContent)) return@launch
                                 var acknowledge = false // Only a stored text or an explicitly handled service packet.
                                 // Дедупликация: сообщение уже в БД
                                 val existingMsg = chatRepository.getMessageById(messageId)
@@ -1228,18 +1212,11 @@ class CoreServerService : Service() {
                                             markMessageDelivered(it)
                                         }
                                     } else if (!existingMsg.isFromMe && existingMsg.senderId == senderId) {
-                                        // This path has not opened the duplicate envelope: re-ACK the row, but do not issue a mesh cleanup receipt.
+                                        // Opening was only for quarantine; a row-based ACK is not a verified mesh cleanup receipt.
                                         acknowledge = true
                                         runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
                                     }
                                 } else {
-                                    // ШИФРОВАНИЕ: это второй, независимый путь приёма. Без
-                                    // расшифровки здесь в чат попал бы конверт как текст.
-                                    val cfContent = if (SealedWire.isSealed(parsed.content)) {
-                                        MessageSealer.open(applicationContext, parsed.content)
-                                    } else {
-                                        parsed.content
-                                    }
                                     if (cfContent == null) {
                                         val knownHere = MessageSealer
                                             .canSeal(applicationContext, senderId)
@@ -1268,7 +1245,7 @@ class CoreServerService : Service() {
                                             .opened(applicationContext, senderId)
                                         if (SealedWire.isSealed(parsed.content)) {
                                             try {
-                                                rememberOpenedMessageBinding(senderId, parsed.content)
+                                                rememberOpenedMessageBinding(fileTransferRouter, senderId, parsed.content)
                                             } catch (error: Exception) {
                                                 Log.w(TAG, "CF opened message binding learn failed: ${error.message}")
                                             }
@@ -1335,6 +1312,7 @@ class CoreServerService : Service() {
                             }
 
                             is RelayEnvelope.Parsed.Other -> {
+                                if (PushControlIngress.isReserved(if (SealedWire.isSealed(parsed.raw)) MessageSealer.open(applicationContext, parsed.raw) else parsed.raw)) return@launch
                                 // Legacy plain-text payload (не envelope) — сохраняем как раньше.
                                 // Раунд 140: но только не служебный конверт - он
                                 // разбирается стражем, в чат ему дороги нет.
@@ -1354,7 +1332,7 @@ class CoreServerService : Service() {
                                         timestamp = System.currentTimeMillis(),
                                         channel = MessageChannel.CF,
                                     )
-                                    Log.i(TAG, "CF plain-text saved to chat ${chat.id}: ${parsed.raw.take(30)}")
+                                    Log.i(TAG, "CF plain-text saved to chat ${chat.id}")
                                     if (chatRepository.isInviteBlocked(senderId, parsed.raw)) {
                                         runCatching { sendInviteReject(senderId, parsed.raw) }
                                     }
@@ -2301,11 +2279,12 @@ class CoreServerService : Service() {
             "message_received" -> {
                 val originalTs = event.timestamp
                 val ts = originalTs ?: System.currentTimeMillis()
-                Log.i(TAG, "📨 MESSAGE_RECEIVED: sender=${event.senderId} msgId=${event.messageId} originalTs=$originalTs ts=$ts text=${event.text?.take(30)}")
+                Log.i(TAG, "📨 MESSAGE_RECEIVED: sender=${event.senderId} msgId=${event.messageId} originalTs=$originalTs ts=$ts")
                 val senderId = event.senderId ?: return
                 val chatId = event.chatId ?: return
                 val messageId = event.messageId ?: return
                 val rawText = event.text ?: return
+                if (PushControlIngress.isReserved(rawText)) return
                 val timestamp = ts
 
                 // Отправитель обязан быть узлом (pk_…): ядро не проверяет первое поле, и
@@ -2365,6 +2344,9 @@ class CoreServerService : Service() {
                 // владелец, скрин 30.09 16:40. Своя строка уже есть как отправленная.
                 // р243: адрес из кэша зеркала (обновляется в цикле) - вызов в
                 // ядро на каждом входящем тормозил разбор очереди.
+                val sealed = SealedWire.isSealed(rawText)
+                val preopened = if (sealed) MessageSealer.open(applicationContext, rawText) else rawText
+                if (PushControlIngress.isReserved(preopened)) return
                 val myNodeId = com.vladimir.messenger.data.mirror.MirrorHub.nodeIdCached()
                 if (myNodeId.isNotBlank() && senderId == myNodeId) {
                     Log.w(TAG, "self-addressed packet ignored msgId=$messageId text=" + rawText.take(24))
@@ -2383,9 +2365,8 @@ class CoreServerService : Service() {
                 // выглядит и настоящая поломка, поэтому пишем WARN с приметами:
                 // раунд 80 стоил дня поисков именно потому, что сообщение
                 // исчезало бесследно.
-                val sealed = SealedWire.isSealed(rawText)
                 val text = if (sealed) {
-                    val opened = MessageSealer.open(applicationContext, rawText)
+                    val opened = preopened
                     if (opened == null) {
                         val known = MessageSealer.canSeal(applicationContext, senderId)
                         // Владелец 2026-10-07: после обмена QR в сети летят СТАРЫЕ копии
@@ -2428,7 +2409,7 @@ class CoreServerService : Service() {
                     com.vladimir.messenger.data.security.KeyDesyncNotice
                         .opened(applicationContext, senderId)
                     try {
-                        rememberOpenedMessageBinding(senderId, rawText)
+                        rememberOpenedMessageBinding(fileTransferRouter, senderId, rawText)
                     } catch (error: Exception) {
                         Log.w(TAG, "opened message binding learn failed: ${error.message}")
                     }
@@ -3053,7 +3034,7 @@ class CoreServerService : Service() {
                 }
             }
             
-            else -> Log.d(TAG, "🔍 Event: type=${event.eventType} sender=${event.senderId} peer=${event.peerId} msg=${event.messageId} text=${event.text?.take(30)}")
+            else -> Log.d(TAG, "🔍 Event: type=${event.eventType} sender=${event.senderId} peer=${event.peerId} msg=${event.messageId}")
         }
     }
 
