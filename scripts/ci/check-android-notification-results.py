@@ -9,6 +9,7 @@ OUTBOX_CLASS = "com.vladimir.messenger.data.repository.OutboxFairnessInstrumente
 PUSH_CLASS = "com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest"
 REGISTRATION_CLASS = "com.vladimir.messenger.data.push.PushRegistrationStoreInstrumentedTest"
 PUSH_INTEGRATION_CLASS = "com.vladimir.messenger.data.push.PushWakeIntegrationInstrumentedTest"
+MAILBOX_DRAIN_CLASS = "com.vladimir.messenger.data.push.PushMailboxDrainInstrumentedTest"
 PUSH_INBOX_CLASS = "com.vladimir.messenger.data.push.PushWakeInboxInstrumentedTest"
 PUSH_DRAIN_CLASS = "com.vladimir.messenger.data.push.PushWakeDrainInstrumentedTest"
 FIREBASE_CLASS = "com.vladimir.messenger.data.push.FirebaseClientConfigurationInstrumentedTest"
@@ -56,6 +57,9 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, OUTBOX_CLASS: {
     "quotaAndFailedEntropyDoNotEvictOrCreateARegistration",
 }, PUSH_INTEGRATION_CLASS: {
     "realFfiAndDeviceJournalsMatchWorkerVectorsWithoutProviderNetwork",
+    "mailboxRoundTripAuthenticatesRealFfiAndPreviouslyPinnedParticipants",
+}, MAILBOX_DRAIN_CLASS: {
+    "realRoomCommitPrecedesAckAndReplayedEnvelopeDeduplicatesAfterReopen",
 }, PUSH_INBOX_CLASS: {
     "routeAndOverflowRecoverySurviveReopenWithoutPrivateFields",
     "newWakeDuringLeaseCannotBeErasedByTheOldCompletion",

@@ -38,6 +38,48 @@ EXPECTED = {
         "streamingCapAndDeclaredLengthAreBothEnforcedAndStreamsClosed",
         "pathsOutsideTheEndpointAllowlistCannotOpenAConnection",
     },
+    PREFIX + "PushEpochEnvelopeTest": {
+        "offerAndRevokeUseTheExistingEncryptedWireAndClearFfiInputs",
+        "unregisteredStateChangedPinsAndInvalidKeysFailBeforeFfi",
+        "malformedWrongRecipientAndWrongManifestAreRejected",
+        "mutatedFfiInputsAreRejectedEvenWhenTheReturnedHeaderLooksCorrect",
+        "zeroEntropyDoesNotReachFfi",
+        "ffiFailuresAndCancellationWipeBorrowedBuffers",
+    },
+    PREFIX + "PushMailboxMessageCodecTest": {
+        "authenticatedPayloadCarriesTheOriginalIdBothPeersAndExactUnicodeText",
+        "independentlyExpectedPeersAndCanonicalMetadataAreRequired",
+        "byteLimitAndMalformedUtf16AreRejectedWithoutSplittingTheBody",
+    },
+    PREFIX + "PushMailboxMessageOpenerTest": {
+        "validOpenedMessageIsBoundToThePinnedSenderLocalRecipientAndOriginalId",
+        "missingWrongOrSelfPinsAndWrongNodesNeverUnwrapAKey",
+        "ciphertextAndUtf8TamperingAndWrongBoundMetadataAreRejected",
+        "alteredBindingIdentityFfiCannotRelabelTheEnvelope",
+        "changedFfiInputsFailClosedAndAllBorrowedBuffersAreCleared",
+        "changedCallerSnapshotsOrCurrentStateCannotReturnPlaintext",
+        "invalidKeyExceptionsAndCancellationNeverProduceAMessage",
+    },
+    PREFIX + "PushMailboxMessageSealerTest": {
+        "originalMessageRoundTripsInsideAnAuthenticatedEnvelopeAndBuffersAreCleared",
+        "invalidInputsPeersAndStateNeverInvokeKeyCreation",
+        "changingFfiInputsOrReturningMalformedHeadersFailsClosed",
+        "changedCallerSnapshotsAndCurrentStateCannotReturnWire",
+        "changingBindingWhileResolvingItsNodeIdIsRejectedAndCleared",
+        "zeroEntropyExceptionsAndCancellationNeverCreateAResult",
+        "eachSealingGeneratesANewKeyAndNonceRatherThanAStableRetryWire",
+    },
+    PREFIX + "PushMailboxDrainTest": {
+        "ackFollowsDurableCommitsAndUsesSortedServerReceipts",
+        "unprocessedItemsAreNeverAcknowledgedButLaterItemsAreStillVisited",
+        "commitExceptionsAreNotAckedAndCancellationNeverAcknowledgesThePage",
+        "failedAckRetriesTheSameAlreadyCommittedMessageWithoutAdvancingCursor",
+        "changedTrustWithholdsTheAckEvenAfterACommit",
+        "malformedPagesAreRejectedBeforeAnyItemIsCommitted",
+        "repeatedIdsAcrossPagesAreRejectedWithoutProcessingThemAgain",
+        "boundedCheckpointPreservesUnprocessedStateAndCursorExpiryRestarts",
+        "transportFailuresAndCancellationNeverTurnIntoCompletedScans",
+    },
 }
 
 

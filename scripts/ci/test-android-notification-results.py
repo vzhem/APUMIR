@@ -41,6 +41,8 @@ class NotificationResultsTest(unittest.TestCase):
         self.assertEqual(1, self.run_report(missing_registration))
         missing_integration = [case for case in self.all_cases() if case[0] != checker.PUSH_INTEGRATION_CLASS]
         self.assertEqual(1, self.run_report(missing_integration))
+        missing_mailbox_drain = [case for case in self.all_cases() if case[0] != checker.MAILBOX_DRAIN_CLASS]
+        self.assertEqual(1, self.run_report(missing_mailbox_drain))
         missing_firebase = [case for case in self.all_cases() if case[0] != checker.FIREBASE_CLASS]
         self.assertEqual(1, self.run_report(missing_firebase))
         missing_lifecycle = [case for case in self.all_cases() if case[0] != checker.CORE_LIFECYCLE_CLASS]

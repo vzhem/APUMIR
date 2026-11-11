@@ -33,6 +33,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import uniffi.p2p_core.clearIdentitySigningSeed
 import uniffi.p2p_core.createFileExchangeBinding
+import uniffi.p2p_core.createFileKeyEnvelope
 import uniffi.p2p_core.createIdentitySigningBinding
 import uniffi.p2p_core.identitySigningMode
 import uniffi.p2p_core.installIdentitySigningSeed
@@ -335,6 +336,81 @@ class PushWakeIntegrationInstrumentedTest {
                 File(file.absolutePath + "-shm").delete()
                 File(file.absolutePath + "-journal").delete()
             }
+        }
+    }
+
+    @Test fun mailboxRoundTripAuthenticatesRealFfiAndPreviouslyPinnedParticipants() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        assertFalse(context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE).getBoolean("identity_created", false))
+        assertFalse(RustBridge.isRunning())
+        assertEquals("legacy-only", identitySigningMode())
+        val pinDb = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        val senderId = "pk_" + "2".repeat(32)
+        val recipientId = "pk_" + "1".repeat(32)
+        val messageId = "01234567-89ab-4cde-8f01-23456789abcd"
+        val body = "Проверка сохранённого идентификатора | 😀"
+        try {
+            installIdentitySigningSeed(1.toUByte(), senderId, ByteArray(32) { 2 })
+            val senderIdentity = createIdentitySigningBinding(100)
+            val senderBinding = createFileExchangeBinding(senderIdentity, ByteArray(32) { 4 }, 200)
+            val changedSender = createFileExchangeBinding(senderIdentity, ByteArray(32) { 5 }, 200)
+            installIdentitySigningSeed(1.toUByte(), recipientId, ByteArray(32) { 1 })
+            val recipientBinding = createFileExchangeBinding(createIdentitySigningBinding(100), ByteArray(32) { 3 }, 200)
+            val pins = FileExchangePeerStore(pinDb.fileExchangePeerDao())
+            assertNull(runBlocking { pins.bindingFor(senderId) })
+            runBlocking { assertTrue(pins.pinFirstSeen(senderBinding).newlyPinned) }
+            val previouslyPinned = runBlocking { pins.bindingFor(senderId)!! }
+            runBlocking { assertTrue(pins.pinFirstSeen(recipientBinding).newlyPinned) }
+            val recipientPin = runBlocking { pins.bindingFor(recipientId)!! }
+
+            installIdentitySigningSeed(1.toUByte(), senderId, ByteArray(32) { 2 })
+            var sealFailures = 0
+            val sealer = PushMailboxMessageSealer(recordFailure = { sealFailures++ })
+            val wire = sealer.seal(messageId, senderId, recipientId, 1_700_000_000_000L, body,
+                senderBinding, recipientPin, ByteArray(32) { 4 }) { true }!!
+            assertEquals(0, sealFailures)
+            assertTrue(PushMailboxProtocol.validEnvelope(wire))
+
+            // A malicious authenticated sender can still place false metadata
+            // inside a valid envelope. Construct one explicitly to test that
+            // the receiver checks the plaintext against its independent pin.
+            val wrongSender = PushMailboxMessageCodec.encode(messageId, "pk_" + "3".repeat(32), recipientId, 1_700_000_000_000L, body)!!
+            val testKey = ByteArray(32) { 7 }
+            val testNonce = ByteArray(12) { (it + 1).toByte() }
+            val bytes = wrongSender.toByteArray(Charsets.UTF_8)
+            val ciphertext = Cipher.getInstance("AES/GCM/NoPadding").run {
+                init(Cipher.ENCRYPT_MODE, SecretKeySpec(testKey, "AES"), GCMParameterSpec(128, testNonce))
+                doFinal(bytes)
+            }
+            val wrapped = createFileKeyEnvelope(senderBinding, recipientBinding, ByteArray(32) { 4 }, manifest(ciphertext), testKey)
+            val mismatchedWire = SealedWire.encode(wrapped, testNonce, ciphertext)
+            testKey.fill(0); testNonce.fill(0); bytes.fill(0); ciphertext.fill(0); wrapped.fill(0)
+            installIdentitySigningSeed(1.toUByte(), recipientId, ByteArray(32) { 1 })
+            assertNull(sealer.seal(messageId, senderId, recipientId, 1_700_000_000_000L, body,
+                senderBinding, recipientPin, ByteArray(32) { 4 }) { true })
+            assertEquals(1, sealFailures) // the installed sender identity no longer matches
+            var failures = 0
+            val opener = PushMailboxMessageOpener(recordFailure = { failures++ })
+            val result = opener.open(wire, recipientBinding, ByteArray(32) { 3 }, previouslyPinned, senderId, recipientId) { true }!!
+            assertEquals(messageId, result.id)
+            assertEquals(senderId, result.sender)
+            assertEquals(recipientId, result.recipient)
+            assertEquals(body, result.content)
+            assertNull(opener.open(wire, recipientBinding, ByteArray(32) { 3 }, changedSender, senderId, recipientId) { true })
+            assertNull(opener.open(wire, recipientBinding, ByteArray(32) { 3 }, byteArrayOf(), senderId, recipientId) { true })
+            assertNull(opener.open(mismatchedWire, recipientBinding, ByteArray(32) { 3 }, previouslyPinned, senderId, recipientId) { true })
+            assertEquals(0, failures)
+            val altered = SealedWire.decode(wire)!!
+            altered.ciphertext[0] = (altered.ciphertext[0].toInt() xor 1).toByte()
+            val tamperedWire = SealedWire.encode(altered.keyEnvelope, altered.iv, altered.ciphertext)
+            assertNull(opener.open(tamperedWire, recipientBinding, ByteArray(32) { 3 }, previouslyPinned, senderId, recipientId) { true })
+            assertEquals(1, failures)
+            installIdentitySigningSeed(1.toUByte(), senderId, ByteArray(32) { 2 })
+            assertNull(opener.open(wire, recipientBinding, ByteArray(32) { 3 }, previouslyPinned, senderId, recipientId) { true })
+            assertEquals(2, failures)
+        } finally {
+            clearIdentitySigningSeed()
+            pinDb.close()
         }
     }
 
