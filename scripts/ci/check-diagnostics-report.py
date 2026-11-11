@@ -849,15 +849,23 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertIn("acknowledgeStoredIncomingText(messageId", service)
         self.assertIn("sealed && MessageSealer.openedByExpectedSender(rawText, senderId)", service)
         self.assertLess(coordinator.index("if (!storedIncomingText("), coordinator.index("sendAck(openedByExpectedSender())"))
-        # Neither a merely recognized group packet nor an unopened CF
-        # duplicate proves a durable personal message/sender match.
+        # Neither a merely recognized group packet nor a CF duplicate proves
+        # a durable personal message/sender match for mesh cleanup. CF now
+        # tries to open *before* this branch only to quarantine push controls:
+        # a duplicate that did not open still retains its row-based ACK path.
         group = service[service.rindex("if (groupRouter.routeIncoming(senderId, chatId, messageId, text))"):
                         service.rindex("// Реакции на сообщения:")]
         self.assertIn("RustBridge.sendDeliveryAck(messageId, senderId)", group)
         self.assertNotIn("roomCommitted = true", group)
-        cf = service[service.index("// This path has not opened the duplicate envelope"):
-                     service.index("// ШИФРОВАНИЕ: это второй, независимый путь приёма")]
+        cf_start = service.index("is RelayEnvelope.Parsed.Message -> {")
+        cf_duplicate = service.index("if (existingMsg != null) {", cf_start)
+        cf_new = service.index("if (cfContent == null) {", cf_duplicate)
+        cf = service[cf_duplicate:cf_new]
+        self.assertLess(service.index("PushControlIngress.isReserved(cfContent)", cf_start), cf_duplicate)
+        self.assertIn("!existingMsg.isFromMe && existingMsg.senderId == senderId", cf)
+        self.assertIn("RustBridge.sendDeliveryAck(messageId, senderId)", cf)
         self.assertNotIn("roomCommitted = true", cf)
+        self.assertNotIn("acknowledgeStoredIncomingText", cf)
         bridge = source(MAIN / "data/RustBridge.kt")
         self.assertIn("captured.confirmMessageDelivered(messageId)", bridge)
 
