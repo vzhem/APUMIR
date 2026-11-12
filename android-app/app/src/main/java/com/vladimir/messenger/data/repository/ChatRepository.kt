@@ -396,7 +396,7 @@ class ChatRepository @Inject constructor(
             }
         }
 
-        val sentDirectly = manualOutboxSender.send(
+        val sentDirectly = replyAwareOutboxSender.sendManual(
             original.id,
             original.chatId,
             recipientId,
@@ -421,13 +421,12 @@ class ChatRepository @Inject constructor(
     private val manualOutboxSender by lazy { roomAutomaticOutboxSender(context, chatDao, ::sendViaRustRetry) }
     private val mirrorEcho by lazy { roomMirrorOutgoingEcho(messageDao, automaticOutboxSender) }
     private val replySidecar by lazy { roomOutgoingReplySidecar(messageDao, automaticOutboxSender, ::sendViaRust) }
+    internal val replyAwareOutboxSender by lazy { roomReplyAwareOutboxSender(messageDao, chatDao, groupDao, automaticOutboxSender, manualOutboxSender, replySidecar) }
     private val mirrorPendingFrames by lazy { roomMirrorPendingOutgoing(context, messageDao, chatDao, groupDao, automaticOutboxSender) }
     /** Fair, bounded traversal continues past unavailable destinations. */
-    private val queuedOutbox by lazy { QueuedOutboxPump(messageDao, chatDao, automaticOutboxSender::send) }
+    private val queuedOutbox by lazy { QueuedOutboxPump(messageDao, chatDao, replyAwareOutboxSender::send) }
     internal suspend fun pumpQueuedOffline(limit: Int = 20): OutboxProgress = queuedOutbox.pump(limit)
-    private val peerOutbox by lazy {
-        roomPeerOutboxRetry(messageDao, chatDao, automaticOutboxSender::send)
-    }
+    private val peerOutbox by lazy { roomPeerOutboxRetry(messageDao, chatDao, replyAwareOutboxSender::send) }
 
     suspend fun retryPendingMessagesForPeer(peerId: String): Int = peerOutbox.retry(peerId)
 

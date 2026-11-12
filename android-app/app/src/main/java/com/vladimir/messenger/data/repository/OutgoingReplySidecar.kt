@@ -4,7 +4,18 @@ import android.util.Log
 import com.vladimir.messenger.data.local.dao.MessageDao
 import com.vladimir.messenger.data.local.entity.MessageEntity
 import com.vladimir.messenger.data.reply.DirectReplyWire
+import com.vladimir.messenger.domain.model.MessageStatus
 import kotlinx.coroutines.CancellationException
+
+private val DIRECT_REPLY_TEXT_STATUSES = setOf(
+    MessageStatus.PENDING.name, MessageStatus.QUEUED_OFFLINE.name, MessageStatus.SENT.name,
+    MessageStatus.FAILED.name, MessageStatus.DELIVERED.name, MessageStatus.READ.name,
+)
+
+/** Rechecked on the sidecar's own Room read, including after a racing body ACK. */
+internal fun isDirectReplyTextRow(row: MessageEntity): Boolean =
+    row.isFromMe && row.senderId == "self" && !row.channel.trim().equals("GROUP", ignoreCase = true) &&
+        row.topicId.isNullOrEmpty() && row.status in DIRECT_REPLY_TEXT_STATUSES
 
 /**
  * A reply's wire metadata has its own transport ID, but belongs to the parent
@@ -22,7 +33,7 @@ internal class OutgoingReplySidecar(
         try {
             val recipient = OutboxRecipient.normalize(peer).takeIf { it.isNotBlank() } ?: return false
             val row = find(messageId) ?: return false
-            if (row.id != messageId || !row.isFromMe || row.senderId != "self" || row.chatId != chatId ||
+            if (row.id != messageId || !isDirectReplyTextRow(row) || row.chatId != chatId ||
                 OutboxRecipient.forMessage(row, peer) != recipient || row.replyToId != reply.messageId ||
                 row.replyAuthor != reply.author || row.replyText != DirectReplyWire.preview(reply.text)
             ) return false

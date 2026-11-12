@@ -43,6 +43,8 @@ class NotificationResultsTest(unittest.TestCase):
         self.assertEqual(1, self.run_report(missing_scoped_ack))
         missing_outbox = [case for case in self.all_cases() if case[0] != checker.OUTBOX_CLASS]
         self.assertEqual(1, self.run_report(missing_outbox))
+        missing_reply_outbox = [case for case in self.all_cases() if case[0] != checker.REPLY_OUTBOX_CLASS]
+        self.assertEqual(1, self.run_report(missing_reply_outbox))
         missing_mirror = [case for case in self.all_cases() if case[0] != checker.MIRROR_OUTGOING_CLASS]
         self.assertEqual(1, self.run_report(missing_mirror))
         missing_pending = [case for case in self.all_cases() if case[0] != checker.MIRROR_PENDING_CLASS]
@@ -73,6 +75,15 @@ class NotificationResultsTest(unittest.TestCase):
             cases = [(classname, name, f"<{tag}/>") if i == 0 else (classname, name, "")
                      for i, (classname, name, _) in enumerate(self.all_cases())]
             self.assertEqual(1, self.run_report(cases))
+
+    def test_every_reply_retry_room_case_is_required(self):
+        names = checker.EXPECTED[checker.REPLY_OUTBOX_CLASS]
+        self.assertEqual(7, len(names))
+        for name in names:
+            key = (checker.REPLY_OUTBOX_CLASS, name)
+            self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[:2] != key]))
+            skipped = [(*case[:2], "<skipped/>") if case[:2] == key else case for case in self.all_cases()]
+            self.assertEqual(1, self.run_report(skipped))
 
     def test_gradle_failure_fails_even_with_complete_reports(self):
         self.assertEqual(1, self.run_report(self.all_cases(), status=1))

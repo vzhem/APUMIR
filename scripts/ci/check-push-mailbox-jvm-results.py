@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Require mailbox and mirror JVM regressions to run, without skips.
+"""Require mailbox, mirror and reply-retry JVM regressions to run, without skips.
 
 The full Gradle test task normally discovers these automatically. This gate
 also detects a missing/renamed class or a test accidentally filtered out. It is
@@ -153,6 +153,26 @@ MIRROR_OUTGOING_DISPATCH_EXPECTED = {
 }
 EXPECTED[MIRROR_OUTGOING_DISPATCH_CLASS] = MIRROR_OUTGOING_DISPATCH_EXPECTED
 
+REPLY_OUTBOX_CLASS = "com.vladimir.messenger.data.repository.ReplyAwareOutboxSenderTest"
+REPLY_OUTBOX_EXPECTED = {
+    "retriesStoredReplyAfterBodyUsingStableSidecarId",
+    "falseBodyResultStillOffersReplyButBlockedBodyDoesNot",
+    "manualRetryUsesItsOwnBodySenderAndSameReplyPolicy",
+    "deletedChangedIncomingGroupOrMissingReplyNeverSendsSidecar",
+    "malformedParentOrPeerAndRejectedScopeNeverSend",
+    "sidecarRereadsChangedQuoteOrRecipientBeforeTransport",
+    "parentClearPreflightAfterBodySuppressesReply",
+    "racingBodyAckDoesNotSuppressTheCurrentReplyAttempt",
+    "replyFailureIsRecordedButDoesNotChangeBodyResult",
+    "parentTransportExceptionNeverAttemptsReply",
+    "cancellationPropagatesAndReleasesReplyGate",
+    "concurrentAutomaticAndManualRetriesShareOneReplyGate",
+    "cancellationDuringReplyReleasesTheGateForTheNextRetry",
+    "boundedGateSkipsOverflowWithoutBlockingBodiesAndRecovers",
+    "blockedReplyDoesNotBlockAnotherMessage",
+}
+EXPECTED[REPLY_OUTBOX_CLASS] = REPLY_OUTBOX_EXPECTED
+
 
 def check(results: Path) -> int:
     expected = {(classname, name) for classname, names in EXPECTED.items() for name in names}
@@ -178,7 +198,7 @@ def check(results: Path) -> int:
     for error in errors:
         safe = error.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
         print(f"::error::{safe}")
-    print(f"::notice::Mailbox and mirror JVM regressions: {len(seen & expected)}/{len(expected)}")
+    print(f"::notice::Mailbox, mirror and reply-retry JVM regressions: {len(seen & expected)}/{len(expected)}")
     return 1 if errors else 0
 
 

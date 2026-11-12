@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Prevent a permanently unavailable oldest chat from starving other recipients."""
+import importlib.util
+import re
 import unittest
 from pathlib import Path
 
@@ -51,9 +53,23 @@ class OutboxFairnessContract(unittest.TestCase):
         self.assertIn("state.recent = OutboxPosition(row.timestamp, row.id)", peer)
         self.assertIn("loadCurrent = messages::getMessageById", adapter)
         self.assertIn("OutboxRecipient.forMessage(current, contact) != peerId", peer)
-        self.assertIn("QueuedOutboxPump(messageDao, chatDao, automaticOutboxSender::send)", repo)
-        self.assertIn("roomPeerOutboxRetry(messageDao, chatDao, automaticOutboxSender::send)", repo)
-        self.assertIn("automaticOutboxSender::send", self.text("service/ChatOutboxPump.kt"))
+        self.assertIn("QueuedOutboxPump(messageDao, chatDao, replyAwareOutboxSender::send)", repo)
+        self.assertIn("roomPeerOutboxRetry(messageDao, chatDao, replyAwareOutboxSender::send)", repo)
+        self.assertIn("chatRepository.replyAwareOutboxSender::send", self.text("service/ChatOutboxPump.kt"))
+        reply = self.text("data/repository/ReplyAwareOutboxSender.kt")
+        sidecar = self.text("data/repository/OutgoingReplySidecar.kt")
+        self.assertIn("sendBody = automatic::send", reply)
+        self.assertIn("sendManualBody = manual::send", reply)
+        self.assertIn("sendReply = sidecar::send", reply)
+        self.assertIn("bodySender(id, chat, peer, body) ?: return null", reply)
+        self.assertIn("isDirectReplyTextRow(row)", reply)
+        self.assertIn("isDirectReplyTextRow(row)", sidecar)
+        self.assertIn("groups.getGroupById(row.chatId) == null", reply)
+        self.assertIn("OutboxRecipient.forMessage(row, contact) == peer", reply)
+        self.assertIn("preflight(messageId, chatId, peer)", sidecar)
+        self.assertIn("MAX_IN_FLIGHT = 64", reply)
+        self.assertIn("repliesInFlight.remove(id)", reply)
+        self.assertIn("catch (cancelled: CancellationException)", reply)
         self.assertIn("ChatClearRegistry.isCleared(context, peer, id)", self.text("data/repository/RoomAutomaticOutboxSender.kt"))
         self.assertIn("c.contactId = :peerId", dao)
         self.assertIn("m.timestamp ASC, m.id ASC LIMIT :limit", dao)
@@ -95,7 +111,7 @@ class OutboxFairnessContract(unittest.TestCase):
         self.assertIn("mirrorColors = frame.textColor to frame.senderNameColor", dispatch)
         self.assertIn("replySidecar.send(messageId, chatId, actualRecipientId, reply)", repo)
         self.assertIn("preflight(messageId, chatId, peer)", self.text("data/repository/OutgoingReplySidecar.kt"))
-        self.assertIn("manualOutboxSender.send(", repo)
+        self.assertIn("replyAwareOutboxSender.sendManual(", repo)
         self.assertIn("mirrorEcho.publish(messageId, chatId, actualRecipientId)", repo)
         self.assertIn("messages.insertMessageIgnore(", store)
         self.assertNotIn("messages.insertMessage(", store)
@@ -117,6 +133,37 @@ class OutboxFairnessContract(unittest.TestCase):
                      "storageFailureAndCancellationRollbackInsertedRowAndPreview", "echoNeverDeletesAnIgnoredConflictingRowWhenClearArrives"):
             self.assertIn(f"fun {case}(", test)
             self.assertIn(f'"{case}"', report)
+
+    def test_reply_retry_jvm_cases_are_required_in_all_gates(self):
+        path = ROOT / "scripts/ci/check-push-mailbox-jvm-results.py"
+        spec = importlib.util.spec_from_file_location("reply_retry_report_gate", path)
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+        source = (ROOT / "android-app/app/src/test/java/com/vladimir/messenger/data/repository/ReplyAwareOutboxSenderTest.kt").read_text()
+        self.assertEqual(checker.REPLY_OUTBOX_EXPECTED, set(re.findall(r"@Test\s+fun\s+(\w+)\(", source)))
+        self.assertIn("--tests '*ReplyAwareOutboxSenderTest*'", (ROOT / "scripts/ci/check-android-compile.sh").read_text())
+
+    def test_reply_retry_acceptance_runs_with_room_and_fake_transport(self):
+        path = ROOT / "android-app/app/src/androidTest/java/com/vladimir/messenger/data/repository/ReplyAwareOutboxSenderInstrumentedTest.kt"
+        source = path.read_text(encoding="utf-8")
+        runner = (ROOT / "scripts/ci/run-android-navigation-tests.sh").read_text()
+        report = (ROOT / "scripts/ci/check-android-notification-results.py").read_text()
+        self.assertIn("ReplyAwareOutboxSenderInstrumentedTest", runner)
+        self.assertIn("ReplyAwareOutboxSenderInstrumentedTest", report)
+        for case in ("queuedAndUnconfirmedRetriesSurviveReopenUntilParentAck",
+                     "discoveryRetryOffersSavedReplyAndStopsAfterParentAck",
+                     "earlyReplyIsNotAcknowledgedUntilARealRoomParentExists",
+                     "deletedRetargetedGroupTopicAndClearedRowsNeverSendReply",
+                     "parentAckDuringBodyKeepsCurrentReplyButStopsLaterScans",
+                     "failedReplyAndParentAckLeaveNoDurableSidecarRetry",
+                     "manualRetryUsesManualTransportAndParentClearScope"):
+            self.assertIn(f"fun {case}(", source)
+            self.assertIn(f'"{case}"', report)
+        ffi = (ROOT / "android-app/app/src/androidTest/java/com/vladimir/messenger/data/reply/DirectReplyRealFfiInstrumentedTest.kt").read_text()
+        self.assertIn("val retry = roomReplyAwareOutboxSender(", ffi)
+        self.assertIn("seal(senderId, 2, sender, senderSecret, payload)", ffi)
+        self.assertIn("DirectReplyResult.UNAPPLIED, DirectReplyResult.APPLIED", ffi)
+        self.assertIn('"selfClaimedIdCannotPassThePinnedReplyOrLegacyMirrorBinding"', report)
 
     def test_unfinished_scan_does_not_wait_for_failure_backoff(self):
         cadence = self.text("service/DeliveryCadence.kt")

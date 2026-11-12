@@ -46,6 +46,9 @@ class OutgoingReplySidecarTest {
             null, row().copy(id = "another"), row().copy(isFromMe = false), row().copy(senderId = "pk_other"),
             row().copy(chatId = "other"), row().copy(recipientId = "pk_other"), row().copy(replyToId = "other"),
             row().copy(replyAuthor = "Bob"), row().copy(replyText = "different"),
+            row().copy(channel = "GROUP"), row().copy(channel = " group "),
+            row().copy(topicId = "topic"), row().copy(topicId = " "),
+            row().copy(status = "LOCAL_FILE"), row().copy(status = "FILE_EXPIRED"),
         )) {
             current = candidate
             assertFalse(sidecar.send("parent", "chat", "pk_friend", reply))

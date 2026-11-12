@@ -54,7 +54,7 @@ cd android-app || exit 1
     --tests '*PushMailboxHttpClientTest*' --tests '*PushMailboxAccessSignerTest*' --tests '*PushMailboxHttpsTransportTest*' \
     --tests '*PushEpochEnvelopeTest*' --tests '*PushMailboxMessageCodecTest*' --tests '*PushMailboxMessageOpenerTest*' --tests '*PushMailboxMessageSealerTest*' --tests '*PushMailboxDrainTest*' --tests '*PushMailboxPutBuilderTest*' \
     --tests '*MirrorPendingOutgoingTest*' --tests '*MirrorPendingScheduleIntegrationTest*' --tests '*MirrorPendingFlusherTest*' \
-    --tests '*MirrorOutgoingFrameTest*' --tests '*MirrorOutgoingDispatcherTest*'
+    --tests '*MirrorOutgoingFrameTest*' --tests '*MirrorOutgoingDispatcherTest*' --tests '*ReplyAwareOutboxSenderTest*'
 TESTS_STATUS=$?
 
 # ---- почему тесты упали: словами в лог, а не «красный шаг без причины» -------
@@ -72,7 +72,7 @@ else
     echo "---- test results (testDebugUnitTest): отчётов нет ----"
 fi
 # A filtered Gradle task can succeed even if one requested class disappears.
-# Check every required mailbox and mirror case, including skips.
+# Check every required mailbox, mirror and reply-retry case, including skips.
 if [ "$TESTS_STATUS" -eq 0 ]; then
     python3 "$REPO_ROOT/scripts/ci/test-push-mailbox-jvm-results.py" || exit 1
     python3 "$REPO_ROOT/scripts/ci/check-push-mailbox-jvm-results.py" "$RESULTS" || exit 1

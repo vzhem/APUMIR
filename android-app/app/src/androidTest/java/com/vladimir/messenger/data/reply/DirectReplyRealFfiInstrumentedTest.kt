@@ -16,6 +16,10 @@ import com.vladimir.messenger.data.mirror.MirrorOutgoingFrame
 import com.vladimir.messenger.data.mirror.MirrorReplyTrust
 import com.vladimir.messenger.data.mirror.MirrorRoomToken
 import com.vladimir.messenger.data.mirror.MirrorRow
+import com.vladimir.messenger.data.repository.AutomaticOutboxSender
+import com.vladimir.messenger.data.repository.OutgoingReplySidecar
+import com.vladimir.messenger.data.repository.QueuedOutboxPump
+import com.vladimir.messenger.data.repository.roomReplyAwareOutboxSender
 import com.vladimir.messenger.data.repository.MirrorOutgoingDispatcher
 import com.vladimir.messenger.data.repository.MirrorOutgoingStore
 import com.vladimir.messenger.data.repository.MirrorStage
@@ -142,6 +146,63 @@ class DirectReplyRealFfiInstrumentedTest {
             assertEquals("target", db.messageDao().getMessageById("parent")!!.replyToId)
             assertEquals(1, forwards)
             assertEquals(1, acknowledgements)
+
+            // Production Room retry and reply ingress, joined by real Rust
+            // signatures/envelopes and AES. The network is deliberately fake:
+            // the first sidecar arrives before its body and must not be ACKed.
+            val sourceDb = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+            try {
+                sourceDb.chatDao().insertChat(ChatEntity(id = "outgoing-chat", contactId = recipientId, contactName = "Receiver"))
+                sourceDb.messageDao().insertMessage(MessageEntity(
+                    id = "retry-parent", chatId = "outgoing-chat", senderId = "self", content = "answer",
+                    timestamp = 42L, isFromMe = true, status = "QUEUED_OFFLINE", recipientId = recipientId,
+                    replyToId = "target", replyAuthor = "Alice", replyText = "quoted",
+                ))
+                var bodies = 0
+                val results = mutableListOf<DirectReplyResult>()
+                val guard = AutomaticOutboxSender(
+                    chatContact = { sourceDb.chatDao().getChatById(it)?.contactId },
+                    isCleared = { _, _ -> false },
+                    transport = { parent, _, _, _ ->
+                        bodies++
+                        if (bodies == 1) false else {
+                            db.messageDao().insertMessage(MessageEntity(
+                                id = parent, chatId = "chat", senderId = senderId, content = "answer",
+                                timestamp = 42L, isFromMe = false, status = "DELIVERED", channel = "LOCAL",
+                            ))
+                            true
+                        }
+                    },
+                    recordFailure = { throw AssertionError("unexpected parent guard failure", it) },
+                )
+                val sidecar = OutgoingReplySidecar(
+                    sourceDb.messageDao()::getMessageById, guard::preflight,
+                    { wireId, _, _, payload ->
+                        val wire = seal(senderId, 2, sender, senderSecret, payload)
+                        val opened = open(wire)
+                        val result = receiver.network(senderId, "chat", wireId, opened,
+                            MessageSealer.openedByExpectedSender(wire, senderId), wire)
+                        results += result
+                        result == DirectReplyResult.APPLIED
+                    },
+                    { throw AssertionError("unexpected retry-sidecar failure", it) },
+                )
+                val retry = roomReplyAwareOutboxSender(
+                    sourceDb.messageDao(), sourceDb.chatDao(), sourceDb.groupDao(), guard, guard, sidecar,
+                )
+                val pump = QueuedOutboxPump(sourceDb.messageDao(), sourceDb.chatDao(), retry::send)
+                assertEquals(0, pump.pump(20).sent)
+                assertEquals(listOf(DirectReplyResult.UNAPPLIED), results)
+                assertEquals(1, acknowledgements)
+                assertNull(db.messageDao().getMessageById("retry-parent"))
+                assertEquals(1, pump.pump(20).sent)
+                assertEquals(listOf(DirectReplyResult.UNAPPLIED, DirectReplyResult.APPLIED), results)
+                assertEquals("target", db.messageDao().getMessageById("retry-parent")!!.replyToId)
+                assertEquals(2, forwards)
+                assertEquals(2, acknowledgements)
+            } finally {
+                sourceDb.close()
+            }
 
             val fakeSelfWire = seal(recipientId, 8, fakeSelf, attackerSecret)
             assertEquals(text, open(fakeSelfWire))

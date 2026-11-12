@@ -12,6 +12,7 @@ SCOPED_ACK_CLASS = "com.vladimir.messenger.data.receipt.ScopedDeliveryAckInstrum
 MIRROR_OUTGOING_CLASS = "com.vladimir.messenger.data.repository.MirrorOutgoingStoreInstrumentedTest"
 MIRROR_PENDING_CLASS = "com.vladimir.messenger.data.repository.MirrorPendingOutgoingInstrumentedTest"
 OUTBOX_CLASS = "com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest"
+REPLY_OUTBOX_CLASS = "com.vladimir.messenger.data.repository.ReplyAwareOutboxSenderInstrumentedTest"
 CLEAR_LOOKUP_CLASS = "com.vladimir.messenger.data.chatclear.ChatClearTombstonesInstrumentedTest"
 PUSH_CLASS = "com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest"
 REGISTRATION_CLASS = "com.vladimir.messenger.data.push.PushRegistrationStoreInstrumentedTest"
@@ -107,6 +108,14 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "discoveryRotatesPastClearedRoomWindowsWithoutSendingThem",
     "failedClearPreflightSkipsOnlyThatRowAndNeverCountsAsNetwork",
     "cancelledClearPreflightPropagatesAndEachRetryCanResume",
+}, REPLY_OUTBOX_CLASS: {
+    "queuedAndUnconfirmedRetriesSurviveReopenUntilParentAck",
+    "discoveryRetryOffersSavedReplyAndStopsAfterParentAck",
+    "earlyReplyIsNotAcknowledgedUntilARealRoomParentExists",
+    "deletedRetargetedGroupTopicAndClearedRowsNeverSendReply",
+    "parentAckDuringBodyKeepsCurrentReplyButStopsLaterScans",
+    "failedReplyAndParentAckLeaveNoDurableSidecarRetry",
+    "manualRetryUsesManualTransportAndParentClearScope",
 }, CLEAR_LOOKUP_CLASS: {
     "survivesRestartAndScopesByOwnerAndPeer",
     "pagesAreStableAndOwnerScoped",
