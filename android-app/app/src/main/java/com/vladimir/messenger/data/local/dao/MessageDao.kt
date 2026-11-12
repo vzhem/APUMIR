@@ -85,9 +85,36 @@ interface MessageDao {
     )
     suspend fun personalMessagesSince(since: Long, lim: Int): List<MessageEntity>
 
-    /** р226: неотправленные исходящие тени - перевыслать активному партнёру. */
-    @Query("SELECT * FROM messages WHERE isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE') ORDER BY timestamp ASC LIMIT :lim")
+    /** The v42 outbox index avoids walking old SENT history on each shadow page. */
+    @Query(
+        "SELECT m.* FROM messages m INDEXED BY index_messages_outbox_status_order WHERE m.isFromMe = 1 " +
+            "AND m.status IN ('PENDING', 'QUEUED_OFFLINE') AND m.channel <> 'GROUP' " +
+            "AND (m.topicId IS NULL OR m.topicId = '') " +
+            "AND NOT EXISTS (SELECT 1 FROM groups g WHERE g.id = m.chatId) " +
+            "ORDER BY m.timestamp ASC, m.id ASC LIMIT :lim",
+    )
     suspend fun pendingMirrorOutgoing(lim: Int): List<MessageEntity>
+
+    /** Continue the same personal-only window, including rows with equal timestamps. */
+    @Query(
+        "SELECT m.* FROM messages m INDEXED BY index_messages_outbox_status_order WHERE m.isFromMe = 1 " +
+            "AND m.status IN ('PENDING', 'QUEUED_OFFLINE') AND m.channel <> 'GROUP' " +
+            "AND (m.topicId IS NULL OR m.topicId = '') " +
+            "AND NOT EXISTS (SELECT 1 FROM groups g WHERE g.id = m.chatId) " +
+            "AND m.timestamp >= :afterTimestamp AND (m.timestamp > :afterTimestamp OR " +
+            "(m.timestamp = :afterTimestamp AND m.id > :afterId)) " +
+            "ORDER BY m.timestamp ASC, m.id ASC LIMIT :lim",
+    )
+    suspend fun pendingMirrorOutgoingAfter(afterTimestamp: Long, afterId: String, lim: Int): List<MessageEntity>
+
+    /** A finite visit budget ends each pass even if new rows are being added. */
+    @Query(
+        "SELECT COUNT(*) FROM messages m INDEXED BY index_messages_outbox_status_order WHERE m.isFromMe = 1 " +
+            "AND m.status IN ('PENDING', 'QUEUED_OFFLINE') AND m.channel <> 'GROUP' " +
+            "AND (m.topicId IS NULL OR m.topicId = '') " +
+            "AND NOT EXISTS (SELECT 1 FROM groups g WHERE g.id = m.chatId)",
+    )
+    suspend fun countPendingMirrorOutgoing(): Int
 
     @Query("SELECT EXISTS(SELECT 1 FROM messages WHERE id = :messageId)")
     suspend fun messageExists(messageId: String): Boolean

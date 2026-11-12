@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Require every disabled mailbox JVM regression to run, without skips.
+"""Require mailbox and pending-mirror JVM regressions to run, without skips.
 
 The full Gradle test task normally discovers these automatically. This gate
 also detects a missing/renamed class or a test accidentally filtered out. It is
-not evidence of real TLS, Android Keystore, UniFFI, a provider, or delivery.
+not evidence of real TLS, Android Room/Keystore, UniFFI, a provider, or delivery.
 """
 import sys
 import xml.etree.ElementTree as ET
@@ -93,6 +93,44 @@ EXPECTED = {
     },
 }
 
+MIRROR_PENDING_EXPECTED = {
+    "com.vladimir.messenger.data.repository.MirrorPendingOutgoingTest": {
+        "pendingFramesKeepStoredReplyColorsAndRoutingFields",
+        "absentTargetNeverExportsOrphanedQuoteText",
+        "changedOrDeletedSnapshotsNeverProduceFramesAndDoNotBlockOthers",
+        "groupTopicIncomingTerminalMalformedAndMissingChatAreRejected",
+        "rawAndCanonicalTombstonesAndParentPreflightFailClosed",
+        "perRowFailureIsReportedAndCancellationPropagates",
+        "queryLimitIsBoundedAndNonPositiveLimitsDoNotRead",
+        "blockedOldRowsCannotHideLaterRowsAndAreRevisitedAfterWrap",
+        "growingQueueCannotStopAnExistingPassFromWrapping",
+        "concurrentPageRequestsAdvanceTheSingleScanWithoutDuplicates",
+    },
+    "com.vladimir.messenger.data.repository.MirrorPendingScheduleIntegrationTest": {
+        "periodicPagesReachAQuoteBeyondBlockedRowsAndRetryALostOffer",
+        "newLocalWorkInterruptsIdleBackoffWithoutPretendingItWasDelivered",
+    },
+    "com.vladimir.messenger.data.mirror.MirrorPendingFlusherTest": {
+        "pairingCanCarryAPageBeforeTheSocketOpensButNotAfterShutdown",
+        "freshPartnerBecomingActiveWakesWithoutEveryHeartbeatDoingSo",
+        "wakeShortensIdleBackoffButStillRespectsCooldown",
+        "availabilityAndCooldownBoundPeriodicRequests",
+        "concurrentTriggersNeverOverlapAnInflightPage",
+        "disconnectDuringLoadOrOffersStopsTheRemainingFrames",
+        "aFailedOfferDoesNotBecomeAnAckAndCanBeOfferedAgain",
+        "cancellationAndFailureReleaseGateWithoutLeakingAnErrorAsSuccess",
+        "cancellationAfterLoadingDoesNotStartIdleBackoff",
+        "clockRollbackDoesNotDisableTheGateForever",
+        "reorderedConcurrentClockSamplesCannotBypassCooldown",
+        "completedSweepsBackOffButNewWorkRestoresTheShortDelay",
+        "idleSweepBackoffIsCappedAtTenMinutes",
+        "unfinishedPagesUseTheShortDelayEvenAfterIdleBackoff",
+        "newWorkDuringADeferredPageIsNotLostAtCompletion",
+        "alreadyCancelledScopeDoesNotStartWork",
+    },
+}
+EXPECTED.update(MIRROR_PENDING_EXPECTED)
+
 
 def check(results: Path) -> int:
     expected = {(classname, name) for classname, names in EXPECTED.items() for name in names}
@@ -118,7 +156,7 @@ def check(results: Path) -> int:
     for error in errors:
         safe = error.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
         print(f"::error::{safe}")
-    print(f"::notice::Disabled push mailbox JVM regressions: {len(seen & expected)}/{len(expected)}")
+    print(f"::notice::Mailbox and pending-mirror JVM regressions: {len(seen & expected)}/{len(expected)}")
     return 1 if errors else 0
 
 

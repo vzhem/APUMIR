@@ -85,6 +85,8 @@ class NotificationArrivalInstrumentedTest {
         val original = Room.databaseBuilder(context, AppDatabase::class.java, databaseName).build()
         original.messageDao().insertMessage(row("sent", 123L).copy(isFromMe = true, status = "SENT"))
         original.messageDao().insertMessage(row("delivered", 124L).copy(isFromMe = true, status = "DELIVERED"))
+        original.messageDao().insertMessage(row("pending", 125L).copy(isFromMe = true, status = "PENDING"))
+        original.messageDao().insertMessage(row("queued", 126L).copy(isFromMe = true, status = "QUEUED_OFFLINE"))
         original.close()
         // Return the fresh schema to its genuine v41 index layout.
         SQLiteDatabase.openDatabase(context.getDatabasePath(databaseName).path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
@@ -98,6 +100,12 @@ class NotificationArrivalInstrumentedTest {
             assertEquals(42, sql.version)
             assertEquals("body-sent", migrated.messageDao().getMessageById("sent")!!.content)
             assertEquals("DELIVERED", migrated.messageDao().getMessageById("delivered")!!.status)
+            // Exercise the new indexed DAO queries on the upgraded database,
+            // not just on a fresh v42 database or against host SQLite.
+            val messages = migrated.messageDao()
+            assertEquals(2, messages.countPendingMirrorOutgoing())
+            assertEquals(listOf("pending", "queued"), messages.pendingMirrorOutgoing(50).map { it.id })
+            assertEquals(listOf("queued"), messages.pendingMirrorOutgoingAfter(125L, "pending", 50).map { it.id })
             sql.query("PRAGMA index_info(`index_messages_outbox_status_order`)").use { cursor ->
                 val names = mutableListOf<String>()
                 while (cursor.moveToNext()) names += cursor.getString(cursor.getColumnIndexOrThrow("name"))
@@ -109,6 +117,12 @@ class NotificationArrivalInstrumentedTest {
                 assertTrue(details.any { it.contains("index_messages_outbox_status_order") })
             }
         } finally { migrated.close() }
+        val reopened = Room.databaseBuilder(context, AppDatabase::class.java, databaseName).build()
+        try {
+            assertEquals(2, reopened.messageDao().countPendingMirrorOutgoing())
+            assertEquals(listOf("pending", "queued"), reopened.messageDao().pendingMirrorOutgoing(50).map { it.id })
+            assertEquals(listOf("queued"), reopened.messageDao().pendingMirrorOutgoingAfter(125L, "pending", 50).map { it.id })
+        } finally { reopened.close() }
     }
 
     @Test fun delayedArrivalsAreClaimedOnceAndSurviveRestartWithoutRearmingDuplicates() = runBlocking {

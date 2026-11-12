@@ -421,6 +421,7 @@ class ChatRepository @Inject constructor(
     private val manualOutboxSender by lazy { roomAutomaticOutboxSender(context, chatDao, ::sendViaRustRetry) }
     private val mirrorEcho by lazy { roomMirrorOutgoingEcho(messageDao, automaticOutboxSender) }
     private val replySidecar by lazy { roomOutgoingReplySidecar(messageDao, automaticOutboxSender, ::sendViaRust) }
+    private val mirrorPendingFrames by lazy { roomMirrorPendingOutgoing(context, messageDao, chatDao, groupDao, automaticOutboxSender) }
     /** Fair, bounded traversal continues past unavailable destinations. */
     private val queuedOutbox by lazy { QueuedOutboxPump(messageDao, chatDao, automaticOutboxSender::send) }
     internal suspend fun pumpQueuedOffline(limit: Int = 20): OutboxProgress = queuedOutbox.pump(limit)
@@ -464,22 +465,7 @@ class ChatRepository @Inject constructor(
             }
 
     /** Неотправленные исходящие тени - перевыслать активному партнёру. */
-    suspend fun mirrorPendingOutgoing(limit: Int): List<MirrorRow> =
-        messageDao.pendingMirrorOutgoing(limit).map { e ->
-            MirrorRow(
-                id = e.id,
-                chatId = e.chatId,
-                contactName = chatDao.getChatById(e.chatId)?.contactName ?: "",
-                senderId = "self",
-                content = e.content,
-                timestamp = e.timestamp,
-                mine = true,
-                recipientId = e.recipientId,
-                status = e.status,
-                textColor = e.textColor,
-                senderNameColor = e.senderNameColor,
-            )
-        }
+    suspend fun mirrorPendingOutgoing(limit: Int): com.vladimir.messenger.data.mirror.MirrorPendingBatch = mirrorPendingFrames.page(limit)
 
     /**
      * Входящее с зеркала. @return (chatId, имя чата) - для уведомления.

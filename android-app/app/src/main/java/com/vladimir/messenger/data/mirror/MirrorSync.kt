@@ -812,7 +812,7 @@ class MirrorChannel(
     interface Bridge {
         suspend fun maxMessageTimestamp(): Long
         suspend fun rowsSince(since: Long, limit: Int): List<MirrorRow>
-        suspend fun pendingOutgoing(limit: Int): List<MirrorRow>
+        suspend fun pendingOutgoing(limit: Int): MirrorPendingBatch
         suspend fun applyIncoming(row: MirrorRow, notify: Boolean)
         suspend fun applySent(row: MirrorRow)
         suspend fun onOutgoingFromPartner(row: MirrorRow)
@@ -955,7 +955,7 @@ class MirrorChannel(
         .pingInterval(30, java.util.concurrent.TimeUnit.SECONDS)
         .build()
     private var backoffMs = 2_000L
-    private var closedByUs = false
+    @Volatile private var closedByUs = false
     private var loopJob: Job? = null
 
     // Партнёр (другое устройство той же личности)
@@ -1038,8 +1038,10 @@ class MirrorChannel(
     /** р231: когда в последний раз просили движок (передача роли). */
     @Volatile private var lastClaimAt = 0L
 
-    /** р249: когда в последний раз досылали накопленные исходящие тени. */
-    @Volatile private var lastPendingFlushAt = 0L
+    private val pendingFlusher = MirrorPendingFlusher(scope,
+        available = { mirrorPendingAvailable(canClaimEngine(), closedByUs, wsOpen, ::pairingTransportAvailable) },
+        load = bridge::pendingOutgoing, offer = ::publishPendingOutgoing,
+        recordFailure = { Log.w(TAG, "Pending mirror flush failed: ${it.javaClass.simpleName}") })
 
     /** Application context for the durable hub journal; never exposes an Activity context. */
     internal fun applicationContext(): Context = context.applicationContext
@@ -1700,8 +1702,12 @@ class MirrorChannel(
     /** Исходящая строка тени -> активному (тот отправит через свою сессию). */
     fun publishOutgoing(row: MirrorRow): Boolean {
         if (engineUp) return false
-        return sendEvent("out", row.toJson())
+        pendingFlusher.noteNewWork()
+        return publishPendingOutgoing(row)
     }
+
+    private fun publishPendingOutgoing(row: MirrorRow): Boolean =
+        !engineUp && sendEvent("out", row.toJson())
 
     /**
      * Действие партнёру: localOnly не передаётся собеседнику.
@@ -2756,6 +2762,7 @@ class MirrorChannel(
             maybeProbeLegacy(now)
             maybeSwitchRoom(now)
             maybeRoomHandshake(now)
+            pendingFlusher.request()
             delay(2_500L)
         }
     }
@@ -2763,9 +2770,8 @@ class MirrorChannel(
     private fun onPartnerFrame(obj: JSONObject) {
         val dev = obj.optString("dev")
         if (dev.isBlank() || dev == deviceTag) return
-        // р249: партнёра только что не было видно - запоминаем, чтобы тень
-        // дослала накопленные исходящие (см. flushPendingOutgoing).
-        val partnerAppeared = !partnerFresh()
+        // Сократить паузу и при появлении, и при переходе живого партнёра в активные.
+        val wakePending = mirrorPendingPartnerWake(partnerFresh(), partnerEng, obj.optInt("eng") == 1)
         partnerDev = dev
         partnerEng = obj.optInt("eng") == 1
         // р249: печать полки партнёра и сам факт встречи (по нему решаем, есть
@@ -2783,9 +2789,8 @@ class MirrorChannel(
         if (!initialSyncRequested) {
             maybeCatchup(force = becameFreshMax)
         }
-        // р249: партнёр объявился - у тени могли копиться исходящие, которым
-        // некому было уйти (писали при отсутствующем активном).
-        if (partnerAppeared) flushPendingOutgoing()
+        // Shorten idle backoff; the cooldown and in-flight gate still apply.
+        if (wakePending) pendingFlusher.wake()
         // р246: отпечаток профиля партнёра отличается от нашего - запросить
         // полный снимок и слиться (онлайн-поиск расхождений профиля).
         ProfileMirror.notePartnerDigest(obj.optString("pd", ""))
@@ -3594,34 +3599,8 @@ class MirrorChannel(
             retryPendingInitialFileRequests()
             retryPendingProfileRequests()
         }
-        // Тень: невостребованные исходящие (ушли, пока партнёра не было).
-        flushPendingOutgoing()
-    }
-
-    /**
-     * р249: дослать исходящие, которые тень накопила без партнёра.
-     *
-     * Раньше это делалось только в момент открытия соединения: если WS уже
-     * был жив, а активный появился позже (или перезапустился), строки так и
-     * висели `PENDING` до следующего переподключения - владелец видел
-     * «висит одна галочка» без всякой причины. Теперь догон зовётся и отсюда,
-     * и из появления партнёра; повторы режет пауза (иначе одна и та же строка
-     * ушла бы собеседнику дважды: она остаётся PENDING до подтверждения).
-     */
-    private fun flushPendingOutgoing() {
-        if (engineUp) return
-        if (!partnerEng) return
-        if (wsRef.get() == null) return
-        val now = System.currentTimeMillis()
-        if (now - lastPendingFlushAt < PENDING_FLUSH_COOLDOWN_MS) return
-        lastPendingFlushAt = now
-        scope.launch {
-            runCatching {
-                bridge.pendingOutgoing(PENDING_FLUSH_ROWS).forEach { row ->
-                    publishOutgoing(row)
-                }
-            }.onFailure { Log.w(TAG, "pending flush failed: ${it.message}") }
-        }
+        // The periodic gate also retries if the partner appears later.
+        pendingFlusher.wake()
     }
 
     private fun handleTransportJson(obj: JSONObject) {
@@ -3759,12 +3738,6 @@ class MirrorChannel(
 
         /** р236: черновик длиннее этого в кадр зеркала не кладём (кадр - 512 КиБ). */
         private const val DRAFT_MAX_CHARS = 8_000
-
-        /** р249: сколько накопленных строк тень досылает за один заход. */
-        private const val PENDING_FLUSH_ROWS = 50
-
-        /** р249: как часто повторять досылку накопленных исходящих. */
-        private const val PENDING_FLUSH_COOLDOWN_MS = 20_000L
 
         /** р249: сколько сидим в общей комнате, разыскивая потерянного партнёра. */
         private const val PROBE_MS = 90_000L

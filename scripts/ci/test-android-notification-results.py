@@ -45,6 +45,8 @@ class NotificationResultsTest(unittest.TestCase):
         self.assertEqual(1, self.run_report(missing_outbox))
         missing_mirror = [case for case in self.all_cases() if case[0] != checker.MIRROR_OUTGOING_CLASS]
         self.assertEqual(1, self.run_report(missing_mirror))
+        missing_pending = [case for case in self.all_cases() if case[0] != checker.MIRROR_PENDING_CLASS]
+        self.assertEqual(1, self.run_report(missing_pending))
         missing_push = [case for case in self.all_cases() if case[0] != checker.PUSH_CLASS]
         self.assertEqual(1, self.run_report(missing_push))
         missing_registration = [case for case in self.all_cases() if case[0] != checker.REGISTRATION_CLASS]

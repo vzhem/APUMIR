@@ -52,7 +52,8 @@ cd android-app || exit 1
     --tests '*GroupFileSeederTest*' --tests '*FileTransferWireTest*' --tests '*FileTransferReceiverTest*' --tests '*FileTransferSenderTest*' --tests '*FileTransferChunkStoreTest*' --tests '*TemporaryFileSweepTest*' --tests '*EphemeralControlTest*' \
     --tests '*SendTimePolicyTest*' --tests '*DeferredWireTest*' --tests '*DeferredDeliveryPolicyTest*' --tests '*FlashlightAlertPolicyTest*' --tests '*Ipv6NetworkProxyTest*' \
     --tests '*PushMailboxHttpClientTest*' --tests '*PushMailboxAccessSignerTest*' --tests '*PushMailboxHttpsTransportTest*' \
-    --tests '*PushEpochEnvelopeTest*' --tests '*PushMailboxMessageCodecTest*' --tests '*PushMailboxMessageOpenerTest*' --tests '*PushMailboxMessageSealerTest*' --tests '*PushMailboxDrainTest*' --tests '*PushMailboxPutBuilderTest*'
+    --tests '*PushEpochEnvelopeTest*' --tests '*PushMailboxMessageCodecTest*' --tests '*PushMailboxMessageOpenerTest*' --tests '*PushMailboxMessageSealerTest*' --tests '*PushMailboxDrainTest*' --tests '*PushMailboxPutBuilderTest*' \
+    --tests '*MirrorPendingOutgoingTest*' --tests '*MirrorPendingScheduleIntegrationTest*' --tests '*MirrorPendingFlusherTest*'
 TESTS_STATUS=$?
 
 # ---- почему тесты упали: словами в лог, а не «красный шаг без причины» -------
@@ -70,7 +71,7 @@ else
     echo "---- test results (testDebugUnitTest): отчётов нет ----"
 fi
 # A filtered Gradle task can succeed even if one requested class disappears.
-# Check every mailbox case, including skips, before compiling device tests.
+# Check every required mailbox and pending-mirror case, including skips.
 if [ "$TESTS_STATUS" -eq 0 ]; then
     python3 "$REPO_ROOT/scripts/ci/test-push-mailbox-jvm-results.py" || exit 1
     python3 "$REPO_ROOT/scripts/ci/check-push-mailbox-jvm-results.py" "$RESULTS" || exit 1

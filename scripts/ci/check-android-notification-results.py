@@ -10,6 +10,7 @@ DIRECT_REPLY_CLASS = "com.vladimir.messenger.data.reply.DirectReplyIngressInstru
 DIRECT_REPLY_FFI_CLASS = "com.vladimir.messenger.data.reply.DirectReplyRealFfiInstrumentedTest"
 SCOPED_ACK_CLASS = "com.vladimir.messenger.data.receipt.ScopedDeliveryAckInstrumentedTest"
 MIRROR_OUTGOING_CLASS = "com.vladimir.messenger.data.repository.MirrorOutgoingStoreInstrumentedTest"
+MIRROR_PENDING_CLASS = "com.vladimir.messenger.data.repository.MirrorPendingOutgoingInstrumentedTest"
 OUTBOX_CLASS = "com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest"
 CLEAR_LOOKUP_CLASS = "com.vladimir.messenger.data.chatclear.ChatClearTombstonesInstrumentedTest"
 PUSH_CLASS = "com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest"
@@ -81,6 +82,12 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "replySidecarUsesParentClearScopeAndRequiresTheRoomRow",
     "storageFailureAndCancellationRollbackInsertedRowAndPreview",
     "echoNeverDeletesAnIgnoredConflictingRowWhenClearArrives",
+}, MIRROR_PENDING_CLASS: {
+    "queuedQuoteAndPaletteSurviveReopenJsonAndActiveStaging",
+    "personalQueryExcludesGroupsAndTopicsBeforeTheLimit",
+    "durableTombstoneSuppressesPendingFrameAcrossReopen",
+    "pendingPagesPassBlockedRowsAndWrapWithRealRoom",
+    "rowOrGroupChangingAfterSelectionDoesNotProduceAFrame",
 }, OUTBOX_CLASS: {
     "actualRoomQueueReachesLaterRecipientPastManyBlockedRows",
     "aBadOldestMessageDoesNotHideLaterMessagesInTheSameRoomChat",

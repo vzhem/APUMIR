@@ -8,7 +8,7 @@ import com.vladimir.messenger.data.reply.DirectReplyWire
 import com.vladimir.messenger.util.NodeIds
 import kotlinx.coroutines.CancellationException
 
-/** Authenticated paired-device frames still need local scope and clear checks. */
+/** Local scope and clear checks do not authenticate the paired-frame source. */
 internal class MirrorOutgoingDispatcher(
     private val isCleared: (String, String) -> Boolean,
     private val localChat: suspend (String) -> String,
