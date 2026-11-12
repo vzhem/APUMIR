@@ -8,6 +8,8 @@ import hashlib
 import json
 import os
 import sys
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -32,22 +34,42 @@ def open_site(name: str):
         raise ValueError("unexpected site filename")
     opener = urllib.request.build_opener(SiteRedirectsOnly())
     request = urllib.request.Request(f"{SITE}/{name}", headers={"Cache-Control": "no-cache"})
-    return opener.open(request, timeout=30)
+    return opener.open(request, timeout=60)
 
 
-def verify_one(spec: SiteFile, fetch=open_site) -> None:
-    digest, size = hashlib.sha256(), 0
-    with fetch(spec.name) as response:
-        while True:
-            block = response.read(min(BLOCK, spec.size - size + 1))
-            if not block:
-                break
-            size += len(block)
-            if size > spec.size:
-                raise ValueError(f"site file too large: {spec.name}")
-            digest.update(block)
-    if size != spec.size or digest.hexdigest() != spec.digest:
-        raise ValueError(f"site file size or digest mismatch: {spec.name}")
+class SiteFileError(ValueError):
+    def __init__(self, name: str, reason: str):
+        super().__init__("site file verification failed")
+        self.name = name
+        self.reason = reason
+
+
+def verify_one(spec: SiteFile, fetch=open_site, sleeper=time.sleep) -> None:
+    # Network failures can be transient; retry from the beginning. A complete
+    # response with the wrong bytes is not a transport retry or a success.
+    for attempt in range(3):
+        digest, size = hashlib.sha256(), 0
+        try:
+            with fetch(spec.name) as response:
+                while True:
+                    block = response.read(min(BLOCK, spec.size - size + 1))
+                    if not block:
+                        break
+                    size += len(block)
+                    if size > spec.size:
+                        raise SiteFileError(spec.name, "size mismatch")
+                    digest.update(block)
+        except urllib.error.HTTPError as error:
+            if error.code not in (408, 429, 500, 502, 503, 504) or attempt == 2:
+                raise SiteFileError(spec.name, f"HTTP {error.code}") from error
+        except (OSError, TimeoutError) as error:
+            if attempt == 2:
+                raise SiteFileError(spec.name, type(error).__name__) from error
+        else:
+            if size != spec.size or digest.hexdigest() != spec.digest:
+                raise SiteFileError(spec.name, "size or SHA-256 mismatch")
+            return
+        sleeper(1 if attempt == 0 else 3)
 
 
 def verify_all(files: list[SiteFile], still_current, fetch=open_site, log=print) -> None:
@@ -79,8 +101,12 @@ def main() -> int:
         files = validate_inputs(Path("site-files"), release, tag)
         expected = tracked_fingerprint(release, tag)
         verify_all(files, lambda: current_release_matches(repository, tag, expected))
+    except SiteFileError as error:
+        # Both values are generated from a validated filename or a fixed reason;
+        # never print raw URL/error text from the HTTP response.
+        print(f"::error title=Site HTTP verification failed::{error.name}: {error.reason}")
+        return 1
     except (OSError, ValueError, TypeError, KeyError) as error:
-        # HTTP failures can contain URLs; expose only the error type.
         print(f"::error::Site HTTP verification failed: {type(error).__name__}")
         return 1
     print("::notice::All public site file bytes and metadata match the verified release snapshot")

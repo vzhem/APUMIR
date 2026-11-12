@@ -373,6 +373,38 @@ class HttpVerificationTest(unittest.TestCase):
             http_verify.verify_all(list(reversed(self.files)), lambda: True, self.fetch, lambda _: None)
         self.assertEqual(self.calls, [])
 
+    def test_network_timeout_retries_from_start_but_bad_bytes_do_not(self):
+        spec = next(f for f in self.files if f.name == "app-release.apk")
+        attempts = []
+        delays = []
+        def flaky(name):
+            attempts.append(name)
+            if len(attempts) < 3:
+                raise TimeoutError("do not print URLs or exception text")
+            return io.BytesIO(self.contents[name])
+        http_verify.verify_one(spec, flaky, delays.append)
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual(delays, [1, 3])
+        attempts.clear()
+        delays.clear()
+        def corrupt(name):
+            attempts.append(name)
+            return io.BytesIO(b"x" * spec.size)
+        with self.assertRaises(http_verify.SiteFileError):
+            http_verify.verify_one(spec, corrupt, delays.append)
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(delays, [])
+
+    def test_repeated_timeout_reports_only_safe_file_and_reason(self):
+        spec = next(f for f in self.files if f.name == "app-release.apk")
+        def failed(_):
+            raise TimeoutError("secret-url")
+        with self.assertRaises(http_verify.SiteFileError) as caught:
+            http_verify.verify_one(spec, failed, lambda _: None)
+        self.assertEqual(caught.exception.name, "app-release.apk")
+        self.assertEqual(caught.exception.reason, "TimeoutError")
+        self.assertNotIn("secret-url", str(caught.exception))
+
     def test_external_or_http_redirect_rejected(self):
         handler = http_verify.SiteRedirectsOnly()
         for url in ("http://apu.clan.su/downloads/app-release.apk", "https://example.org/app-release.apk"):
