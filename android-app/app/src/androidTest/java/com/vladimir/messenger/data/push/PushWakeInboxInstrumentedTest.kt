@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.CancellationException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -56,7 +57,7 @@ class PushWakeInboxInstrumentedTest {
             db.rawQuery("PRAGMA table_info(pending)", null).use { cursor ->
                 val columns = mutableSetOf<String>()
                 while (cursor.moveToNext()) columns += cursor.getString(1)
-                assertEquals(setOf("route", "revision", "expires_at", "due_at", "lease", "lease_until"), columns)
+                assertEquals(setOf("route", "revision", "expires_at", "due_at", "lease", "lease_until", "lease_nonce"), columns)
             }
         }
         val reopened = inbox(2)
@@ -112,6 +113,136 @@ class PushWakeInboxInstrumentedTest {
         assertTrue(old.lease != current.lease)
         assertEquals(PushWakeInbox.Completion.STALE, store.complete(old, true, afterExpiry + 1))
         assertEquals(PushWakeInbox.Completion.COMPLETED, store.complete(current, true, afterExpiry + 1))
+    }
+
+    @Test fun recreatedDatabaseRejectsAnOldClaimWithMatchingCounters() {
+        val first = inbox()
+        assertEquals(PushWakeInbox.EnqueueResult.QUEUED, first.enqueueRoute(a, now))
+        val old = ready(first, now)
+        first.close()
+        assertTrue(SQLiteDatabase.deleteDatabase(dbFile))
+
+        val recreated = inbox()
+        assertEquals(PushWakeInbox.EnqueueResult.QUEUED, recreated.enqueueRoute(a, now + 1))
+        val current = ready(recreated, now + 1)
+        assertEquals(old.revision, current.revision)
+        assertEquals(old.lease, current.lease) // both files began their counters at one
+        assertTrue(old.leaseNonce != current.leaseNonce)
+        assertFalse(current.toString().contains(current.leaseNonce))
+        assertEquals(PushWakeInbox.Completion.STALE, recreated.complete(old, true, now + 2))
+        assertEquals(PushWakeInbox.Completion.STALE, recreated.complete(old, false, now + 2))
+        assertTrue(recreated.pending(now + 2) is PushWakeInbox.PendingResult.Pending)
+        assertEquals(PushWakeInbox.Completion.COMPLETED, recreated.complete(current, true, now + 3))
+        assertEquals(PushWakeInbox.PendingResult.Empty, recreated.pending(now + 3))
+    }
+
+    @Test fun restoredPreLeaseSnapshotRejectsOldClaimEvenWhenCountersRepeat() {
+        val snapshot = File(dbFile.absolutePath + ".snapshot")
+        try {
+            val first = inbox()
+            assertEquals(PushWakeInbox.EnqueueResult.QUEUED, first.enqueueRoute(a, now))
+            first.close()
+            dbFile.copyTo(snapshot, overwrite = true) // no connection is open
+            val old = ready(first, now + 1)
+            first.close()
+            snapshot.copyTo(dbFile, overwrite = true)
+
+            val restored = inbox()
+            val current = ready(restored, now + 2)
+            assertEquals(old.revision, current.revision)
+            assertEquals(old.lease, current.lease)
+            assertTrue(old.leaseNonce != current.leaseNonce)
+            assertEquals(PushWakeInbox.Completion.STALE, restored.complete(old, true, now + 3))
+            assertEquals(PushWakeInbox.Completion.COMPLETED, restored.complete(current, true, now + 4))
+        } finally { snapshot.delete() }
+    }
+
+    @Test fun versionOneMigrationPreservesWakesAndReleasesLegacyLeases() {
+        SQLiteDatabase.openOrCreateDatabase(dbFile, null).use { db ->
+            db.execSQL("CREATE TABLE meta (id INTEGER PRIMARY KEY CHECK(id=1), last_lease INTEGER NOT NULL CHECK(last_lease>=0))")
+            db.execSQL("INSERT INTO meta (id, last_lease) VALUES (1, 7)")
+            db.execSQL(
+                "CREATE TABLE pending (route TEXT PRIMARY KEY NOT NULL, " +
+                    "revision INTEGER NOT NULL CHECK(revision>0), expires_at INTEGER NOT NULL, " +
+                    "due_at INTEGER NOT NULL, lease INTEGER, lease_until INTEGER NOT NULL, " +
+                    "CHECK(route='*' OR (length(route)=64 AND route NOT GLOB '*[^0-9a-f]*')), " +
+                    "CHECK(lease IS NULL OR lease>0))"
+            )
+            db.execSQL("CREATE INDEX pending_due ON pending(due_at)")
+            db.execSQL("INSERT INTO pending(route,revision,expires_at,due_at,lease,lease_until) VALUES (?,?,?,?,?,?)",
+                arrayOf(a, 3L, now + PushWakeInbox.TTL_MS, now, 7L, now + PushWakeInbox.LEASE_MS))
+            db.execSQL("INSERT INTO pending(route,revision,expires_at,due_at,lease,lease_until) VALUES (?,?,?,?,?,?)",
+                arrayOf(b, 2L, now + PushWakeInbox.TTL_MS, now + PushWakeInbox.RETRY_MS, null, 0L))
+            db.version = 1
+        }
+        val migrated = inbox()
+        val current = ready(migrated, now + 1)
+        assertEquals(a, current.route)
+        assertEquals(3L, current.revision)
+        assertEquals(8L, current.lease)
+        assertEquals(64, current.leaseNonce.length)
+        assertEquals(PushWakeInbox.Completion.COMPLETED, migrated.complete(current, true, now + 2))
+        assertEquals(now + PushWakeInbox.RETRY_MS, due(migrated, now + 2))
+        migrated.close()
+        val reopened = inbox()
+        val delayed = ready(reopened, now + PushWakeInbox.RETRY_MS)
+        assertEquals(b, delayed.route)
+        assertEquals(2L, delayed.revision)
+        assertEquals(9L, delayed.lease)
+        assertEquals(PushWakeInbox.Completion.COMPLETED, reopened.complete(delayed, true, now + PushWakeInbox.RETRY_MS + 1))
+        assertEquals(PushWakeInbox.PendingResult.Empty, reopened.pending(now + PushWakeInbox.RETRY_MS + 1))
+    }
+
+    @Test fun failedLeaseEntropyRollsBackTheClaimAndPreservesTheWake() {
+        val unavailable = PushWakeInbox(context, dbFile, fillLeaseNonce = { throw IllegalStateException("unavailable") })
+            .also(stores::add)
+        assertEquals(PushWakeInbox.EnqueueResult.QUEUED, unavailable.enqueueRoute(a, now))
+        assertEquals(PushWakeInbox.ClaimResult.Unavailable, unavailable.claim(now))
+        assertTrue(unavailable.pending(now) is PushWakeInbox.PendingResult.Pending)
+        unavailable.close()
+        val cancelled = PushWakeInbox(context, dbFile, fillLeaseNonce = { throw CancellationException("cancel") })
+            .also(stores::add)
+        var propagated = false
+        try { cancelled.claim(now) } catch (_: CancellationException) { propagated = true }
+        assertTrue(propagated)
+        assertTrue(cancelled.pending(now) is PushWakeInbox.PendingResult.Pending)
+        cancelled.close()
+        val zeroEntropy = PushWakeInbox(context, dbFile, fillLeaseNonce = { it.fill(0) }).also(stores::add)
+        assertEquals(PushWakeInbox.ClaimResult.Unavailable, zeroEntropy.claim(now))
+        assertTrue(zeroEntropy.pending(now) is PushWakeInbox.PendingResult.Pending)
+        zeroEntropy.close()
+        SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+            db.rawQuery("SELECT last_lease FROM meta WHERE id=1", null).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(0L, cursor.getLong(0))
+            }
+        }
+        val recovered = inbox()
+        val claim = ready(recovered, now + 1)
+        assertEquals(1L, claim.lease)
+        assertEquals(PushWakeInbox.Completion.COMPLETED, recovered.complete(claim, true, now + 2))
+    }
+
+    @Test fun wrongOrCorruptedLeaseNonceCannotConsumeARealClaim() {
+        val store = inbox()
+        assertEquals(PushWakeInbox.EnqueueResult.QUEUED, store.enqueueRoute(a, now))
+        val actual = ready(store, now)
+        val wrong = PushWakeInbox.Claim(a, actual.revision, actual.lease, "fe".repeat(32))
+        assertEquals(PushWakeInbox.Completion.STALE, store.complete(wrong, true, now + 1))
+        listOf("not-a-valid-nonce", "00".repeat(32), "AB".repeat(32)).forEach { invalid ->
+            val malformed = PushWakeInbox.Claim(a, actual.revision, actual.lease, invalid)
+            assertEquals(PushWakeInbox.Completion.INVALID, store.complete(malformed, true, now + 1))
+        }
+        store.close()
+        SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.execSQL("UPDATE pending SET lease_nonce=? WHERE route=?", arrayOf("malformed", a))
+        }
+        assertEquals(PushWakeInbox.Completion.UNAVAILABLE, store.complete(actual, true, now + 1))
+        // Once the lease expires, a fresh nonce is issued rather than trusting
+        // the corrupted value; the pending wake is still available.
+        val retry = ready(store, now + PushWakeInbox.LEASE_MS)
+        assertEquals(PushWakeInbox.Completion.STALE, store.complete(actual, true, now + PushWakeInbox.LEASE_MS + 1))
+        assertEquals(PushWakeInbox.Completion.COMPLETED, store.complete(retry, true, now + PushWakeInbox.LEASE_MS + 1))
     }
 
     @Test fun failedWorkRespectsBackoffAndDoesNotLoseANewerWake() {

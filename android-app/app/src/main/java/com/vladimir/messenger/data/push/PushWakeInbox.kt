@@ -6,6 +6,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.util.Log
 import java.io.File
+import java.security.SecureRandom
 import java.util.concurrent.CancellationException
 
 /**
@@ -21,15 +22,19 @@ import java.util.concurrent.CancellationException
  * Firebase, schedule work, send network traffic, or enable push.
  *
  * SQLite transactions and a process-wide lock prevent races among instances.
- * The monotonic lease number prevents an old completion from deleting a new
- * claim, even after the row expired and was recreated. Rows expire after an
- * hour; after quota overflow a separate coalesced recovery marker preserves the
- * need for a generic sync rather than silently discarding another contact.
+ * Each claim has both a monotonic lease number and a fresh random nonce: an old
+ * completion cannot consume a newly claimed row if the database is recreated
+ * or an earlier, unleased snapshot is restored and the counter repeats, except
+ * for a negligible random collision. Restoring a snapshot that contains the
+ * SAME live claim is not detected. Nor does this detect database deletion or
+ * protect identity/pin/restore from ABA. Rows expire after an hour; overflow
+ * coalesces a generic recovery marker instead of silently dropping a contact.
  */
 internal class PushWakeInbox(
     context: Context,
     private val databaseFile: File = File(context.applicationContext.noBackupFilesDir, "push_wake_inbox_v1.sqlite"),
     private val maxRoutes: Int = 128,
+    private val fillLeaseNonce: (ByteArray) -> Unit = { LEASE_ENTROPY.nextBytes(it) },
 ) : PushWakeQueue {
     private val app = context.applicationContext
     private var helper: SQLiteOpenHelper? = null
@@ -59,6 +64,7 @@ internal class PushWakeInbox(
         val route: String?,
         internal val revision: Long,
         internal val lease: Long,
+        internal val leaseNonce: String,
     ) {
         override fun toString(): String = "PushWakeClaim(redacted)"
     }
@@ -98,6 +104,7 @@ internal class PushWakeInbox(
                         put("expires_at", nowMs + TTL_MS)
                         put("due_at", nowMs)
                         putNull("lease")
+                        putNull("lease_nonce")
                         put("lease_until", 0L)
                     }
                     check(db.insertOrThrow("pending", null, values) != -1L)
@@ -146,10 +153,15 @@ internal class PushWakeInbox(
                 val (route, revision) = candidate
                 check((route == RECOVERY || ROUTE.matches(route)) && revision > 0)
                 val lease = nextLease(db)
-                val values = ContentValues().apply { put("lease", lease); put("lease_until", nowMs + LEASE_MS) }
+                val nonce = freshLeaseNonce()
+                val values = ContentValues().apply {
+                    put("lease", lease)
+                    put("lease_nonce", nonce)
+                    put("lease_until", nowMs + LEASE_MS)
+                }
                 check(db.update("pending", values, "route=? AND lease IS NULL", arrayOf(route)) == 1)
                 db.setTransactionSuccessful()
-                ClaimResult.Ready(Claim(route.takeUnless { it == RECOVERY }, revision, lease))
+                ClaimResult.Ready(Claim(route.takeUnless { it == RECOVERY }, revision, lease, nonce))
             } finally { db.endTransaction() }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -167,30 +179,38 @@ internal class PushWakeInbox(
     override fun complete(claim: Claim, success: Boolean, nowMs: Long): Completion = synchronized(LOCK) {
         val route = claim.route ?: RECOVERY
         if (!validNow(nowMs) || (route != RECOVERY && !ROUTE.matches(route)) ||
-            claim.revision <= 0 || claim.lease <= 0
+            claim.revision <= 0 || claim.lease <= 0 || !validLeaseNonce(claim.leaseNonce)
         ) return@synchronized Completion.INVALID
         try {
             val db = db()
             db.beginTransaction()
             try {
                 normalize(db, nowMs)
-                val current = db.rawQuery("SELECT revision, lease FROM pending WHERE route=?", arrayOf(route)).use { cursor ->
-                    if (!cursor.moveToFirst() || cursor.isNull(1)) null else cursor.getLong(0) to cursor.getLong(1)
+                val current = db.rawQuery("SELECT revision, lease, lease_nonce FROM pending WHERE route=?", arrayOf(route)).use { cursor ->
+                    if (!cursor.moveToFirst() || cursor.isNull(1)) null else {
+                        check(!cursor.isNull(2)) { "push wake lease nonce missing" }
+                        val nonce = cursor.getString(2)
+                        check(validLeaseNonce(nonce)) { "push wake lease nonce invalid" }
+                        Triple(cursor.getLong(0), cursor.getLong(1), nonce)
+                    }
                 }
-                if (current == null || current.second != claim.lease) {
+                if (current == null || current.second != claim.lease || current.third != claim.leaseNonce) {
                     db.setTransactionSuccessful()
                     return@synchronized Completion.STALE
                 }
+                val where = "route=? AND lease=? AND lease_nonce=?"
+                val args = arrayOf(route, claim.lease.toString(), claim.leaseNonce)
                 val result = if (success && current.first == claim.revision) {
-                    check(db.delete("pending", "route=? AND lease=?", arrayOf(route, claim.lease.toString())) == 1)
+                    check(db.delete("pending", where, args) == 1)
                     Completion.COMPLETED
                 } else {
                     val values = ContentValues().apply {
                         putNull("lease")
+                        putNull("lease_nonce")
                         put("lease_until", 0L)
                         put("due_at", if (success) nowMs else nowMs + RETRY_MS)
                     }
-                    check(db.update("pending", values, "route=? AND lease=?", arrayOf(route, claim.lease.toString())) == 1)
+                    check(db.update("pending", values, where, args) == 1)
                     if (success) Completion.NEWER_QUEUED else Completion.RETRY_QUEUED
                 }
                 db.setTransactionSuccessful()
@@ -234,21 +254,26 @@ internal class PushWakeInbox(
 
     private fun db(): SQLiteDatabase {
         if (helper == null) {
-            helper = object : SQLiteOpenHelper(app, databaseFile.absolutePath, null, 1) {
+            // Keep the original file path so existing pending wakes migrate.
+            helper = object : SQLiteOpenHelper(app, databaseFile.absolutePath, null, 2) {
                 override fun onCreate(db: SQLiteDatabase) {
                     db.execSQL("CREATE TABLE meta (id INTEGER PRIMARY KEY CHECK(id=1), last_lease INTEGER NOT NULL CHECK(last_lease>=0))")
                     db.execSQL("INSERT INTO meta (id, last_lease) VALUES (1, 0)")
                     db.execSQL(
                         "CREATE TABLE pending (route TEXT PRIMARY KEY NOT NULL, " +
                             "revision INTEGER NOT NULL CHECK(revision>0), expires_at INTEGER NOT NULL, " +
-                            "due_at INTEGER NOT NULL, lease INTEGER, lease_until INTEGER NOT NULL, " +
+                            "due_at INTEGER NOT NULL, lease INTEGER, lease_until INTEGER NOT NULL, lease_nonce TEXT, " +
                             "CHECK(route='*' OR (length(route)=64 AND route NOT GLOB '*[^0-9a-f]*')), " +
                             "CHECK(lease IS NULL OR lease>0))"
                     )
                     db.execSQL("CREATE INDEX pending_due ON pending(due_at)")
                 }
                 override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-                    error("unsupported push wake inbox migration")
+                    check(oldVersion == 1 && newVersion == 2) { "unsupported push wake inbox migration" }
+                    db.execSQL("ALTER TABLE pending ADD COLUMN lease_nonce TEXT")
+                    // The old process cannot complete after an app upgrade. Its
+                    // claims have no nonce, so preserve and release them for retry.
+                    db.execSQL("UPDATE pending SET lease=NULL, lease_until=0 WHERE lease IS NOT NULL")
                 }
             }
         }
@@ -261,7 +286,7 @@ internal class PushWakeInbox(
         db.execSQL("UPDATE pending SET expires_at=? WHERE expires_at>?", arrayOf(nowMs + TTL_MS, nowMs + TTL_MS))
         db.execSQL("UPDATE pending SET due_at=? WHERE due_at>?", arrayOf(nowMs + RETRY_MS, nowMs + RETRY_MS))
         db.execSQL(
-            "UPDATE pending SET lease=NULL, lease_until=0 WHERE lease IS NOT NULL AND (lease_until<=? OR lease_until>?)",
+            "UPDATE pending SET lease=NULL, lease_nonce=NULL, lease_until=0 WHERE lease IS NOT NULL AND (lease_until<=? OR lease_until>?)",
             arrayOf(nowMs, nowMs + LEASE_MS),
         )
     }
@@ -276,6 +301,21 @@ internal class PushWakeInbox(
         val values = ContentValues().apply { put("last_lease", next) }
         check(db.update("meta", values, "id=1 AND last_lease=?", arrayOf(before.toString())) == 1)
         return next
+    }
+
+    private fun freshLeaseNonce(): String {
+        val bytes = ByteArray(32)
+        try {
+            fillLeaseNonce(bytes)
+            check(bytes.any { it != 0.toByte() }) { "push wake lease entropy unavailable" }
+            val chars = CharArray(bytes.size * 2)
+            for (index in bytes.indices) {
+                val value = bytes[index].toInt() and 0xff
+                chars[index * 2] = HEX[value ushr 4]
+                chars[index * 2 + 1] = HEX[value and 0x0f]
+            }
+            return String(chars)
+        } finally { bytes.fill(0) }
     }
 
     private fun revision(db: SQLiteDatabase, route: String): Long? =
@@ -295,13 +335,17 @@ internal class PushWakeInbox(
     }
 
     private fun validNow(nowMs: Long): Boolean = nowMs in 1..(Long.MAX_VALUE - TTL_MS)
+    private fun validLeaseNonce(value: String): Boolean = LEASE_NONCE.matches(value) && value.any { it != '0' }
 
     companion object {
         const val TTL_MS = 60L * 60_000L
         const val LEASE_MS = 60_000L
         const val RETRY_MS = 15_000L
         private const val RECOVERY = "*"
+        private const val HEX = "0123456789abcdef"
         private val ROUTE = Regex("^[0-9a-f]{64}$")
+        private val LEASE_NONCE = Regex("^[0-9a-f]{64}$")
+        private val LEASE_ENTROPY = SecureRandom()
         private val LOCK = Any()
     }
 }

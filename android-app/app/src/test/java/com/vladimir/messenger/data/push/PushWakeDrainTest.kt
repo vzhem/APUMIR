@@ -15,7 +15,7 @@ import org.junit.Test
 /** Tests production drain logic with an in-memory queue; not an Android/FCM test. */
 class PushWakeDrainTest {
     private class FakeQueue : PushWakeQueue {
-        private val item = PushWakeInbox.Claim("12".repeat(32), 1L, 1L)
+        private val item = PushWakeInbox.Claim("12".repeat(32), 1L, 1L, "ab".repeat(32))
         var pending = true
         var leased = false
         var due = 100L
@@ -44,7 +44,7 @@ class PushWakeDrainTest {
 
     private class BatchQueue(routes: List<String?>) : PushWakeQueue {
         private val items = routes.mapIndexed { index, route ->
-            PushWakeInbox.Claim(route, index.toLong() + 1, index.toLong() + 1)
+            PushWakeInbox.Claim(route, index.toLong() + 1, index.toLong() + 1, "ab".repeat(32))
         }
         private var next = 0
         val completions = mutableListOf<Pair<String?, Boolean>>()
