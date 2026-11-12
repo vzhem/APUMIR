@@ -50,6 +50,7 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "sqliteFailureAndClearPreflightCannotAcknowledge",
     "conflictingReplyCannotOverwriteTheFirstQuote",
     "groupReplyUpdateRequiresTheMatchingGroupAtUpdateTime",
+    "groupEarlyRepliesRespectOwnerAndStoredAuthorInRealRoom",
 }, DIRECT_REPLY_FFI_CLASS: {
     "selfClaimedIdCannotPassThePinnedReplyOrLegacyMirrorBinding",
 }, MIRROR_OUTGOING_CLASS: {

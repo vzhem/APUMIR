@@ -460,12 +460,15 @@ interface MessageDao {
      */
     @Query(
         "UPDATE messages SET replyToId = :replyToId, replyAuthor = :replyAuthor, replyText = :replyText " +
-            "WHERE id = :messageId AND chatId = :groupId " +
-            "AND EXISTS (SELECT 1 FROM groups g WHERE g.id = messages.chatId)"
+            "WHERE id = :messageId AND chatId = :groupId AND senderId = :senderId " +
+            "AND EXISTS (SELECT 1 FROM groups g WHERE g.id = messages.chatId) " +
+            "AND (replyToId IS NULL OR replyToId = '' OR " +
+            "(replyToId = :replyToId AND replyAuthor = :replyAuthor AND replyText = :replyText))"
     )
     suspend fun applyGroupReply(
         groupId: String,
         messageId: String,
+        senderId: String,
         replyToId: String?,
         replyAuthor: String,
         replyText: String,

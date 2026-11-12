@@ -90,11 +90,23 @@ class DirectReplyScopeTest(unittest.TestCase):
         self.assertEqual(0, self.update("foreign", q=query("applyGroupReply")))
         self.add("group-parent", chat="group", channel="GROUP")
         self.assertEqual(0, self.update("group-parent", q=query("applyGroupReply"), group="other"))
+        self.assertEqual(0, self.update("group-parent", q=query("applyGroupReply"), peer="pk_other456"))
         self.assertEqual(1, self.update("group-parent", q=query("applyGroupReply"), group="group"))
+        self.assertEqual(0, self.update("group-parent", q=query("applyGroupReply"), target="changed"))
+        self.assertEqual(1, self.update("group-parent", q=query("applyGroupReply"), group="group"))
+        # The previous group-scoped query alone still let another claimed sender replace it.
+        prior_group = ("UPDATE messages SET replyToId=:replyToId, replyAuthor=:replyAuthor, replyText=:replyText "
+                       "WHERE id=:messageId AND chatId=:groupId "
+                       "AND EXISTS (SELECT 1 FROM groups g WHERE g.id = messages.chatId)")
+        self.assertEqual(1, self.update("group-parent", q=prior_group, peer="pk_other456", target="forged"))
+        self.assertEqual("forged", self.reply("group-parent"))
         group = (BASE / "data/group/GroupRepository.kt").read_text(encoding="utf-8")
-        self.assertIn("messageDao.applyGroupReply(", group)
-        self.assertIn("pendingReplies.put(packet.groupId, packet.messageId, packet)", group)
-        self.assertIn("pendingReplies.take(packet.groupId, localId)", group)
+        ingress = (BASE / "data/group/GroupReplyIngress.kt").read_text(encoding="utf-8")
+        self.assertIn("groupReplies.receive(senderId, packet)", group)
+        self.assertIn("groupReplies.parentInserted(packet.groupId, localId)", group)
+        self.assertIn("messageDao.applyGroupReply(", ingress)
+        self.assertIn("pending.put(owner, packet.groupId, packet.messageId, sender", ingress)
+        self.assertIn("pending.take(owner, groupId, messageId)", ingress)
         self.assertNotIn("applyDirectReplyFromPeer", group)
 
     def test_conflicting_reply_cannot_replace_the_first_but_exact_duplicate_can_ack(self):
@@ -142,7 +154,9 @@ class DirectReplyScopeTest(unittest.TestCase):
         self.assertLess(source.index("!authenticated"), source.index("apply(sender, packet)"))
         self.assertLess(source.index("isCleared(sender, parent)"), source.index("apply(sender, packet)"))
         self.assertIn("DirectReplyWire.transportMessageId(parent) != transportId", source)
-        self.assertIn('if (applied) sideEffect("ack")', source)
+        self.assertIn("if (!fromMirror && applied)", source)
+        self.assertLess(source.index("if (!fromMirror && applied)"), source.index('sideEffect("forward")'))
+        self.assertLess(source.index('sideEffect("forward")'), source.index('sideEffect("ack")'))
         self.assertIn("catch (cancelled: CancellationException)", source)
         binding = (BASE / "service/DirectReplyRouting.kt").read_text(encoding="utf-8")
         self.assertIn("ChatClearRegistry.isCleared", binding)

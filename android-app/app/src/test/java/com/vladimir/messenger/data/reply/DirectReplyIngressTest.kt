@@ -76,14 +76,14 @@ class DirectReplyIngressTest {
         assertTrue(f.acknowledgements.isEmpty())
     }
 
-    @Test fun missingOrConflictingParentNeverAcksButMayReachPairedDevice() = runBlocking {
+    @Test fun missingOrConflictingParentIsNeitherForwardedNorAcknowledged() = runBlocking {
         val f = Fixture()
         f.apply = { _, _ -> false }
         assertEquals(DirectReplyResult.UNAPPLIED, f.ingress.testNetwork(peer, "chat", id, packet, true))
         assertTrue(f.acknowledgements.isEmpty())
-        assertEquals(1, f.forwarded.size)
+        assertTrue(f.forwarded.isEmpty())
         assertEquals(DirectReplyResult.UNAPPLIED, f.ingress.mirror(peer, id, packet, true))
-        assertEquals(1, f.forwarded.size)
+        assertTrue(f.forwarded.isEmpty())
         assertTrue(f.acknowledgements.isEmpty())
     }
 

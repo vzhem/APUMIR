@@ -1720,31 +1720,7 @@ class GroupRepository(
 
     // ── р250: приём новых конвертов ─────────────────────────────────────────
 
-    /** Цитаты, пришедшие раньше сообщения, изолированы по группе и ID. */
-    private val pendingReplies = GroupReplyBuffer<GroupWire.Packet.Reply>(PENDING_REPLIES, PENDING_TTL_MS, clock)
-
-    private suspend fun handleReply(senderId: String, packet: GroupWire.Packet.Reply) {
-        val me = myId().orEmpty()
-        if (me.isBlank()) return
-        if (groupDao.getMember(packet.groupId, me) == null) return
-        val message = messageDao.getMessageById(packet.messageId)
-        // Сообщение ещё в пути (цитата пришла быстрее): подождём его в буфере,
-        // как куски поста ждут манифест.
-        if (message == null || message.chatId != packet.groupId) {
-            pendingReplies.put(packet.groupId, packet.messageId, packet)
-            return
-        }
-        applyReply(packet)
-    }
-
-    private suspend fun applyReply(packet: GroupWire.Packet.Reply) {
-        messageDao.applyGroupReply(
-            groupId = packet.groupId, messageId = packet.messageId,
-            replyToId = packet.replyToId,
-            replyAuthor = packet.replyAuthor,
-            replyText = GroupWire.replyPreview(packet.replyText),
-        )
-    }
+    private val groupReplies = roomGroupReplyIngress(groupDao, messageDao, ::myId, PENDING_REPLIES, PENDING_TTL_MS, clock)
 
     private suspend fun handlePoll(senderId: String, packet: GroupWire.Packet.Poll) =
         polls.handlePoll(senderId, packet)
@@ -3142,7 +3118,7 @@ class GroupRepository(
                 }
                 // р250: цитата ответа могла приехать раньше самого сообщения -
                 // забираем её из буфера (как куски поста ждут манифест).
-                pendingReplies.take(packet.groupId, localId).forEach { applyReply(it) }
+                groupReplies.parentInserted(packet.groupId, localId)
                 if (packet.senderNameColor.isNotBlank()) {
                     onPeerNameColor(authorId, packet.senderNameColor)
                 }
@@ -3803,7 +3779,7 @@ class GroupRepository(
             }
 
             // ── р250: ответы, опросы и медленный режим ──
-            is GroupWire.Packet.Reply -> handleReply(senderId, packet)
+            is GroupWire.Packet.Reply -> groupReplies.receive(senderId, packet)
 
             is GroupWire.Packet.Poll -> handlePoll(senderId, packet)
 

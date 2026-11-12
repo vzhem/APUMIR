@@ -76,12 +76,14 @@ internal class DirectReplyIngress(
         }
         currentCoroutineContext().ensureActive()
         if (applied == null) return DirectReplyResult.REJECTED
-        if (!fromMirror) {
-            // A verified sidecar may precede its parent on one device but not
-            // on the other. This is best-effort, not a durable mirror queue.
+        if (!fromMirror && applied) {
+            // Do not forward an unapplied sidecar: false can mean a conflicting
+            // quote, not just a missing parent. A paired device with an empty
+            // quote could otherwise accept the locally rejected version.
+            // Early sidecars still need a durable inbox and mirror catch-up.
             sideEffect("forward") { forwardVerified(sender, chat, transportId, text) }
             currentCoroutineContext().ensureActive()
-            if (applied) sideEffect("ack") { acknowledge(transportId, sender) }
+            sideEffect("ack") { acknowledge(transportId, sender) }
         }
         return if (applied) DirectReplyResult.APPLIED else DirectReplyResult.UNAPPLIED
     }
