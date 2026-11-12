@@ -77,7 +77,9 @@ export class FcmV1 {
       "&assertion=" + encodeURIComponent(assertion);
     const response = await this.sendRequest(OAUTH_ENDPOINT, {
       method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: form, signal: AbortSignal.timeout(10_000),
+      // Workerd supports "manual", not "error". A redirect is rejected below;
+      // never forward the signed assertion to another endpoint.
+      body: form, redirect: "manual", signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) throw new Error("FCM OAuth unavailable");
     const payload = await boundedJson(response);
@@ -109,7 +111,9 @@ export class FcmV1 {
           // bounded full sync before this prototype can be enabled.
           android: { priority: "HIGH", ttl: "3600s", restricted_package_name: "com.vladimir.messenger" },
         } }),
-        signal: AbortSignal.timeout(10_000),
+        // Workerd's manual mode exposes 3xx without forwarding the device
+        // token or opaque route; the non-success response is retried below.
+        redirect: "manual", signal: AbortSignal.timeout(10_000),
       });
       if (response.ok) return "sent";
       if (response.status === 401) this.cached = null;

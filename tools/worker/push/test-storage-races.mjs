@@ -2,7 +2,9 @@
 // public request path is separately exercised in workerd with SQLite DOs.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { generateKeyPairSync } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import { FcmV1 } from "./fcm.mjs";
 import { identity, registration } from "./mailbox-test-fixture.mjs";
 import { PushShard } from "./worker.mjs";
 
@@ -195,6 +197,56 @@ test("provider failure persists a bounded retry and an alarm resumes it", async 
   assert.equal(calls, 2);
   assert.equal(pending(sql).length, 0);
   db.close();
+});
+
+test("an OAuth or FCM redirect retains the wake and its token until a later provider success", async () => {
+  const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const privateKey = rsa.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+  const oauth = "https://oauth2.googleapis.com/token";
+  const fcm = "https://fcm.googleapis.com/v1/projects/test-project/messages:send";
+  for (const phase of ["oauth", "fcm"]) {
+    const { db, sql, shard, env, getAlarm } = makeShard();
+    try {
+      env.FCM_PRIVATE_KEY = privateKey;
+      const now = Date.now();
+      insert(sql, now);
+      let redirect = true;
+      const requests = [];
+      shard.provider = new FcmV1(env, async (url, options) => {
+        requests.push({ url, redirect: options.redirect });
+        if (url === oauth) {
+          if (redirect && phase === "oauth") {
+            return new Response(null, { status: 307, headers: { location: "https://untrusted.invalid/capture" } });
+          }
+          return Response.json({ access_token: "fake-access", expires_in: 3600 });
+        }
+        if (url === fcm) {
+          if (redirect && phase === "fcm") {
+            return new Response(null, { status: 307, headers: { location: "https://untrusted.invalid/capture" } });
+          }
+          return Response.json({ name: "fake" });
+        }
+        throw new Error("Unexpected provider endpoint");
+      });
+      assert.equal((await shard.wake(owner, route, now)).status, 202);
+      await shard.alarm();
+      assert.equal(row(sql).token, oldToken, `${phase}: do not retire a token on redirect`);
+      assert.equal(pending(sql).length, 1, `${phase}: the wake must remain queued`);
+      assert.equal(pending(sql)[0].attempts, 1);
+      assert.ok(pending(sql)[0].next_at > now);
+      assert.ok(getAlarm() !== null && getAlarm() <= pending(sql)[0].next_at);
+      assert.deepEqual(requests.map((request) => request.url), phase === "oauth" ? [oauth] : [oauth, fcm]);
+      assert.ok(requests.every((request) => request.redirect === "manual"));
+
+      redirect = false;
+      makePendingDue(sql);
+      await shard.alarm();
+      assert.equal(row(sql).token, oldToken);
+      assert.equal(pending(sql).length, 0, `${phase}: a later successful send clears the signal`);
+      assert.deepEqual(requests.map((request) => request.url), phase === "oauth" ? [oauth, oauth, fcm] : [oauth, fcm, fcm]);
+      assert.ok(requests.every((request) => request.redirect === "manual"));
+    } finally { db.close(); }
+  }
 });
 
 test("coalesces a wake arriving during a send without losing the later request", async () => {
