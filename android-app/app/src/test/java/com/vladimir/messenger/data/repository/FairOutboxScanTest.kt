@@ -92,6 +92,20 @@ class FairOutboxScanTest {
         assertFalse(progress.moreToScan)
     }
 
+    @Test fun rowsInvalidatedAfterLoadingDoNotSpendBudgetOrBlockTheirChat() = runBlocking {
+        val rows = listOf(Item("stale", 1, "chat"), Item("fresh", 2, "chat"))
+        val visited = mutableListOf<String>()
+        val scan = FairOutboxScan<Item>(maxAttemptsPerCycle = 1)
+        val progress = scan.run(20, { rows.size }, loader(rows)) {
+            visited += it.id
+            if (it.id == "stale") null else true
+        }
+        assertEquals(listOf("stale", "fresh"), visited)
+        assertEquals(1, progress.attempted)
+        assertEquals(1, progress.sent)
+        assertFalse(progress.moreToScan)
+    }
+
     @Test fun emptyScanDoesNotLoadAndNewRowsCanStartTheNextScan() = runBlocking {
         val rows = mutableListOf<Item>()
         val scan = FairOutboxScan<Item>()

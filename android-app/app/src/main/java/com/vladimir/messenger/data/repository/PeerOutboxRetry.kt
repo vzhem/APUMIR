@@ -13,6 +13,8 @@ import kotlinx.coroutines.CancellationException
 internal class PeerOutboxRetry(
     private val loadPending: suspend (String, Int) -> List<MessageEntity>,
     private val loadRecent: suspend (String, Int) -> List<MessageEntity>,
+    private val loadCurrent: suspend (String) -> MessageEntity?,
+    private val chatContact: suspend (String) -> String?,
     private val send: suspend (String, String, String, String) -> Boolean,
     private val markSent: suspend (String) -> Unit,
     private val recordFailure: () -> Unit,
@@ -23,7 +25,7 @@ internal class PeerOutboxRetry(
     private val lastSync = LinkedHashMap<String, Long>(16, 0.75f, true)
 
     suspend fun retry(peerId: String): Int {
-        if (peerId.isBlank() || !begin(peerId)) return 0
+        if (!peerId.startsWith("pk_") || '\u0000' in peerId || !begin(peerId)) return 0
         try {
             var sent = 0
             var attempts = 0
@@ -33,7 +35,7 @@ internal class PeerOutboxRetry(
                 if (attempts >= TOTAL_LIMIT) break
                 if (!tried.add(row.id)) continue
                 attempts++
-                if (attempt(row, peerId)) sent++
+                if (attempt(row, peerId, pendingOnly = true)) sent++
             }
 
             if (syncDue(peerId)) {
@@ -49,7 +51,7 @@ internal class PeerOutboxRetry(
                     if (attempts >= TOTAL_LIMIT) break
                     if (!tried.add(row.id)) continue
                     attempts++
-                    if (attempt(row, peerId)) sent++
+                    if (attempt(row, peerId, pendingOnly = false)) sent++
                 }
                 // Only a completed pass starts the cooldown: cancellation or a
                 // failed database read must not suppress the next opportunity.
@@ -70,7 +72,24 @@ internal class PeerOutboxRetry(
         emptyList()
     }
 
-    private suspend fun attempt(row: MessageEntity, peerId: String): Boolean {
+    private suspend fun attempt(snapshot: MessageEntity, peerId: String, pendingOnly: Boolean): Boolean {
+        // Discovery results can contain multiple chats and can sit behind slow
+        // network sends. Re-read each row and never substitute the discovered
+        // chat contact for a different, nonblank saved recipient.
+        val row = try {
+            val current = loadCurrent(snapshot.id) ?: return false
+            if (!current.isFromMe || current.status !in RETRYABLE ||
+                (pendingOnly && current.status == MessageStatus.SENT.name)
+            ) return false
+            val contact = if (current.recipientId.isBlank()) chatContact(current.chatId) else null
+            if (OutboxRecipient.forMessage(current, contact) != peerId) return false
+            current
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            recordFailure()
+            return false
+        }
         val delivered = try {
             send(row.id, row.chatId, peerId, TextColorWire.wrap(row.content, row.textColor, row.senderNameColor))
         } catch (cancelled: CancellationException) {
@@ -109,6 +128,7 @@ internal class PeerOutboxRetry(
     }
 
     private companion object {
+        val RETRYABLE = setOf(MessageStatus.PENDING.name, MessageStatus.QUEUED_OFFLINE.name, MessageStatus.SENT.name)
         const val PENDING_LIMIT = 20
         const val RECENT_LIMIT = 50
         const val TOTAL_LIMIT = 50

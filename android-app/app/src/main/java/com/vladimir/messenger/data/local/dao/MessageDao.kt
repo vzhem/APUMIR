@@ -20,6 +20,23 @@ data class TypingJunkRow(val chatId: String, val count: Int)
 /** Delivery ACK rows written by pre-fix versions (chat -> how many rows). */
 data class DeliveryAckJunkRow(val chatId: String, val count: Int)
 
+// SQLite's default TRIM removes only U+0020. Include Kotlin's whitespace set
+// for legacy blank recipients; runtime rechecks every selected row. Embedded
+// NUL is rejected because SQLite text functions and Kotlin can disagree on it.
+private const val RETRY_BLANK_RECIPIENT =
+    "TRIM(m.recipientId, CHAR(9,10,11,12,13,28,29,30,31,32,160,5760," +
+        "8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288)) = ''"
+private const val RETRY_NO_NUL = "INSTR(m.recipientId, CHAR(0)) = 0"
+private const val RETRY_PEER_SCOPE =
+    "(m.recipientId = :peerId OR " + RETRY_BLANK_RECIPIENT + " OR (" +
+        "m.recipientId NOT GLOB 'pk_*' AND INSTR(m.recipientId, 'node=pk_') > 0 " +
+        "AND SUBSTR(m.recipientId, INSTR(m.recipientId, 'node=pk_') + 5, LENGTH(:peerId)) = :peerId " +
+        "AND SUBSTR(m.recipientId, INSTR(m.recipientId, 'node=pk_') + 5 + LENGTH(:peerId), 1) IN ('', '&')))"
+private const val RETRY_PERSONAL_SCOPE =
+    "(" + RETRY_NO_NUL + " AND (m.recipientId GLOB 'pk_*' OR INSTR(m.recipientId, 'node=pk_') > 0 " +
+        "OR (" + RETRY_BLANK_RECIPIENT + " AND INSTR(c.contactId, CHAR(0)) = 0 " +
+        "AND (c.contactId GLOB 'pk_*' OR INSTR(c.contactId, 'node=pk_') > 0))))"
+
 @Dao
 interface MessageDao {
     /** Direct-chat startup reads only the newest window, not the entire lifetime of the chat. */
@@ -148,6 +165,8 @@ interface MessageDao {
         "SELECT m.* FROM chats c CROSS JOIN messages m INDEXED BY index_messages_chatId_timestamp " +
             "WHERE c.contactId = :peerId AND m.chatId = c.id AND m.isFromMe = 1 " +
             "AND m.status IN ('PENDING', 'QUEUED_OFFLINE') " +
+            // Filter before LIMIT so unrelated rows cannot starve this peer.
+            "AND " + RETRY_NO_NUL + " AND " + RETRY_PEER_SCOPE + " " +
             "ORDER BY m.timestamp ASC, m.id ASC LIMIT :limit"
     )
     suspend fun getRetryableOutgoingForPeer(peerId: String, limit: Int): List<MessageEntity>
@@ -164,7 +183,7 @@ interface MessageDao {
     @Query(
         "SELECT COUNT(*) FROM messages m INNER JOIN chats c ON c.id = m.chatId " +
             "WHERE m.isFromMe = 1 AND m.status = 'SENT' AND m.channel <> 'GROUP' " +
-            "AND (m.recipientId GLOB 'pk_*' OR (m.recipientId = '' AND c.contactId GLOB 'pk_*')) " +
+            "AND " + RETRY_PERSONAL_SCOPE + " " +
             "AND NOT EXISTS (SELECT 1 FROM groups g WHERE g.id = m.chatId) " +
             "AND m.id NOT GLOB 'deferred_*' AND m.content NOT GLOB 'APUGIFREF1|*' " +
             "AND (m.topicId IS NULL OR m.topicId = '')"
@@ -174,7 +193,7 @@ interface MessageDao {
     @Query(
         "SELECT m.* FROM messages m INNER JOIN chats c ON c.id = m.chatId " +
             "WHERE m.isFromMe = 1 AND m.status = 'SENT' AND m.channel <> 'GROUP' " +
-            "AND (m.recipientId GLOB 'pk_*' OR (m.recipientId = '' AND c.contactId GLOB 'pk_*')) " +
+            "AND " + RETRY_PERSONAL_SCOPE + " " +
             "AND NOT EXISTS (SELECT 1 FROM groups g WHERE g.id = m.chatId) " +
             "AND m.id NOT GLOB 'deferred_*' AND m.content NOT GLOB 'APUGIFREF1|*' " +
             "AND (m.topicId IS NULL OR m.topicId = '') " +
@@ -185,7 +204,7 @@ interface MessageDao {
     @Query(
         "SELECT m.* FROM messages m INNER JOIN chats c ON c.id = m.chatId " +
             "WHERE m.isFromMe = 1 AND m.status = 'SENT' AND m.channel <> 'GROUP' " +
-            "AND (m.recipientId GLOB 'pk_*' OR (m.recipientId = '' AND c.contactId GLOB 'pk_*')) " +
+            "AND " + RETRY_PERSONAL_SCOPE + " " +
             "AND NOT EXISTS (SELECT 1 FROM groups g WHERE g.id = m.chatId) " +
             "AND m.id NOT GLOB 'deferred_*' AND m.content NOT GLOB 'APUGIFREF1|*' " +
             "AND (m.topicId IS NULL OR m.topicId = '') AND m.timestamp >= :afterTimestamp " +
@@ -210,8 +229,14 @@ interface MessageDao {
     suspend fun getRecentOutgoingMessagesForChat(chatId: String, limit: Int): List<MessageEntity>
 
 
-    @Query("SELECT * FROM messages WHERE chatId = :chatId AND isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE', 'SENT') ORDER BY timestamp DESC, id DESC LIMIT :limit")
-    suspend fun getUnconfirmedOutgoingMessages(chatId: String, limit: Int): List<MessageEntity>
+    /** Like the pending discovery query, filter saved recipients before the bounded recent window. */
+    @Query(
+        "SELECT m.* FROM messages m WHERE m.chatId = :chatId AND m.isFromMe = 1 " +
+            "AND m.status IN ('PENDING', 'QUEUED_OFFLINE', 'SENT') " +
+            "AND " + RETRY_NO_NUL + " AND " + RETRY_PEER_SCOPE + " " +
+            "ORDER BY m.timestamp DESC, m.id DESC LIMIT :limit"
+    )
+    suspend fun getUnconfirmedOutgoingMessages(chatId: String, peerId: String, limit: Int): List<MessageEntity>
 
     @Query("UPDATE messages SET channel = :channel WHERE id = :messageId")
     suspend fun updateMessageChannel(messageId: String, channel: String)

@@ -484,19 +484,7 @@ class ChatRepository @Inject constructor(
     internal suspend fun pumpQueuedOffline(limit: Int = 20): OutboxProgress = queuedOutbox.pump(limit)
 
     private val peerOutbox by lazy {
-        PeerOutboxRetry(
-            loadPending = { peer, limit -> messageDao.getRetryableOutgoingForPeer(peer, limit) },
-            loadRecent = { peer, limit ->
-                chatDao.getChatByContactId(peer)?.let { messageDao.getUnconfirmedOutgoingMessages(it.id, limit) }
-                    ?: emptyList()
-            },
-            send = ::sendViaRust,
-            markSent = { id ->
-                messageDao.updateOutgoingRetryResult(id, MessageStatus.SENT.name, MessageChannel.LOCAL.name)
-                Unit
-            },
-            recordFailure = { Log.w(TAG, "Peer outbox retry failed") },
-        )
+        roomPeerOutboxRetry(messageDao, chatDao, ::sendViaRust) { Log.w(TAG, "Peer outbox retry failed") }
     }
 
     suspend fun retryPendingMessagesForPeer(peerId: String): Int = peerOutbox.retry(peerId)

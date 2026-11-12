@@ -49,6 +49,10 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "unconfirmedPumpSkipsGroupsDeferredMediaAndServicesAndRespectsMirror",
     "roomReconciliationRepairsCommittedAckAfterRestartWithoutTouchingOtherRows",
     "ackDuringLateNativeSendReconcilesTheNewlyRetainedCopy",
+    "queuedPageRereadsAcknowledgedDeletedAndEditedRows",
+    "queuedRetriesKeepSavedRecipientAndParseLegacyLinksWithoutUnsafeFallback",
+    "discoveryRoomQueryAndRetryRespectSavedRecipientsAndLiveRows",
+    "unconfirmedRoomRetriesLegacyRecipientInsteadOfChangedChat",
 }, PUSH_CLASS: {
     "encryptedStateSurvivesCloseAndReopenAndRejectsRollback",
     "unsealedWrongPinWrongNodeAndWrongTargetNeverCreateState",

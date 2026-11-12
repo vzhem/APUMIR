@@ -4,6 +4,9 @@
 set -uo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# Exercise the actual Room SQL on host SQLite as well as the emulator tests.
+python3 "$root/scripts/ci/check-outbox-fairness.py" || exit 1
+python3 "$root/scripts/ci/check-outbox-recipient-sql.py" || exit 1
 cd "$root/android-app" || exit 1
 chmod +x gradlew
 reports="$root/target/android-test-reports"

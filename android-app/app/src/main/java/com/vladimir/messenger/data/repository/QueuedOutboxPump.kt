@@ -27,22 +27,30 @@ internal class QueuedOutboxPump(
                 OutboxCandidate(OutboxPosition(row.timestamp, row.id), row.chatId, row)
             }
         },
-        attempt = { row ->
+        attempt = { snapshot ->
             try {
-                val chat = chats.getChatById(row.chatId)
-                val peer = chat?.contactId.orEmpty().ifBlank { row.recipientId }
-                if (peer.isBlank() || !peer.startsWith("pk_")) {
-                    false
+                // Pages can wait behind slow sends; an ACK, clear, or edit may
+                // have changed this row since it was selected.
+                val row = messages.getMessageById(snapshot.id)
+                if (row == null || !row.isFromMe ||
+                    row.status !in setOf(MessageStatus.PENDING.name, MessageStatus.QUEUED_OFFLINE.name)
+                ) {
+                    null
                 } else {
-                    val delivered = send(
-                        row.id, row.chatId, peer,
-                        TextColorWire.wrap(row.content, row.textColor, row.senderNameColor),
-                    )
-                    if (delivered) {
-                        // An ACK may have arrived while send was in progress.
-                        messages.updateOutgoingRetryResult(row.id, MessageStatus.SENT.name, MessageChannel.LOCAL.name)
+                    val peer = OutboxRecipient.forMessage(row, chats.getChatById(row.chatId)?.contactId)
+                    if (!peer.startsWith("pk_")) {
+                        false
+                    } else {
+                        val delivered = send(
+                            row.id, row.chatId, peer,
+                            TextColorWire.wrap(row.content, row.textColor, row.senderNameColor),
+                        )
+                        if (delivered) {
+                            // An ACK may have arrived while send was in progress.
+                            messages.updateOutgoingRetryResult(row.id, MessageStatus.SENT.name, MessageChannel.LOCAL.name)
+                        }
+                        delivered
                     }
-                    delivered
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled

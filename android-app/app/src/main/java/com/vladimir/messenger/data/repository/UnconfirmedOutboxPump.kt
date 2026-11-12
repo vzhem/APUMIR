@@ -50,11 +50,9 @@ internal class UnconfirmedOutboxPump(
                         current.id.startsWith("deferred_") || current.content.startsWith("APUGIFREF1|") ||
                         ChatPreviews.isServicePacket(current.content) || current.content.startsWith("APUSTORY1|")
                     ) {
-                        true
+                        null
                     } else {
-                        val storedPeer = current.recipientId
-                        val peer = if (storedPeer.startsWith("pk_")) storedPeer
-                            else chats.getChatById(current.chatId)?.contactId.orEmpty()
+                        val peer = OutboxRecipient.forMessage(current, chats.getChatById(current.chatId)?.contactId)
                         if (!peer.startsWith("pk_") || mirrorIsActive()) false
                         else send(
                             current.id, current.chatId, peer,

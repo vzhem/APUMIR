@@ -51,7 +51,9 @@ internal class FairOutboxScan<T>(private val maxAttemptsPerCycle: Int = 4) {
         countAtStart: suspend () -> Int,
         load: suspend (OutboxPosition?, Int) -> List<OutboxCandidate<T>>,
         eligible: suspend (T) -> Boolean = { true },
-        attempt: suspend (T) -> Boolean,
+        // null means the row became ineligible after its page was read; it is
+        // visited but must not count as a send, failure, or network attempt.
+        attempt: suspend (T) -> Boolean?,
     ): OutboxProgress = lock.withLock {
         require(maxAttemptsPerCycle > 0)
         if (remaining == null) remaining = countAtStart().coerceAtLeast(0)
@@ -81,11 +83,10 @@ internal class FairOutboxScan<T>(private val maxAttemptsPerCycle: Int = 4) {
                 // a later scan if all later rows disappear or also fail.
             } else {
                 if (attempted >= maxAttemptsPerCycle) break
-                attempted++
-                if (attempt(candidate.value)) {
-                    sent++
-                } else {
-                    failed[candidate.destination] = candidate.position
+                when (attempt(candidate.value)) {
+                    true -> { attempted++; sent++ }
+                    false -> { attempted++; failed[candidate.destination] = candidate.position }
+                    null -> Unit
                 }
             }
             position = candidate.position

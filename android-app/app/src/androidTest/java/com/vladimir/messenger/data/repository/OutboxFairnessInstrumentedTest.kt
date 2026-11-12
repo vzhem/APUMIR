@@ -319,6 +319,141 @@ class OutboxFairnessInstrumentedTest {
         } finally { allowNative.countDown(); db.close() }
     }
 
+    @Test fun queuedPageRereadsAcknowledgedDeletedAndEditedRows() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        try {
+            val chats = db.chatDao()
+            val messages = db.messageDao()
+            chats.insertChat(ChatEntity(id = "chat", contactId = "pk_contact", contactName = "Peer"))
+            listOf("a-first", "b-ack", "c-delete", "d-sent", "e-incoming", "f-edited").forEachIndexed { n, id ->
+                messages.insertMessageIgnore(MessageEntity(
+                    id = id, chatId = "chat", senderId = "self", content = "old", timestamp = n.toLong(),
+                    isFromMe = true, status = "QUEUED_OFFLINE", recipientId = "pk_original",
+                ))
+            }
+            val sent = mutableListOf<Triple<String, String, String>>()
+            val pump = QueuedOutboxPump(messages, chats) { id, _, peer, body ->
+                sent += Triple(id, peer, body)
+                if (id == "a-first") {
+                    messages.markOutgoingMessageDelivered("b-ack")
+                    messages.deleteChatMessages("chat", listOf("c-delete"))
+                    messages.updateOutgoingRetryResult("d-sent", "SENT", "LOCAL")
+                    messages.insertMessage(messages.getMessageById("e-incoming")!!.copy(isFromMe = false))
+                    messages.insertMessage(messages.getMessageById("f-edited")!!.copy(content = "new", recipientId = "pk_new"))
+                }
+                true
+            }
+            val progress = pump.pump(20)
+            assertEquals(listOf(Triple("a-first", "pk_original", "old"), Triple("f-edited", "pk_new", "new")), sent)
+            assertEquals(2, progress.attempted)
+            assertEquals(2, progress.sent)
+            assertFalse(progress.moreToScan)
+            assertEquals("DELIVERED", messages.getMessageById("b-ack")!!.status)
+            assertEquals("SENT", messages.getMessageById("d-sent")!!.status)
+        } finally { db.close() }
+    }
+
+    @Test fun queuedRetriesKeepSavedRecipientAndParseLegacyLinksWithoutUnsafeFallback() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        try {
+            val chats = db.chatDao()
+            val messages = db.messageDao()
+            val cases = listOf(
+                Triple("stored", "pk_current", "pk_original"),
+                Triple("blank", "pk_current", "\t\u2003"),
+                Triple("link", "pk_current", "apu://add?node=pk_original&name=x"),
+                Triple("invalid", "pk_current", "not-a-node"),
+                Triple("nul", "pk_current", "node=pk_current\u0000suffix"),
+                Triple("legacy-chat", "apu://add?node=pk_legacy&name=x", ""),
+            )
+            cases.forEachIndexed { n, (id, contact, recipient) ->
+                chats.insertChat(ChatEntity(id = id, contactId = contact, contactName = "Peer"))
+                messages.insertMessageIgnore(MessageEntity(
+                    id = id, chatId = id, senderId = "self", content = "body", timestamp = n.toLong(),
+                    isFromMe = true, status = "PENDING", recipientId = recipient,
+                ))
+            }
+            messages.insertMessageIgnore(MessageEntity(
+                id = "missing-chat", chatId = "missing", senderId = "self", content = "body", timestamp = 6,
+                isFromMe = true, status = "PENDING", recipientId = "pk_saved",
+            ))
+            val sent = mutableMapOf<String, String>()
+            val pump = QueuedOutboxPump(messages, chats) { id, _, peer, _ -> sent[id] = peer; true }
+            var cycles = 0
+            do { val progress = pump.pump(20); cycles++; assertTrue(cycles < 5) } while (progress.moreToScan)
+            assertEquals(mapOf("stored" to "pk_original", "blank" to "pk_current", "link" to "pk_original",
+                "legacy-chat" to "pk_legacy", "missing-chat" to "pk_saved"), sent)
+            assertEquals("PENDING", messages.getMessageById("invalid")!!.status)
+            assertEquals("PENDING", messages.getMessageById("nul")!!.status)
+        } finally { db.close() }
+    }
+
+    @Test fun discoveryRoomQueryAndRetryRespectSavedRecipientsAndLiveRows() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        try {
+            val chats = db.chatDao()
+            val messages = db.messageDao()
+            chats.insertChat(ChatEntity(id = "chat", contactId = "pk_peer", contactName = "Peer"))
+            suspend fun add(id: String, timestamp: Long, recipient: String, status: String = "PENDING") {
+                messages.insertMessageIgnore(MessageEntity(
+                    id = id, chatId = "chat", senderId = "self", content = "old", timestamp = timestamp,
+                    isFromMe = true, status = status, recipientId = recipient,
+                ))
+            }
+            repeat(25) { add("wrong$it", 0, "pk_other") }
+            add("prefix", 0, "apu://add?node=pk_peerExtra&name=x")
+            add("second-node", 0, "node=pk_other&node=pk_peer")
+            add("nul", 0, "node=pk_peer\u0000suffix")
+            add("first", 1, "pk_peer")
+            add("ack", 2, "pk_peer")
+            add("delete", 3, "pk_peer")
+            add("blank", 4, "\t\u2003")
+            add("link", 5, "apu://add?node=pk_peer&name=x")
+            add("edited", 6, "pk_peer")
+            repeat(55) { add("sent-wrong$it", 100L + it, "pk_other", "SENT") }
+            assertEquals(listOf("first", "ack", "delete", "blank", "link", "edited"),
+                messages.getRetryableOutgoingForPeer("pk_peer", 20).map { it.id })
+            assertEquals(listOf("edited", "link", "blank", "delete", "ack", "first"),
+                messages.getUnconfirmedOutgoingMessages("chat", "pk_peer", 50).map { it.id })
+            val sent = mutableListOf<Pair<String, String>>()
+            val retry = roomPeerOutboxRetry(messages, chats, { id, _, peer, body ->
+                assertEquals("pk_peer", peer)
+                sent += id to body
+                if (id == "first") {
+                    messages.markOutgoingMessageDelivered("ack")
+                    messages.deleteChatMessages("chat", listOf("delete"))
+                    messages.insertMessage(messages.getMessageById("edited")!!.copy(content = "new"))
+                }
+                true
+            }, { error("unexpected error") })
+            assertEquals(4, retry.retry("pk_peer"))
+            assertEquals(listOf("first", "blank", "link", "edited"), sent.map { it.first })
+            assertEquals("new", sent.last().second)
+            assertEquals("DELIVERED", messages.getMessageById("ack")!!.status)
+        } finally { db.close() }
+    }
+
+    @Test fun unconfirmedRoomRetriesLegacyRecipientInsteadOfChangedChat() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        try {
+            val chats = db.chatDao()
+            val messages = db.messageDao()
+            chats.insertChat(ChatEntity(id = "chat", contactId = "pk_changed", contactName = "Peer"))
+            listOf("pk_original", "apu://add?node=pk_legacy&name=x", "\t\u2003", "not-a-node", "node=pk_original\u0000suffix").forEachIndexed { n, recipient ->
+                messages.insertMessageIgnore(MessageEntity(
+                    id = "m$n", chatId = "chat", senderId = "self", content = "hello", timestamp = n.toLong(),
+                    isFromMe = true, status = "SENT", recipientId = recipient,
+                ))
+            }
+            assertEquals(3, messages.countUnconfirmedPersonalSent())
+            val sent = mutableMapOf<String, String>()
+            val pump = UnconfirmedOutboxPump(messages, chats, { id, _, peer, _ -> sent[id] = peer; true }, { false })
+            var cycles = 0
+            do { val progress = pump.pump(20); cycles++; assertTrue(cycles < 5) } while (progress.moreToScan)
+            assertEquals(mapOf("m0" to "pk_original", "m1" to "pk_legacy", "m2" to "pk_changed"), sent)
+        } finally { db.close() }
+    }
+
     @Test fun roomKeysetPaginationKeepsAllEqualTimestampIds() = runBlocking {
         val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
         try {
