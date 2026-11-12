@@ -27,7 +27,7 @@ from site_staged_upload import FTP_BLOCK_BYTES, FTP_TIMEOUT_SECONDS, current_rel
 PACK_NAME = "feature-pack-translate-arm64-v8a.zip"
 TOKEN = re.compile(r"[0-9a-f]{32}\Z")
 SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
-STAGE_NAME = re.compile(r"apumir-stage-[0-9a-f]{32}-[A-Za-z0-9._-]+\Z")
+STAGE_NAME = re.compile(r"(?:apumir-stage-[0-9a-f]{32}-[A-Za-z0-9._-]+|apu-stage-[0-9a-f]{32}\.(?:zip|json|apk))\Z")
 
 
 def _names(ftp) -> set[str]:
@@ -39,9 +39,12 @@ def _code(error: Exception) -> str:
     return match.group(1) if match else "unknown"
 
 
+def _failure_text(phase: str, error: Exception) -> str:
+    return f"{phase} failed ({type(error).__name__}, FTP code {_code(error)})"
+
+
 def _failure(log, label: str, phase: str, error: Exception) -> None:
-    log(f"::notice title=FTP temporary probe::{label}: {phase} failed "
-        f"({type(error).__name__}, FTP code {_code(error)})")
+    log(f"::notice title=FTP temporary probe::{label}: {_failure_text(phase, error)}")
 
 
 def _tiny_zip() -> bytes:
@@ -60,6 +63,8 @@ def _one(ftp, label: str, name: str, content, size: int, log) -> tuple[bool, boo
         return False, True
     ok = False
     clean = True
+    outcome = "not attempted"
+    cleanup = "not checked"
     phase = "STOR"
     try:
         ftp.storbinary(f"STOR {name}", content, blocksize=FTP_BLOCK_BYTES)
@@ -69,9 +74,9 @@ def _one(ftp, label: str, name: str, content, size: int, log) -> tuple[bool, boo
         if ftp.size(name) != size:
             raise ValueError("temporary file size mismatch")
         ok = True
-        log(f"::notice title=FTP temporary probe::{label}: STOR and SIZE succeeded")
+        outcome = "STOR and SIZE succeeded"
     except Exception as error:
-        _failure(log, label, phase, error)
+        outcome = _failure_text(phase, error)
     finally:
         # Only this collision-checked random name is eligible for deletion.
         # A denied STOR often leaves no file, so do not call DELETE blindly.
@@ -80,10 +85,54 @@ def _one(ftp, label: str, name: str, content, size: int, log) -> tuple[bool, boo
                 ftp.delete(name)
                 if name in _names(ftp):
                     raise OSError("temporary file remains after cleanup")
-            log(f"::notice title=FTP temporary probe::{label}: no temporary file remains in listing")
+            cleanup = "no temporary file remains in listing"
         except Exception as error:
             clean = False
-            _failure(log, label, "cleanup", error)
+            cleanup = _failure_text("cleanup", error)
+    log(f"::notice title=FTP temporary probe::{label}: {outcome}; {cleanup}")
+    return ok, clean
+
+
+def _short_rename(ftp, token_factory, log) -> tuple[bool, bool]:
+    tokens = [token_factory().hex, token_factory().hex]
+    if any(not TOKEN.fullmatch(token) for token in tokens):
+        raise ValueError("invalid probe token")
+    names = [f"apu-stage-{token}.zip" for token in tokens]
+    before = _names(ftp)
+    if names[0] == names[1] or any(name in before for name in names):
+        log("::notice title=FTP temporary probe::short-rename: collision; no write or cleanup")
+        return False, True
+    owned = set()
+    ok = False
+    clean = True
+    outcome = "not attempted"
+    phase = "STOR"
+    try:
+        for name, data in zip(names, (b"old temporary bytes", b"new and longer temporary bytes")):
+            owned.add(name)  # A failed STOR may still create a partial file.
+            ftp.storbinary(f"STOR {name}", io.BytesIO(data), blocksize=FTP_BLOCK_BYTES)
+        ftp.voidcmd("TYPE I")
+        phase = "RNTO"
+        ftp.rename(names[1], names[0])
+        phase = "SIZE"
+        if ftp.size(names[0]) != len(b"new and longer temporary bytes"):
+            raise ValueError("renamed temporary file size mismatch")
+        ok = True
+        outcome = "temporary overwrite rename and SIZE succeeded"
+    except Exception as error:
+        outcome = _failure_text(phase, error)
+    finally:
+        try:
+            for name in sorted(owned):
+                if name in _names(ftp):
+                    ftp.delete(name)
+            if any(name in _names(ftp) for name in owned):
+                raise OSError("temporary file remains after cleanup")
+            cleanup = "no temporary files remain in listing"
+        except Exception as error:
+            clean = False
+            cleanup = _failure_text("cleanup", error)
+    log(f"::notice title=FTP temporary probe::short-rename: {outcome}; {cleanup}")
     return ok, clean
 
 
@@ -95,10 +144,11 @@ def probe(ftp, large: Path | None = None, token_factory=uuid.uuid4, log=print) -
     tiny_zip = _tiny_zip()
     cases = (
         ("production-zip", lambda t: f"apumir-stage-{t}-{PACK_NAME}", tiny_zip),
-        ("short-zip", lambda t: f"apu-probe-{t}.zip", tiny_zip),
+        ("short-zip", lambda t: f"apu-stage-{t}.zip", tiny_zip),
         ("production-json", lambda t: f"apumir-stage-{t}-feature-pack-translate-arm64-v8a.json", b'{}\n'),
+        ("short-json", lambda t: f"apu-stage-{t}.json", b'{}\n'),
         ("production-apk", lambda t: f"apumir-stage-{t}-app-release.apk", b"temporary apk probe\n"),
-        ("short-apk", lambda t: f"apu-probe-{t}.apk", b"temporary apk probe\n"),
+        ("short-apk", lambda t: f"apu-stage-{t}.apk", b"temporary apk probe\n"),
     )
     results = {}
     all_clean = True
@@ -113,19 +163,27 @@ def probe(ftp, large: Path | None = None, token_factory=uuid.uuid4, log=print) -
         if not clean:
             return False
 
-    if large is not None and results["production-zip"]:
+    if large is not None and results["short-zip"]:
         if large.is_symlink() or not large.is_file() or not 0 < large.stat().st_size <= MAX_TRANSFER_BYTES:
             raise ValueError("unsafe large probe sample")
         token = token_factory().hex
         if not TOKEN.fullmatch(token):
             raise ValueError("invalid probe token")
         with large.open("rb") as source:
-            ok, clean = _one(ftp, "release-sized-zip", f"apumir-stage-{token}-{PACK_NAME}",
+            ok, clean = _one(ftp, "release-sized-zip", f"apu-stage-{token}.zip",
                              source, large.stat().st_size, log)
         results["release-sized-zip"] = ok
         all_clean = all_clean and clean
+        if not clean:
+            return False
     elif large is not None:
-        log("::notice title=FTP temporary probe::Release-sized sample skipped because production-shaped ZIP was denied")
+        log("::notice title=FTP temporary probe::Release-sized sample skipped because short ZIP was denied")
+    if results["short-zip"]:
+        ok, clean = _short_rename(ftp, token_factory, log)
+        results["short-rename"] = ok
+        all_clean = all_clean and clean
+    else:
+        log("::notice title=FTP temporary probe::Short-name rename skipped because short ZIP was denied")
     return all_clean and all(results.values())
 
 

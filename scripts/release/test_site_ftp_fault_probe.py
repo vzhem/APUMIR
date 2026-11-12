@@ -20,6 +20,7 @@ class FakeFtp:
         self.deny_store = lambda _name, _data: False
         self.partial_on_failure = False
         self.fail_delete = False
+        self.fail_rename = False
         self.bad_size = False
         self.fail_listing_after_store = False
         self.stored = False
@@ -46,6 +47,12 @@ class FakeFtp:
     def size(self, name):
         return len(self.files[name]) + int(self.bad_size)
 
+    def rename(self, source, destination):
+        self.commands.append(("rename", source, destination))
+        if self.fail_rename:
+            raise ftplib.error_perm("550 private rename text SECRET-DO-NOT-PRINT")
+        self.files[destination] = self.files.pop(source)
+
     def delete(self, name):
         self.commands.append(("delete", name))
         if self.fail_delete:
@@ -68,14 +75,15 @@ class FaultProbeTest(unittest.TestCase):
         for name, value in self.public.items():
             self.assertEqual(self.ftp.files[name], value)
         for command in self.ftp.commands:
-            if command[0] in {"store", "delete"}:
-                self.assertNotIn(command[1], self.public)
+            if command[0] in {"store", "delete", "rename"}:
+                self.assertTrue(all(name not in self.public for name in command[1:]))
         self.assertNotIn("SECRET-DO-NOT-PRINT", "\n".join(self.messages))
 
     def test_all_samples_are_isolated_and_removed(self):
         self.assertTrue(self.run_probe())
         self.assertEqual(self.ftp.files, self.public)
-        self.assertEqual(sum(c[0] == "store" for c in self.ftp.commands), 5)
+        self.assertEqual(sum(c[0] == "store" for c in self.ftp.commands), 8)
+        self.assertTrue(any("short-rename: temporary overwrite rename and SIZE succeeded" in m for m in self.messages))
         self.assert_public_untouched()
 
     def test_denied_long_zip_is_distinguished_from_short_zip_and_absent_cleanup(self):
@@ -100,18 +108,25 @@ class FaultProbeTest(unittest.TestCase):
         self.assertEqual(self.ftp.files, self.public)
         self.assert_public_untouched()
 
+    def test_refused_short_rename_cleans_temporary_names_without_touching_public_files(self):
+        self.ftp.fail_rename = True
+        self.assertFalse(self.run_probe())
+        self.assertIn("short-rename: RNTO failed (error_perm, FTP code 550)", "\n".join(self.messages))
+        self.assertEqual(self.ftp.files, self.public)
+        self.assert_public_untouched()
+
     def test_cleanup_failure_is_reported_and_stops_further_stores(self):
         self.ftp.fail_delete = True
         self.assertFalse(self.run_probe())
         self.assertEqual(sum(c[0] == "store" for c in self.ftp.commands), 1)
-        self.assertIn("production-zip: cleanup failed (error_perm, FTP code 550)", "\n".join(self.messages))
+        self.assertIn("cleanup failed (error_perm, FTP code 550)", "\n".join(self.messages))
         self.assert_public_untouched()
 
     def test_unavailable_post_store_listing_stops_and_reports_cleanup(self):
         self.ftp.fail_listing_after_store = True
         self.assertFalse(self.run_probe())
         self.assertEqual(sum(c[0] == "store" for c in self.ftp.commands), 1)
-        self.assertIn("production-zip: cleanup failed", "\n".join(self.messages))
+        self.assertIn("production-zip: STOR and SIZE succeeded; cleanup failed", "\n".join(self.messages))
         self.assert_public_untouched()
 
     def test_size_mismatch_is_a_failure_but_temporary_files_are_removed(self):
