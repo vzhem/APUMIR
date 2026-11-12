@@ -6,6 +6,7 @@ from pathlib import Path
 
 CLASS = "com.vladimir.messenger.data.notification.NotificationArrivalInstrumentedTest"
 INCOMING_CLASS = "com.vladimir.messenger.data.repository.IncomingMessageStoreInstrumentedTest"
+DIRECT_REPLY_CLASS = "com.vladimir.messenger.data.reply.DirectReplyIngressInstrumentedTest"
 MIRROR_OUTGOING_CLASS = "com.vladimir.messenger.data.repository.MirrorOutgoingStoreInstrumentedTest"
 OUTBOX_CLASS = "com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest"
 CLEAR_LOOKUP_CLASS = "com.vladimir.messenger.data.chatclear.ChatClearTombstonesInstrumentedTest"
@@ -40,6 +41,12 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "clearAfterAnOldCheckEventuallyRemovesTheCommittedRowAndMetadata",
     "sqliteFailureRollsBackEverythingAndTheSameIdCanBeRetried",
     "cancellationRollsBackAndNonAlertingServiceRowsKeepTheirPolicy",
+}, DIRECT_REPLY_CLASS: {
+    "verifiedReplyCommitsBeforeAckAndSurvivesReopen",
+    "wrongSenderChatOutgoingGroupAndTopicNeverChange",
+    "unauthenticatedAndEarlyPacketsAreNotAcknowledged",
+    "cancellationRollsBackTheRowAndNeverAcknowledges",
+    "sqliteFailureAndClearPreflightCannotAcknowledge",
 }, MIRROR_OUTGOING_CLASS: {
     "replayedPartnerFramesNeverReplaceDeliveredRows",
     "concurrentFirstFramesHaveExactlyOneInsertionAcrossReopen",

@@ -45,7 +45,16 @@ class PushIngressContracts(unittest.TestCase):
         message = section(cf, "is RelayEnvelope.Parsed.Message -> {", "is RelayEnvelope.Parsed.Other -> {")
         self.assert_order(message, "val cfContent = if (SealedWire.isSealed(parsed.content)) MessageSealer.open",
                           "if (PushControlIngress.isReserved(cfContent)) return@launch",
-                          "chatRepository.getMessageById(messageId)", "RustBridge.sendDeliveryAck(messageId, senderId)",
+                          "chatRepository.getMessageById(messageId)",
+                          "DirectReplyWire.isPacket(cfContent)")
+        # A reply is classified before ordinary ID-based deduplication and can
+        # ACK only through the verified, scoped reply router.
+        reply = section(message, "DirectReplyWire.isPacket(cfContent)", "} else if (existingMsg != null)")
+        self.assert_order(reply, "chatRepository.getChatByContactId(senderId)",
+                          "MessageSealer.openedByExpectedSender(parsed.content, senderId)",
+                          "directReplies.network(", "DirectReplyResult.APPLIED")
+        ordinary = message.split("} else if (existingMsg != null)", 1)[1]
+        self.assert_order(ordinary, "RustBridge.sendDeliveryAck(messageId, senderId)",
                           ".opened(applicationContext, senderId)",
                           "rememberOpenedMessageBinding(fileTransferRouter, senderId, parsed.content)",
                           "chatRepository.getChatByContactId(senderId)")

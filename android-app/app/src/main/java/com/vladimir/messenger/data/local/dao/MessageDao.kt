@@ -469,6 +469,22 @@ interface MessageDao {
         replyText: String,
     ): Int
 
+    /** Direct sidecars cannot modify outgoing, group, topic or another peer's rows. */
+    @Query(
+        "UPDATE messages SET replyToId = :replyToId, replyAuthor = :replyAuthor, replyText = :replyText " +
+            "WHERE id = :messageId AND senderId = :senderId AND isFromMe = 0 AND channel != 'GROUP' " +
+            "AND (topicId IS NULL OR topicId = '') " +
+            "AND EXISTS (SELECT 1 FROM chats c WHERE c.id = messages.chatId AND c.contactId = :senderId) " +
+            "AND NOT EXISTS (SELECT 1 FROM groups g WHERE g.id = messages.chatId)"
+    )
+    suspend fun applyDirectReplyFromPeer(
+        senderId: String,
+        messageId: String,
+        replyToId: String,
+        replyAuthor: String,
+        replyText: String,
+    ): Int
+
     // ── Комментарии большого канала (рой, этап 4) ────────────────────────────
     // Текстовые сообщения темы - без служебных кусков фото и длинного текста
     // ([partPattern] = `InlineImage.PART_MARKER + "%"`). В теме канала самое

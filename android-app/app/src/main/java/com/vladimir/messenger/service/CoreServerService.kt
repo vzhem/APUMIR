@@ -104,6 +104,7 @@ class CoreServerService : Service() {
     /** р252: опросы личных чатов - через посредника, чтобы не растить этот файл. */
     @Inject lateinit var directPollRepository: com.vladimir.messenger.data.directpoll.DirectPollRepository
     private val directPolls by lazy { DirectPollRouting.bind(this, directPollRepository) }
+    private val directReplies by lazy { directReplyIngress(applicationContext, chatRepository) { mirror } }
     @Inject lateinit var repostRepository: com.vladimir.messenger.data.repost.RepostRepository
     // Отклики на истории: значки и комментарии зрителей (см. docs/STORY_REACTIONS_AND_COMMENTS.md).
     @Inject lateinit var storyFeedback: com.vladimir.messenger.data.story.StoryFeedbackRepository
@@ -389,13 +390,8 @@ class CoreServerService : Service() {
         // путь приёма обязан разбирать его так же, как основной: иначе строка
         // «ack|…» вырастет в личный чат. Даже некорректный ACK с зарезервированным
         // префиксом съедаем, но статус меняем только для разобранного id.
-        if (com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(text)) {
-            com.vladimir.messenger.data.reply.DirectReplyWire.parse(text)?.let { packet ->
-                runCatching { chatRepository.applyDirectReply(packet) }
-                    .onFailure { Log.w(TAG, "direct reply apply failed: ${it.message}") }
-            }
-            return true
-        }
+        // Legacy CF payloads have no verified reply source; consume, never apply them as text.
+        if (com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(text)) return true
         if (DeliveryAckWire.isPacket(text)) {
             val ackedId = DeliveryAckWire.messageId(text)
             if (ackedId != null) {
@@ -1200,7 +1196,11 @@ class CoreServerService : Service() {
                                 var acknowledge = false // Only a stored text or an explicitly handled service packet.
                                 // Дедупликация: сообщение уже в БД
                                 val existingMsg = chatRepository.getMessageById(messageId)
-                                if (existingMsg != null) {
+                                if (cfContent != null && com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(cfContent)) {
+                                    val knownChat = chatRepository.getChatByContactId(senderId)
+                                    val authenticated = SealedWire.isSealed(parsed.content) && MessageSealer.openedByExpectedSender(parsed.content, senderId)
+                                    acknowledge = directReplies.network(senderId, knownChat?.id ?: "", messageId, cfContent, authenticated) == com.vladimir.messenger.data.reply.DirectReplyResult.APPLIED
+                                } else if (existingMsg != null) {
                                     Log.i(TAG, "CF duplicate skipped (already in DB): messageId=$messageId")
                                     if (DeliveryAckWire.isPacket(existingMsg.content)) {
                                         // Старый ACK мог быть уже записан до обновления.
@@ -1339,6 +1339,8 @@ class CoreServerService : Service() {
                                 }
                             }
                         }
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
                     } catch (e: Exception) {
                         Log.e(TAG, "CF message handling failed", e)
                     }
@@ -1452,9 +1454,9 @@ class CoreServerService : Service() {
             senderId: String,
             chatId: String,
             messageId: String,
-            text: String,
+            text: String, replySourceAuthenticated: Boolean,
         ) {
-            applyMirrorEnvelope(senderId, chatId, messageId, text)
+            applyMirrorEnvelope(senderId, chatId, messageId, text, replySourceAuthenticated)
         }
 
         override suspend fun onActionFromPartner(
@@ -1750,7 +1752,7 @@ class CoreServerService : Service() {
         senderId: String,
         chatId: String,
         messageId: String,
-        text: String,
+        text: String, replySourceAuthenticated: Boolean,
     ): Boolean {
         if (deferredDelivery.routeIncoming(senderId, chatId, messageId, text, authenticated = true, fromMirror = true)) return true
         // р244: подтверждение доставки пришло с партнёрского устройства -
@@ -1786,9 +1788,7 @@ class CoreServerService : Service() {
             return true
         }
         if (com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(text)) {
-            com.vladimir.messenger.data.reply.DirectReplyWire.parse(text)?.let { packet ->
-                chatRepository.applyDirectReply(packet)
-            }
+            directReplies.mirror(senderId, messageId, text, replySourceAuthenticated)
             return true
         }
         // Групповой конверт: у группы один и тот же id на всех устройствах,
@@ -2324,7 +2324,7 @@ class CoreServerService : Service() {
                     // р242: считаем такие пакеты для диагностики - по счётчику
                     // видно, что «собеседник» это собственный узел.
                     com.vladimir.messenger.data.mirror.MirrorHub.noteSelfPacket()
-                    runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                    if (!com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(preopened)) runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
                     return
                 }
 
@@ -2407,11 +2407,7 @@ class CoreServerService : Service() {
                 // В v140 оно стало идти обычным P2P-пакетом `ack|id`; клиенты
                 // до v140 не распознавали его, поэтому свежая версия фильтрует
                 if (com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(text)) {
-                    com.vladimir.messenger.data.reply.DirectReplyWire.parse(text)?.let { packet ->
-                        runCatching { chatRepository.applyDirectReply(packet) }
-                            .onFailure { Log.w(TAG, "direct reply apply failed: ${it.message}") }
-                    }
-                    runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                    directReplies.network(senderId, chatId, messageId, text, sealed && MessageSealer.openedByExpectedSender(rawText, senderId))
                     return
                 }
 

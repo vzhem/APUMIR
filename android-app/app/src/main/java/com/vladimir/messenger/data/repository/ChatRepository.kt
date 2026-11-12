@@ -1232,13 +1232,8 @@ class ChatRepository @Inject constructor(
         return messageDao.getMessageById(messageId)?.toDomain()
     }
 
-    suspend fun applyDirectReply(packet: DirectReplyWire.Packet): Boolean =
-        messageDao.applyReply(
-            messageId = packet.messageId,
-            replyToId = packet.replyToId,
-            replyAuthor = packet.replyAuthor,
-            replyText = packet.replyText,
-        ) > 0
+    suspend fun applyDirectReply(senderId: String, packet: DirectReplyWire.Packet): Boolean =
+        messageDao.applyDirectReplyFromPeer(senderId, packet.messageId, packet.replyToId, packet.replyAuthor, packet.replyText) > 0
 
 
     /** Rust send calls may wait for network work; never run them on a caller/UI dispatcher. */

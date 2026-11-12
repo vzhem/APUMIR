@@ -7,6 +7,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # Exercise the actual Room SQL on host SQLite as well as the emulator tests.
 python3 "$root/scripts/ci/check-outbox-fairness.py" || exit 1
 python3 "$root/scripts/ci/check-outbox-recipient-sql.py" || exit 1
+python3 "$root/scripts/ci/check-direct-reply-scope.py" || exit 1
 cd "$root/android-app" || exit 1
 chmod +x gradlew
 reports="$root/target/android-test-reports"
@@ -38,7 +39,7 @@ fi
 # check; never accept a green task that silently skipped acceptance cases.
 clear_report
 ./gradlew :app:connectedDebugAndroidTest --no-daemon \
-    -Pandroid.testInstrumentationRunnerArguments.class=com.vladimir.messenger.data.chatclear.ChatClearTombstonesInstrumentedTest,com.vladimir.messenger.data.notification.NotificationArrivalInstrumentedTest,com.vladimir.messenger.data.repository.IncomingMessageStoreInstrumentedTest,com.vladimir.messenger.data.repository.MirrorOutgoingStoreInstrumentedTest,com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest,com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest,com.vladimir.messenger.data.push.PushRegistrationStoreInstrumentedTest,com.vladimir.messenger.data.push.PushWakeIntegrationInstrumentedTest,com.vladimir.messenger.data.push.PushMailboxDrainInstrumentedTest,com.vladimir.messenger.data.push.PushMailboxOutboxInstrumentedTest,com.vladimir.messenger.data.push.PushMailboxOutboxRealFfiInstrumentedTest,com.vladimir.messenger.data.push.PushWakeInboxInstrumentedTest,com.vladimir.messenger.data.push.PushWakeDrainInstrumentedTest,com.vladimir.messenger.data.push.PushWakeWorkManagerInstrumentedTest,com.vladimir.messenger.data.push.FirebaseClientConfigurationInstrumentedTest,com.vladimir.messenger.data.CoreLifecycleOwnershipInstrumentedTest,com.vladimir.messenger.service.DeliveryHeartbeatInstrumentedTest \
+    -Pandroid.testInstrumentationRunnerArguments.class=com.vladimir.messenger.data.chatclear.ChatClearTombstonesInstrumentedTest,com.vladimir.messenger.data.notification.NotificationArrivalInstrumentedTest,com.vladimir.messenger.data.repository.IncomingMessageStoreInstrumentedTest,com.vladimir.messenger.data.reply.DirectReplyIngressInstrumentedTest,com.vladimir.messenger.data.repository.MirrorOutgoingStoreInstrumentedTest,com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest,com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest,com.vladimir.messenger.data.push.PushRegistrationStoreInstrumentedTest,com.vladimir.messenger.data.push.PushWakeIntegrationInstrumentedTest,com.vladimir.messenger.data.push.PushMailboxDrainInstrumentedTest,com.vladimir.messenger.data.push.PushMailboxOutboxInstrumentedTest,com.vladimir.messenger.data.push.PushMailboxOutboxRealFfiInstrumentedTest,com.vladimir.messenger.data.push.PushWakeInboxInstrumentedTest,com.vladimir.messenger.data.push.PushWakeDrainInstrumentedTest,com.vladimir.messenger.data.push.PushWakeWorkManagerInstrumentedTest,com.vladimir.messenger.data.push.FirebaseClientConfigurationInstrumentedTest,com.vladimir.messenger.data.CoreLifecycleOwnershipInstrumentedTest,com.vladimir.messenger.service.DeliveryHeartbeatInstrumentedTest \
     2>&1 | tee "$reports/notification.log"
 notification_gradle=${PIPESTATUS[0]}
 python3 "$root/scripts/ci/check-android-notification-results.py" \

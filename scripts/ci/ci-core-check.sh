@@ -228,6 +228,7 @@ if python3 scripts/ci/check-chat-startup.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-notification-arrival.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-outbox-fairness.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-outbox-recipient-sql.py >>"$LOG" 2>&1 && \
+   python3 scripts/ci/check-direct-reply-scope.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-presence-recovery.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-release-config.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-chat-history-harness.py >>"$LOG" 2>&1 && \
