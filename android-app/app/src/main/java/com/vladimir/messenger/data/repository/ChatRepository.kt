@@ -157,15 +157,15 @@ class ChatRepository @Inject constructor(
         fixedMessageId: String? = null,
         /** Строка партнёра: не перенаправлять обратно, но отразить текущий статус. */
         fromMirror: Boolean = false,
+        mirrorColors: Pair<String, String>? = null,
     ): Result<Message> {
         return try {
             val messageId = fixedMessageId ?: UUID.randomUUID().toString()
             val timestamp = System.currentTimeMillis()
-            val textColor = TextColorSettingsStore.textColor(
-                context,
-                TextColorSettingsStore.directScope(chatId),
-            )
-            val senderNameColor = TextColorSettingsStore.ownNameColor(context)
+            val (textColor, senderNameColor) = outgoingTextColors(fromMirror, mirrorColors) {
+                TextColorSettingsStore.textColor(context, TextColorSettingsStore.directScope(chatId)) to
+                    TextColorSettingsStore.ownNameColor(context)
+            }
             val wireContent = TextColorWire.wrap(content, textColor, senderNameColor)
 
             // р226: это устройство - зеркало и активный партнёр в сети.
@@ -177,18 +177,8 @@ class ChatRepository @Inject constructor(
                     val mirrorChat = chatDao.getChatById(chatId)
                     val mirrorRecipient = if (recipientId.isNotBlank()) recipientId else mirrorChat?.contactId ?: ""
                     if (mirrorRecipient.isNotBlank()) {
-                        val mirrorEntity = MessageEntity(
-                            id = messageId,
-                            chatId = chatId,
-                            senderId = "self",
-                            content = content,
-                            timestamp = timestamp,
-                            isFromMe = true,
-                            status = MessageStatus.PENDING.name,
-                            channel = MessageChannel.UNKNOWN.name,
-                            recipientId = mirrorRecipient,
-                            textColor = textColor,
-                            senderNameColor = senderNameColor,
+                        val mirrorEntity = outgoingTextRow(
+                            messageId, chatId, mirrorRecipient, content, timestamp, reply, textColor, senderNameColor,
                         )
                         messageDao.insertMessage(mirrorEntity)
                         OperationalDiagnostics.tracker.persisted(messageId)
@@ -237,21 +227,8 @@ class ChatRepository @Inject constructor(
             }
 
             // ШАГ 2: Создать entity с recipientId
-            val entity = MessageEntity(
-                id = messageId,
-                chatId = chatId,
-                senderId = "self",
-                content = content,
-                timestamp = timestamp,
-                isFromMe = true,
-                status = MessageStatus.PENDING.name,
-                channel = MessageChannel.UNKNOWN.name,
-                recipientId = actualRecipientId,
-                replyToId = reply?.messageId,
-                replyAuthor = reply?.author.orEmpty(),
-                replyText = reply?.let { DirectReplyWire.preview(it.text) }.orEmpty(),
-                textColor = textColor,
-                senderNameColor = senderNameColor,
+            val entity = outgoingTextRow(
+                messageId, chatId, actualRecipientId, content, timestamp, reply, textColor, senderNameColor,
             )
             val preview = com.vladimir.messenger.util.ChatPreviews.human(content) ?: content
             if (fromMirror) {
@@ -329,17 +306,7 @@ class ChatRepository @Inject constructor(
                 Log.w(TAG, "referral attribution failed: ${e.message}")
             }
 
-            if (reply != null) {
-                val packet = DirectReplyWire.build(
-                    messageId = messageId,
-                    replyToId = reply.messageId,
-                    replyAuthor = reply.author,
-                    replyText = reply.text,
-                )
-                val replyTransportId = DirectReplyWire.transportMessageId(messageId)
-                runCatching { sendViaRust(replyTransportId, chatId, actualRecipientId, packet) }
-                    .onFailure { Log.w(TAG, "direct reply metadata send failed: ${it.message}") }
-            }
+            if (reply != null) replySidecar.send(messageId, chatId, actualRecipientId, reply)
             Result.success(entity.toDomain())
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
@@ -453,6 +420,7 @@ class ChatRepository @Inject constructor(
     internal val automaticOutboxSender by lazy { roomAutomaticOutboxSender(context, chatDao, ::sendViaRust) }
     private val manualOutboxSender by lazy { roomAutomaticOutboxSender(context, chatDao, ::sendViaRustRetry) }
     private val mirrorEcho by lazy { roomMirrorOutgoingEcho(messageDao, automaticOutboxSender) }
+    private val replySidecar by lazy { roomOutgoingReplySidecar(messageDao, automaticOutboxSender, ::sendViaRust) }
     /** Fair, bounded traversal continues past unavailable destinations. */
     private val queuedOutbox by lazy { QueuedOutboxPump(messageDao, chatDao, automaticOutboxSender::send) }
     internal suspend fun pumpQueuedOffline(limit: Int = 20): OutboxProgress = queuedOutbox.pump(limit)
@@ -552,6 +520,7 @@ class ChatRepository @Inject constructor(
             DeliveryAckWire.messageId(row.content)?.let { markOutgoingMessageDelivered(it) }
             return
         }
+        if (!mirrorEchoMayResolve(row) { peer, id -> com.vladimir.messenger.data.chatclear.ChatClearRegistry.isCleared(context, peer, id) }) return
         val chat: Chat = if (row.recipientId.isNotBlank()) {
             getChatByContactId(row.recipientId)
                 ?: getOrCreateChat(row.recipientId, row.contactName.ifBlank { com.vladimir.messenger.util.NodeIds.autoName(row.recipientId) })

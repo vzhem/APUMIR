@@ -89,6 +89,12 @@ class OutboxFairnessContract(unittest.TestCase):
         self.assertIn("mirrorOutgoingStore.applyEcho(", repo)
         echo_section = repo.split("suspend fun applyMirrorSent(", 1)[1].split("suspend fun scheduledRecipient(", 1)[0]
         self.assertIn("!row.mine || row.id.isBlank()", echo_section)
+        self.assertLess(echo_section.index("mirrorEchoMayResolve(row)"), echo_section.index("getOrCreateChat("))
+        self.assertEqual(2, repo.count("outgoingTextRow("))
+        self.assertIn("outgoingTextColors(fromMirror, mirrorColors)", repo)
+        self.assertIn("mirrorColors = frame.textColor to frame.senderNameColor", dispatch)
+        self.assertIn("replySidecar.send(messageId, chatId, actualRecipientId, reply)", repo)
+        self.assertIn("preflight(messageId, chatId, peer)", self.text("data/repository/OutgoingReplySidecar.kt"))
         self.assertIn("manualOutboxSender.send(", repo)
         self.assertIn("mirrorEcho.publish(messageId, chatId, actualRecipientId)", repo)
         self.assertIn("messages.insertMessageIgnore(", store)
@@ -107,6 +113,7 @@ class OutboxFairnessContract(unittest.TestCase):
                      "missingOrChangedChatAndMalformedRecipientFailClosed", "clearDuringInsertionRemovesOnlyTheNewRowAndLeavesNoPreview",
                      "retryRequiresSameScopeBodyAndCurrentNonterminalStatus",
                      "missingManualRetryIsDurableButClearedIdsAreNotRecreated", "echoIsScopedAndNeverDowngradesSentOrDeliveryReceipt",
+                     "pairedTextReplyAndPaletteSurviveRoomReopen", "replySidecarUsesParentClearScopeAndRequiresTheRoomRow",
                      "storageFailureAndCancellationRollbackInsertedRowAndPreview", "echoNeverDeletesAnIgnoredConflictingRowWhenClearArrives"):
             self.assertIn(f"fun {case}(", test)
             self.assertIn(f'"{case}"', report)

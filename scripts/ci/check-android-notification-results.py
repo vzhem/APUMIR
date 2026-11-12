@@ -50,6 +50,8 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "retryRequiresSameScopeBodyAndCurrentNonterminalStatus",
     "missingManualRetryIsDurableButClearedIdsAreNotRecreated",
     "echoIsScopedAndNeverDowngradesSentOrDeliveryReceipt",
+    "pairedTextReplyAndPaletteSurviveRoomReopen",
+    "replySidecarUsesParentClearScopeAndRequiresTheRoomRow",
     "storageFailureAndCancellationRollbackInsertedRowAndPreview",
     "echoNeverDeletesAnIgnoredConflictingRowWhenClearArrives",
 }, OUTBOX_CLASS: {

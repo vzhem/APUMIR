@@ -18,11 +18,7 @@ internal class MirrorOutgoingDispatcher(
 ) {
     suspend fun dispatch(row: MirrorRow) {
         try {
-            if (!MirrorOutgoingPolicy.accepts(row)) return
-            val peer = OutboxRecipient.normalize(row.recipientId)
-            if (isCleared(row.recipientId, row.id) ||
-                (peer != row.recipientId && isCleared(peer, row.id))
-            ) return
+            if (!MirrorOutgoingPolicy.accepts(row) || !mirrorPeerPermitted(row.recipientId, row.id, isCleared)) return
             val chatId = localChat(row.recipientId).takeIf { it.isNotBlank() } ?: return
             if (row.manualRetry) manual(row, chatId) else initial(row, chatId)
         } catch (cancelled: CancellationException) {
@@ -44,6 +40,7 @@ internal suspend fun dispatchMirrorOutgoing(context: Context, repository: ChatRe
             repository.sendMessage(
                 chatId = chatId, recipientId = frame.recipientId, content = frame.content,
                 fixedMessageId = frame.id, fromMirror = true,
+                mirrorColors = frame.textColor to frame.senderNameColor,
                 reply = frame.replyToId.takeIf { it.isNotBlank() }?.let {
                     DirectReplyWire.Target(it, frame.replyAuthor, frame.replyText)
                 },

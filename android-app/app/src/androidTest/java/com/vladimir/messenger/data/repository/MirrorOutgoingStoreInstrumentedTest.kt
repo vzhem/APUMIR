@@ -8,6 +8,7 @@ import com.vladimir.messenger.data.chatclear.ChatClearTombstones
 import com.vladimir.messenger.data.local.AppDatabase
 import com.vladimir.messenger.data.local.entity.ChatEntity
 import com.vladimir.messenger.data.local.entity.MessageEntity
+import com.vladimir.messenger.data.reply.DirectReplyWire
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
@@ -216,6 +217,47 @@ class MirrorOutgoingStoreInstrumentedTest {
         assertEquals("DELIVERED", db.messageDao().getMessageById("message")!!.status)
         assertNull(db.chatDao().getChatById("other")!!.lastMessage)
         assertEquals("preview", db.chatDao().getChatById("chat")!!.lastMessage)
+    }
+
+    @Test fun pairedTextReplyAndPaletteSurviveRoomReopen() = runBlocking {
+        chat()
+        val reply = DirectReplyWire.Target("quoted", "Alice", "line one\n line two")
+        val paired = outgoingTextRow("message", "chat", "pk_friend", "answer", 42L, reply, "red", "blue")
+        assertEquals(MirrorStage.Inserted, store().stageNew(paired, "pk_friend", "answer"))
+        db.close()
+        db = open()
+        val saved = db.messageDao().getMessageById("message")!!
+        assertEquals("quoted", saved.replyToId)
+        assertEquals("Alice", saved.replyAuthor)
+        assertEquals("line one line two", saved.replyText)
+        assertEquals("red", saved.textColor)
+        assertEquals("blue", saved.senderNameColor)
+    }
+
+    @Test fun replySidecarUsesParentClearScopeAndRequiresTheRoomRow() = runBlocking {
+        chat()
+        val reply = DirectReplyWire.Target("quoted", "Alice", "private quote")
+        val parent = outgoingTextRow("parent", "chat", "pk_friend", "answer", 42L, reply, "red", "blue")
+        assertEquals(MirrorStage.Inserted, store().stageNew(parent, "pk_friend", "answer"))
+        var sends = 0
+        val guard = AutomaticOutboxSender(
+            chatContact = { db.chatDao().getChatById(it)?.contactId },
+            isCleared = { peer, id -> tombstones.contains("owner", peer, id) },
+            transport = { _, _, _, _ -> error("not used") },
+            recordFailure = { throw AssertionError("unexpected guard failure", it) },
+        )
+        val sidecar = OutgoingReplySidecar(
+            find = db.messageDao()::getMessageById,
+            preflight = guard::preflight,
+            transport = { _, _, _, _ -> sends++; true },
+            recordFailure = { throw AssertionError("unexpected send failure", it) },
+        )
+        assertTrue(sidecar.send("parent", "chat", "pk_friend", reply))
+        assertTrue(tombstones.remember("owner", "pk_friend", listOf("parent")))
+        assertFalse(sidecar.send("parent", "chat", "pk_friend", reply))
+        assertEquals(1, db.messageDao().deleteByIdChatAndSender("parent", "chat", "self"))
+        assertFalse(sidecar.send("parent", "chat", "pk_friend", reply))
+        assertEquals(1, sends)
     }
 
     @Test fun storageFailureAndCancellationRollbackInsertedRowAndPreview() = runBlocking {
