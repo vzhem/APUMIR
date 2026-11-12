@@ -51,9 +51,23 @@ class SafeLogTest(unittest.TestCase):
 '''
         self.assertEqual(inspect.last_uploaded_name(log), "app-release.apk")
 
+    def test_staged_file_progress_and_cleanup_are_reported_without_raw_log(self):
+        log = b'''2026-11-12T17:22:01Z Staging feature-pack-translate-arm64-v8a.zip (123 bytes)
+2026-11-12T17:22:02Z Promoted feature-pack-translate-arm64-v8a.zip
+2026-11-12T17:22:03Z Staging feature-pack-translate-x86_64.zip (456 bytes)
+2026-11-12T17:22:04Z Staging cleanup failed: error_perm
+'''
+        self.assertEqual(inspect.last_upload_event(log), ("started", "feature-pack-translate-x86_64.zip"))
+        self.assertTrue(inspect.staging_cleanup_failed(log))
+        self.assertEqual(inspect.last_upload_event(log.splitlines()[1]), ("promoted", "feature-pack-translate-arm64-v8a.zip"))
+
     def test_does_not_treat_printed_shell_as_progress(self):
         self.assertIsNone(inspect.last_uploaded_name(
             b'2026-11-12T17:22:00.0000000Z   echo "FTP -> $REMOTE_DIR/$name (10 B)"\n'
+            b'2026-11-12T17:22:01Z   print("Staging app-release.apk (20 bytes)")\n'
+        ))
+        self.assertFalse(inspect.staging_cleanup_failed(
+            b'2026-11-12T17:22:02Z print("Staging cleanup failed: error_perm")\n'
         ))
 
     def test_rejects_non_whitelisted_or_non_timestamped_lines(self):
@@ -88,6 +102,31 @@ class EndToEndTest(unittest.TestCase):
         self.assertIn("feature-packs.json SHA-256 matches release: False", text)
         self.assertIn("Site APK snapshot: 100 bytes; matches Latest: False; matches site metadata: True", text)
         self.assertIn("Last observed FTP file started: app-release.apk", text)
+        self.assertNotIn("SECRET-DO-NOT-PRINT", text)
+
+    def test_failed_staged_run_reports_only_safe_file_and_cleanup_status(self):
+        tag = "v11.74.509"
+        released = {"tag_name": tag, "assets": [
+            {"name": "app-release.apk", "digest": "sha256:" + "a" * 64, "size": 123},
+            {"name": "feature-packs.json", "digest": "sha256:" + "b" * 64},
+        ]}
+        runs = {"workflow_runs": [{"head_branch": tag, "event": "release", "id": 123, "status": "completed"}]}
+        jobs = {"jobs": [{"name": "Upload release files to apu.clan.su", "id": 456,
+                          "steps": [{"status": "completed", "conclusion": "failure", "name": "Upload to apu.clan.su via FTP"}]}]}
+        metadata = json.dumps({"version": "v11.74.508", "sha256": "c" * 64}).encode()
+        log = (b'2026-11-12T17:22:01Z Staging feature-pack-translate-arm64-v8a.zip (123 bytes)\n'
+               b'2026-11-12T17:22:02Z Staging cleanup failed: error_perm\nSECRET-DO-NOT-PRINT\n')
+        out = io.StringIO()
+        with patch.dict(os.environ, {"GITHUB_REPOSITORY": "owner/repo"}), \
+             patch.object(inspect, "gh_json", side_effect=[released, runs, jobs]), \
+             patch.object(inspect, "read_site", side_effect=[metadata, b"{}"]), \
+             patch.object(inspect, "hash_site_apk", return_value=(100, "c" * 64)), \
+             patch.object(inspect, "job_log_tail", return_value=log), contextlib.redirect_stdout(out):
+            self.assertEqual(inspect.main(), 0)
+        text = out.getvalue()
+        self.assertIn("FTP upload step completed: failure", text)
+        self.assertIn("Last observed FTP file started: feature-pack-translate-arm64-v8a.zip", text)
+        self.assertIn("A staging cleanup failed", text)
         self.assertNotIn("SECRET-DO-NOT-PRINT", text)
 
     def test_invalid_repository_never_calls_network(self):

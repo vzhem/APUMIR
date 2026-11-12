@@ -38,21 +38,35 @@ def parse_latest(data: bytes) -> tuple[str, str]:
     return version, digest
 
 
-def last_uploaded_name(log: bytes) -> str | None:
-    # The log contains the printed shell script as well as its output. Match
-    # only a real timestamped runner line, then whitelist the final basename.
-    pattern = re.compile(rb"^\d{4}-\d\d-\d\dT[^ ]+ FTP -> ([^\s]+) \([0-9]+ ")
+def last_upload_event(log: bytes) -> tuple[str, str] | None:
+    # Match only timestamped runner output, never the printed shell script.
+    # File names and event labels are whitelisted; no FTP response is exposed.
+    legacy = re.compile(rb"^\d{4}-\d\d-\d\dT[^ ]+ FTP -> ([^\s]+) \([0-9]+ ")
+    staged = re.compile(rb"^\d{4}-\d\d-\d\dT[^ ]+ (Staging|Promoted) ([A-Za-z0-9._-]+)(?: \([0-9]+ bytes\))?\s*$")
     last = None
     for line in log.splitlines():
-        match = pattern.match(line)
-        if match:
-            try:
-                name = match.group(1).decode("ascii").rsplit("/", 1)[-1]
-            except UnicodeDecodeError:
-                continue
-            if name in SAFE_NAMES:
-                last = name
+        old_match = legacy.match(line)
+        new_match = staged.match(line)
+        if not old_match and not new_match:
+            continue
+        try:
+            name = (old_match.group(1) if old_match else new_match.group(2)).decode("ascii").rsplit("/", 1)[-1]
+        except UnicodeDecodeError:
+            continue
+        if name in SAFE_NAMES:
+            phase = "promoted" if new_match and new_match.group(1) == b"Promoted" else "started"
+            last = (phase, name)
     return last
+
+
+def last_uploaded_name(log: bytes) -> str | None:
+    event = last_upload_event(log)
+    return event[1] if event else None
+
+
+def staging_cleanup_failed(log: bytes) -> bool:
+    pattern = re.compile(rb"^\d{4}-\d\d-\d\dT[^ ]+ Staging cleanup failed: [A-Za-z_]+\s*$")
+    return any(pattern.match(line) for line in log.splitlines())
 
 
 class SiteRedirectsOnly(urllib.request.HTTPRedirectHandler):
@@ -199,8 +213,10 @@ def main() -> int:
                     conclusion = "unknown"
                 report(f"FTP upload step completed: {conclusion}")
             log = job_log_tail(f"repos/{repo}/actions/jobs/{int(job['id'])}/logs")
-            name = last_uploaded_name(log) if log is not None else None
-            report(f"Last observed FTP file started: {name}" if name else "Job log/progress not available")
+            event = last_upload_event(log) if log is not None else None
+            report(f"Last observed FTP file {event[0]}: {event[1]}" if event else "Job log/progress not available")
+            if log is not None and staging_cleanup_failed(log):
+                report("A staging cleanup failed; an isolated temporary file may remain")
     except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError):
         report("Site publication run details unavailable")
     return 0
