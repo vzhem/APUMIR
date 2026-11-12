@@ -19,6 +19,7 @@ from pyftpdlib.servers import FTPServer
 from site_release_files import SiteFile
 from site_staged_upload import publish_one
 from site_ftp_probe import probe
+from site_ftp_fault_probe import probe as fault_probe
 
 logging.getLogger("pyftpdlib").setLevel(logging.ERROR)
 
@@ -43,7 +44,7 @@ class LocalFtpIntegrationTest(unittest.TestCase):
         self.ftp = None
         self.addCleanup(self.stop_server)
 
-    def start_server(self, reject_overwrite=False):
+    def start_server(self, reject_overwrite=False, reject_long_names=False):
         authorizer = DummyAuthorizer()
         authorizer.add_user("fixture", "fixture", str(self.root), perm="elradfmwMT")
         class Handler(FTPHandler):
@@ -56,6 +57,13 @@ class LocalFtpIntegrationTest(unittest.TestCase):
                     return
                 return FTPHandler.ftp_RNTO(handler, path)
             Handler.ftp_RNTO = rename
+        if reject_long_names:
+            def store(handler, path, mode="w"):
+                if len(Path(path).name) > 64:
+                    handler.respond("550 Fixture disallows long filenames")
+                    return
+                return FTPHandler.ftp_STOR(handler, path, mode)
+            Handler.ftp_STOR = store
         self.server = FTPServer(("127.0.0.1", 0), Handler)
         port = self.server.socket.getsockname()[1]
         self.thread = threading.Thread(target=self.server.serve_forever,
@@ -101,6 +109,21 @@ class LocalFtpIntegrationTest(unittest.TestCase):
     def test_real_ftp_capability_probe_does_not_touch_public_file(self):
         self.start_server()
         probe(self.ftp, log=lambda _: None)
+        self.assertEqual((self.downloads / self.name).read_bytes(), self.old)
+        self.assertEqual(sorted(p.name for p in self.downloads.iterdir()), [self.name])
+
+    def test_real_ftp_fault_probe_cleans_all_names_and_preserves_public_file(self):
+        self.start_server()
+        self.assertTrue(fault_probe(self.ftp, large=self.local / self.name, log=lambda _: None))
+        self.assertEqual((self.downloads / self.name).read_bytes(), self.old)
+        self.assertEqual(sorted(p.name for p in self.downloads.iterdir()), [self.name])
+
+    def test_real_ftp_fault_probe_distinguishes_refused_long_name(self):
+        self.start_server(reject_long_names=True)
+        messages = []
+        self.assertFalse(fault_probe(self.ftp, log=messages.append))
+        self.assertTrue(any("production-zip: STOR failed (error_perm, FTP code 550)" in m for m in messages))
+        self.assertTrue(any("short-zip: STOR and SIZE succeeded" in m for m in messages))
         self.assertEqual((self.downloads / self.name).read_bytes(), self.old)
         self.assertEqual(sorted(p.name for p in self.downloads.iterdir()), [self.name])
 

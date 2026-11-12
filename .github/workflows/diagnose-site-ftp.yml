@@ -1,0 +1,110 @@
+name: Diagnose site FTP staging safely
+
+# One-off diagnosis of the failed .509 publication. Only unique temporary
+# filenames are written, and all public .508 files are verified before/after.
+on:
+  push:
+    branches: ['arena/**']
+    paths:
+      - '.github/workflows/diagnose-site-ftp.yml'
+      - 'scripts/release/site_ftp_fault_probe.py'
+      - 'scripts/release/test_site_ftp_fault_probe.py'
+      - 'docs/APP_DELIVERY_TRACKER.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-publish
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    if: contains(github.event.head_commit.message, '[diagnose-ftp-509]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      APU_PROBE_TAG: v11.74.509
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test probe and site-verification safety offline
+        run: |
+          python3 scripts/release/test_site_ftp_fault_probe.py
+          python3 scripts/release/test_site_staged_upload.py
+
+      - name: Prepare verified release inputs and old site metadata
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)" = "$APU_PROBE_TAG"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/latest" > site-release.json
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/v11.74.508" > site-reference.json
+          mkdir -p probe-files reference-files
+          gh release download v11.74.509 --repo "$GITHUB_REPOSITORY" --dir probe-files \
+            --pattern feature-pack-translate-arm64-v8a.zip
+          gh release download v11.74.508 --repo "$GITHUB_REPOSITORY" --dir reference-files \
+            --pattern app-release.apk --pattern SHA256SUMS.txt --pattern feature-packs.json \
+            --pattern 'feature-pack-*.zip'
+          PYTHONPATH=scripts/release python3 - <<'PY'
+          import json
+          from pathlib import Path
+          from site_release_files import MAX_METADATA_BYTES, validate_inputs
+          from site_verify_http import open_site
+          with open_site('latest.json') as response:
+              data = response.read(MAX_METADATA_BYTES + 1)
+          if len(data) > MAX_METADATA_BYTES:
+              raise ValueError('site metadata too large')
+          Path('reference-files/latest.json').write_bytes(data)
+          with Path('site-reference.json').open('rb') as source:
+              metadata = source.read(MAX_METADATA_BYTES + 1)
+          if len(metadata) > MAX_METADATA_BYTES:
+              raise ValueError('release metadata too large')
+          validate_inputs(Path('reference-files'), json.loads(metadata), 'v11.74.508')
+          print('Reference release and current site pointer identify v11.74.508')
+          PY
+
+      - name: Verify all old public site files before the probe
+        id: baseline
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)" = "$APU_PROBE_TAG"
+          PYTHONPATH=scripts/release python3 - <<'PY'
+          import json
+          from pathlib import Path
+          from site_release_files import MAX_METADATA_BYTES, validate_inputs
+          from site_verify_http import verify_all
+          with Path('site-reference.json').open('rb') as source:
+              metadata = source.read(MAX_METADATA_BYTES + 1)
+          if len(metadata) > MAX_METADATA_BYTES:
+              raise ValueError('release metadata too large')
+          files = validate_inputs(Path('reference-files'), json.loads(metadata), 'v11.74.508')
+          verify_all(files, lambda: True)
+          print('All public files match the old release snapshot before the probe')
+          PY
+
+      - name: Probe isolated FTP filename and size cases
+        env:
+          APU_FTP_HOST: ${{ secrets.APU_UCOZ_FTP_HOST }}
+          APU_FTP_USER: ${{ secrets.APU_UCOZ_FTP_USER }}
+          APU_FTP_PASSWORD: ${{ secrets.APU_UCOZ_FTP_PASSWORD }}
+          APU_FTP_REMOTE_DIR: ${{ vars.APU_UCOZ_FTP_REMOTE_DIR }}
+        run: python3 scripts/release/site_ftp_fault_probe.py
+
+      - name: Recheck all old public site files after the probe
+        if: ${{ !cancelled() && steps.baseline.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)" = "$APU_PROBE_TAG"
+          PYTHONPATH=scripts/release python3 - <<'PY'
+          import json
+          from pathlib import Path
+          from site_release_files import MAX_METADATA_BYTES, validate_inputs
+          from site_verify_http import verify_all
+          with Path('site-reference.json').open('rb') as source:
+              metadata = source.read(MAX_METADATA_BYTES + 1)
+          if len(metadata) > MAX_METADATA_BYTES:
+              raise ValueError('release metadata too large')
+          files = validate_inputs(Path('reference-files'), json.loads(metadata), 'v11.74.508')
+          verify_all(files, lambda: True)
+          print('All public files still match the old release snapshot after the probe')
+          PY
