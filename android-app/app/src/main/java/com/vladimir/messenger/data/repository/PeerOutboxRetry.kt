@@ -11,8 +11,8 @@ import kotlinx.coroutines.CancellationException
  * the same contact. Message bodies and peer identifiers must not be logged.
  */
 internal class PeerOutboxRetry(
-    private val loadPending: suspend (String, Int) -> List<MessageEntity>,
-    private val loadRecent: suspend (String, Int) -> List<MessageEntity>,
+    private val loadPending: suspend (String, OutboxPosition?, Int) -> List<MessageEntity>,
+    private val loadRecent: suspend (String, OutboxPosition?, Int) -> List<MessageEntity>,
     private val loadCurrent: suspend (String) -> MessageEntity?,
     private val chatContact: suspend (String) -> String?,
     private val send: suspend (String, String, String, String) -> Boolean?,
@@ -22,42 +22,65 @@ internal class PeerOutboxRetry(
 ) {
     private val gate = Any()
     private val inFlight = mutableSetOf<String>()
-    private val lastSync = LinkedHashMap<String, Long>(16, 0.75f, true)
+    private val states = LinkedHashMap<String, RetryState>(16, 0.75f, true)
+
+    // One peer cannot run concurrently. State is accessed by that invocation
+    // only and published through gate on entry/exit; idle peers are LRU-bounded.
+    private class RetryState(
+        var pending: OutboxPosition? = null,
+        var recent: OutboxPosition? = null,
+        var lastSync: Long? = null,
+    )
 
     suspend fun retry(peerId: String): Int {
-        if (!peerId.startsWith("pk_") || '\u0000' in peerId || !begin(peerId)) return 0
+        if (!peerId.startsWith("pk_") || '\u0000' in peerId) return 0
+        val state = begin(peerId) ?: return 0
         try {
             var sent = 0
-            // This bounds rows inspected, not network calls: stale or cleared
-            // rows still consume the discovery path's finite scan budget.
+            // Bound rows inspected, not only network calls. The cursors rotate
+            // on later discoveries so persistent tombstones cannot occupy the
+            // same first window forever. They are hints, not durable state.
             var visited = 0
             val tried = HashSet<String>()
-            val pending = load { loadPending(peerId, PENDING_LIMIT) }.take(PENDING_LIMIT)
-            for (row in pending) {
-                if (visited >= TOTAL_LIMIT) break
-                if (!tried.add(row.id)) continue
-                visited++
-                if (attempt(row, peerId, pendingOnly = true)) sent++
+            var pending = load { loadPending(peerId, state.pending, PENDING_LIMIT) }?.take(PENDING_LIMIT)
+            if (pending != null && pending.isEmpty() && state.pending != null) {
+                state.pending = null
+                pending = load { loadPending(peerId, null, PENDING_LIMIT) }?.take(PENDING_LIMIT)
+            }
+            if (pending != null) {
+                for (row in pending) {
+                    if (tried.add(row.id)) {
+                        visited++
+                        if (attempt(row, peerId, pendingOnly = true)) sent++
+                    }
+                    // Do not advance past a cancelled or still-running attempt.
+                    state.pending = OutboxPosition(row.timestamp, row.id)
+                }
+                if (pending.size < PENDING_LIMIT) state.pending = null
             }
 
-            if (syncDue(peerId)) {
-                val recent = try {
-                    loadRecent(peerId, RECENT_LIMIT).take(RECENT_LIMIT)
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    recordFailure()
-                    return sent
+            if (syncDue(state)) {
+                var recent = load { loadRecent(peerId, state.recent, RECENT_LIMIT) }?.take(RECENT_LIMIT)
+                    ?: return sent
+                if (recent.isEmpty() && state.recent != null) {
+                    state.recent = null
+                    recent = load { loadRecent(peerId, null, RECENT_LIMIT) }?.take(RECENT_LIMIT)
+                        ?: return sent
                 }
+                var consumed = 0
                 for (row in recent) {
                     if (visited >= TOTAL_LIMIT) break
-                    if (!tried.add(row.id)) continue
-                    visited++
-                    if (attempt(row, peerId, pendingOnly = false)) sent++
+                    if (tried.add(row.id)) {
+                        visited++
+                        if (attempt(row, peerId, pendingOnly = false)) sent++
+                    }
+                    state.recent = OutboxPosition(row.timestamp, row.id)
+                    consumed++
                 }
-                // Only a completed pass starts the cooldown: cancellation or a
-                // failed database read must not suppress the next opportunity.
-                noteSync(peerId)
+                if (consumed == recent.size && recent.size < RECENT_LIMIT) state.recent = null
+                // Only a completed invocation starts the cooldown: cancellation
+                // or a failed database read must not suppress the next opportunity.
+                state.lastSync = nowMs()
             }
             return sent
         } finally {
@@ -65,13 +88,13 @@ internal class PeerOutboxRetry(
         }
     }
 
-    private suspend fun load(block: suspend () -> List<MessageEntity>): List<MessageEntity> = try {
+    private suspend fun load(block: suspend () -> List<MessageEntity>): List<MessageEntity>? = try {
         block()
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: Exception) {
         recordFailure()
-        emptyList()
+        null
     }
 
     private suspend fun attempt(snapshot: MessageEntity, peerId: String, pendingOnly: Boolean): Boolean {
@@ -113,20 +136,21 @@ internal class PeerOutboxRetry(
         return delivered == true
     }
 
-    private fun begin(peerId: String): Boolean = synchronized(gate) {
-        if (inFlight.size >= MAX_IN_FLIGHT || peerId in inFlight) false
-        else inFlight.add(peerId)
+    private fun begin(peerId: String): RetryState? = synchronized(gate) {
+        if (inFlight.size >= MAX_IN_FLIGHT || peerId in inFlight) return@synchronized null
+        inFlight.add(peerId)
+        val state = states.getOrPut(peerId) { RetryState() }
+        while (states.size > MAX_TRACKED_PEERS) {
+            val victim = states.keys.firstOrNull { it !in inFlight } ?: break
+            states.remove(victim)
+        }
+        state
     }
 
-    private fun syncDue(peerId: String): Boolean = synchronized(gate) {
-        val last = lastSync[peerId]
+    private fun syncDue(state: RetryState): Boolean {
+        val last = state.lastSync
         val now = nowMs()
-        last == null || now < last || now - last >= FULL_SYNC_COOLDOWN_MS
-    }
-
-    private fun noteSync(peerId: String) = synchronized(gate) {
-        lastSync[peerId] = nowMs()
-        while (lastSync.size > MAX_TRACKED_PEERS) lastSync.remove(lastSync.keys.first())
+        return last == null || now < last || now - last >= FULL_SYNC_COOLDOWN_MS
     }
 
     private companion object {

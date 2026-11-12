@@ -45,6 +45,10 @@ class OutboxFairnessContract(unittest.TestCase):
         self.assertNotIn("content=${msg.content.take", repo)
         self.assertIn("roomPeerOutboxRetry(", repo)
         self.assertIn("getRetryableOutgoingForPeer(peer, limit)", adapter)
+        self.assertIn("getRetryableOutgoingForPeerAfter(peer, after.timestamp, after.id, limit)", adapter)
+        self.assertIn("getUnconfirmedOutgoingMessagesBefore(chat.id, peer, before.timestamp, before.id, limit)", adapter)
+        self.assertIn("state.pending = OutboxPosition(row.timestamp, row.id)", peer)
+        self.assertIn("state.recent = OutboxPosition(row.timestamp, row.id)", peer)
         self.assertIn("loadCurrent = messages::getMessageById", adapter)
         self.assertIn("OutboxRecipient.forMessage(current, contact) != peerId", peer)
         self.assertIn("QueuedOutboxPump(messageDao, chatDao, automaticOutboxSender::send)", repo)
@@ -58,6 +62,19 @@ class OutboxFairnessContract(unittest.TestCase):
         self.assertIn("catch (cancelled: CancellationException)", peer)
         self.assertIn("queueAfterInitialSendFailure(messageId)", repo)
         self.assertIn("status IN ('PENDING', 'QUEUED_OFFLINE')", dao)
+
+    def test_clear_lookup_requires_identity_even_before_the_first_database(self):
+        registry = self.text("data/chatclear/ChatClearRegistry.kt")
+        lookup = self.text("data/chatclear/ChatClearLookup.kt")
+        self.assertNotIn(".exists()", registry)
+        self.assertIn("store(context).contains(owner, currentPeer, id)", registry)
+        self.assertIn("check(identity.isNotBlank())", lookup)
+        runner = (ROOT / "scripts/ci/run-android-navigation-tests.sh").read_text()
+        report = (ROOT / "scripts/ci/check-android-notification-results.py").read_text()
+        self.assertIn("ChatClearTombstonesInstrumentedTest", runner)
+        for case in ("firstLookupRequiresIdentityAndUsesRealStorageFromAnAbsentFile",
+                     "lookupWaitsForAConcurrentFirstTombstoneTransaction"):
+            self.assertIn(f'"{case}"', report)
 
     def test_unfinished_scan_does_not_wait_for_failure_backoff(self):
         cadence = self.text("service/DeliveryCadence.kt")
@@ -73,7 +90,7 @@ class OutboxFairnessContract(unittest.TestCase):
         report = (ROOT / "scripts/ci/check-android-notification-results.py").read_text()
         self.assertIn("OutboxFairnessInstrumentedTest", runner)
         self.assertIn("OutboxFairnessInstrumentedTest", report)
-        for name in ("actualRoomQueueReachesLaterRecipientPastManyBlockedRows", "aBadOldestMessageDoesNotHideLaterMessagesInTheSameRoomChat", "growingRoomQueueEndsScanAndRetriesBlockedChat", "discoveryQueryIsContactScopedAndBoundedAcrossChats", "initialFailureCannotUndoConcurrentSuccessOrAck", "roomKeysetPaginationKeepsAllEqualTimestampIds", "unconfirmedPersonalTextRetriesSameIdAndStopsAfterRoomAck", "unconfirmedPumpSkipsGroupsDeferredMediaAndServicesAndRespectsMirror", "roomReconciliationRepairsCommittedAckAfterRestartWithoutTouchingOtherRows", "ackDuringLateNativeSendReconcilesTheNewlyRetainedCopy", "queuedPageRereadsAcknowledgedDeletedAndEditedRows", "queuedRetriesKeepSavedRecipientAndParseLegacyLinksWithoutUnsafeFallback", "discoveryRoomQueryAndRetryRespectSavedRecipientsAndLiveRows", "unconfirmedRoomRetriesLegacyRecipientInsteadOfChangedChat", "durableClearTombstonesSuppressAllAutomaticRetriesWithoutBlockingOtherRows", "failedClearPreflightSkipsOnlyThatRowAndNeverCountsAsNetwork", "cancelledClearPreflightPropagatesAndEachRetryCanResume"):
+        for name in ("actualRoomQueueReachesLaterRecipientPastManyBlockedRows", "aBadOldestMessageDoesNotHideLaterMessagesInTheSameRoomChat", "growingRoomQueueEndsScanAndRetriesBlockedChat", "discoveryQueryIsContactScopedAndBoundedAcrossChats", "initialFailureCannotUndoConcurrentSuccessOrAck", "roomKeysetPaginationKeepsAllEqualTimestampIds", "unconfirmedPersonalTextRetriesSameIdAndStopsAfterRoomAck", "unconfirmedPumpSkipsGroupsDeferredMediaAndServicesAndRespectsMirror", "roomReconciliationRepairsCommittedAckAfterRestartWithoutTouchingOtherRows", "ackDuringLateNativeSendReconcilesTheNewlyRetainedCopy", "queuedPageRereadsAcknowledgedDeletedAndEditedRows", "queuedRetriesKeepSavedRecipientAndParseLegacyLinksWithoutUnsafeFallback", "discoveryRoomQueryAndRetryRespectSavedRecipientsAndLiveRows", "unconfirmedRoomRetriesLegacyRecipientInsteadOfChangedChat", "durableClearTombstonesSuppressAllAutomaticRetriesWithoutBlockingOtherRows", "discoveryRotatesPastClearedRoomWindowsWithoutSendingThem", "failedClearPreflightSkipsOnlyThatRowAndNeverCountsAsNetwork", "cancelledClearPreflightPropagatesAndEachRetryCanResume"):
             self.assertIn(f"fun {name}(", test)
             self.assertIn(f'"{name}"', report)
 

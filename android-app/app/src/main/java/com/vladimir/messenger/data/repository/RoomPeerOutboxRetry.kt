@@ -13,10 +13,15 @@ internal fun roomPeerOutboxRetry(
     send: suspend (String, String, String, String) -> Boolean?,
     recordFailure: () -> Unit = { Log.w("PeerOutboxRetry", "Peer outbox retry failed") },
 ): PeerOutboxRetry = PeerOutboxRetry(
-    loadPending = { peer, limit -> messages.getRetryableOutgoingForPeer(peer, limit) },
-    loadRecent = { peer, limit ->
-        chats.getChatByContactId(peer)?.let { messages.getUnconfirmedOutgoingMessages(it.id, peer, limit) }
-            ?: emptyList()
+    loadPending = { peer, after, limit ->
+        if (after == null) messages.getRetryableOutgoingForPeer(peer, limit)
+        else messages.getRetryableOutgoingForPeerAfter(peer, after.timestamp, after.id, limit)
+    },
+    loadRecent = { peer, before, limit ->
+        chats.getChatByContactId(peer)?.let { chat ->
+            if (before == null) messages.getUnconfirmedOutgoingMessages(chat.id, peer, limit)
+            else messages.getUnconfirmedOutgoingMessagesBefore(chat.id, peer, before.timestamp, before.id, limit)
+        } ?: emptyList()
     },
     loadCurrent = messages::getMessageById,
     chatContact = { chats.getChatById(it)?.contactId },

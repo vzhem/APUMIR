@@ -517,6 +517,48 @@ class OutboxFairnessInstrumentedTest {
         }
     }
 
+    @Test fun discoveryRotatesPastClearedRoomWindowsWithoutSendingThem() = runBlocking {
+        val file = File(context.noBackupFilesDir, "discovery-clear-${UUID.randomUUID()}.sqlite")
+        val tombstones = ChatClearTombstones(context, file)
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        try {
+            val chats = db.chatDao()
+            val messages = db.messageDao()
+            chats.insertChat(ChatEntity(id = "chat", contactId = "pk_peer", contactName = "Peer"))
+            val ids = (0 until 120).map { "m%03d".format(it) }
+            ids.forEach { id ->
+                messages.insertMessageIgnore(MessageEntity(
+                    id = id, chatId = "chat", senderId = "self", content = "body", timestamp = 42,
+                    isFromMe = true, status = "PENDING", recipientId = "pk_peer",
+                ))
+            }
+            ids.filter { it != "m050" }.chunked(com.vladimir.messenger.data.chatclear.ChatClearWire.MAX_IDS)
+                .forEach { assertTrue(tombstones.remember("owner", "pk_peer", it)) }
+            val sent = mutableListOf<String>()
+            val guard = AutomaticOutboxSender(
+                chatContact = { chats.getChatById(it)?.contactId },
+                isCleared = { peer, id -> tombstones.contains("owner", peer, id) },
+                transport = { id, _, _, _ -> sent += id; true },
+                recordFailure = { error("unexpected preflight failure") },
+            )
+            val retry = roomPeerOutboxRetry(messages, chats, guard::send) { error("unexpected retry error") }
+            // The allowed row is neither in the oldest pending page nor in the
+            // newest recent page. Earlier cleared pages remain in Room.
+            assertEquals(0, retry.retry("pk_peer"))
+            assertEquals(0, retry.retry("pk_peer"))
+            assertEquals(1, retry.retry("pk_peer"))
+            assertEquals(listOf("m050"), sent)
+            assertEquals("SENT", messages.getMessageById("m050")!!.status)
+            assertEquals("PENDING", messages.getMessageById("m000")!!.status)
+            assertEquals("PENDING", messages.getMessageById("m119")!!.status)
+        } finally {
+            db.close()
+            tombstones.close()
+            context.deleteDatabase(file.absolutePath)
+            listOf("-wal", "-shm", "-journal").forEach { File(file.absolutePath + it).delete() }
+        }
+    }
+
     @Test fun failedClearPreflightSkipsOnlyThatRowAndNeverCountsAsNetwork() = runBlocking {
         val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
         try {

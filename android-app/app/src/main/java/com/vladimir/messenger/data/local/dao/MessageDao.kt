@@ -171,6 +171,20 @@ interface MessageDao {
     )
     suspend fun getRetryableOutgoingForPeer(peerId: String, limit: Int): List<MessageEntity>
 
+    /** Continue a peer's bounded discovery scan without repeatedly visiting its oldest rows. */
+    @Query(
+        "SELECT m.* FROM chats c CROSS JOIN messages m INDEXED BY index_messages_chatId_timestamp " +
+            "WHERE c.contactId = :peerId AND m.chatId = c.id AND m.isFromMe = 1 " +
+            "AND m.status IN ('PENDING', 'QUEUED_OFFLINE') " +
+            "AND " + RETRY_NO_NUL + " AND " + RETRY_PEER_SCOPE + " " +
+            "AND m.timestamp >= :afterTimestamp AND (m.timestamp > :afterTimestamp OR " +
+            "(m.timestamp = :afterTimestamp AND m.id > :afterId)) " +
+            "ORDER BY m.timestamp ASC, m.id ASC LIMIT :limit"
+    )
+    suspend fun getRetryableOutgoingForPeerAfter(
+        peerId: String, afterTimestamp: Long, afterId: String, limit: Int,
+    ): List<MessageEntity>
+
     /**
      * р245: содержимое последних строк переписки - для насоса медиа. По нему
      * тень находит ссылки на гифки, байтов которых у неё ещё нет, и просит их
@@ -237,6 +251,19 @@ interface MessageDao {
             "ORDER BY m.timestamp DESC, m.id DESC LIMIT :limit"
     )
     suspend fun getUnconfirmedOutgoingMessages(chatId: String, peerId: String, limit: Int): List<MessageEntity>
+
+    /** Continue the descending discovery window with the same recipient filter. */
+    @Query(
+        "SELECT m.* FROM messages m WHERE m.chatId = :chatId AND m.isFromMe = 1 " +
+            "AND m.status IN ('PENDING', 'QUEUED_OFFLINE', 'SENT') " +
+            "AND " + RETRY_NO_NUL + " AND " + RETRY_PEER_SCOPE + " " +
+            "AND m.timestamp <= :beforeTimestamp AND (m.timestamp < :beforeTimestamp OR " +
+            "(m.timestamp = :beforeTimestamp AND m.id < :beforeId)) " +
+            "ORDER BY m.timestamp DESC, m.id DESC LIMIT :limit"
+    )
+    suspend fun getUnconfirmedOutgoingMessagesBefore(
+        chatId: String, peerId: String, beforeTimestamp: Long, beforeId: String, limit: Int,
+    ): List<MessageEntity>
 
     @Query("UPDATE messages SET channel = :channel WHERE id = :messageId")
     suspend fun updateMessageChannel(messageId: String, channel: String)

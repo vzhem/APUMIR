@@ -23,8 +23,8 @@ class PeerOutboxRetryTest {
         val calls = mutableListOf<String>()
         val marked = mutableListOf<String>()
         val helper = PeerOutboxRetry(
-            loadPending = { peer, limit -> assertEquals("pk_peer", peer); assertEquals(20, limit); pending },
-            loadRecent = { peer, limit -> assertEquals("pk_peer", peer); assertEquals(50, limit); recent },
+            loadPending = { peer, _, limit -> assertEquals("pk_peer", peer); assertEquals(20, limit); pending },
+            loadRecent = { peer, _, limit -> assertEquals("pk_peer", peer); assertEquals(50, limit); recent },
             loadCurrent = { id -> (pending + recent).firstOrNull { it.id == id } },
             chatContact = { "pk_peer" },
             send = { id, _, peer, _ -> assertEquals("pk_peer", peer); calls += id; true },
@@ -42,8 +42,8 @@ class PeerOutboxRetryTest {
         val calls = mutableListOf<String>()
         val marked = mutableListOf<String>()
         val helper = PeerOutboxRetry(
-            loadPending = { _, _ -> listOf(row("p")) },
-            loadRecent = { _, _ -> recentLoads++; listOf(row("p"), row("s", "SENT")) },
+            loadPending = { _, _, _ -> listOf(row("p")) },
+            loadRecent = { _, _, _ -> recentLoads++; listOf(row("p"), row("s", "SENT")) },
             loadCurrent = { id -> row(id, if (id == "s") "SENT" else "PENDING") },
             chatContact = { "pk_peer" },
             send = { id, _, _, _ -> calls += id; true },
@@ -67,8 +67,8 @@ class PeerOutboxRetryTest {
         val calls = mutableListOf<String>()
         var errors = 0
         val helper = PeerOutboxRetry(
-            loadPending = { _, _ -> listOf(row("bad"), row("good")) },
-            loadRecent = { _, _ -> listOf(row("later", "SENT")) },
+            loadPending = { _, _, _ -> listOf(row("bad"), row("good")) },
+            loadRecent = { _, _, _ -> listOf(row("later", "SENT")) },
             loadCurrent = { id -> row(id, if (id == "later") "SENT" else "PENDING") },
             chatContact = { "pk_peer" },
             send = { id, _, _, _ -> calls += id; if (id == "bad") error("secret body must not be logged") else true },
@@ -90,7 +90,7 @@ class PeerOutboxRetryTest {
         val current = snapshots.associateBy { it.id }.toMutableMap()
         val sent = mutableListOf<Pair<String, String>>()
         val helper = PeerOutboxRetry(
-            loadPending = { _, _ -> snapshots }, loadRecent = { _, _ -> emptyList() },
+            loadPending = { _, _, _ -> snapshots }, loadRecent = { _, _, _ -> emptyList() },
             loadCurrent = { current[it] }, chatContact = { if (it == "other") "pk_other" else "pk_peer" },
             send = { id, _, peer, body ->
                 assertEquals("pk_peer", peer)
@@ -117,7 +117,7 @@ class PeerOutboxRetryTest {
         val current = snapshots.associateBy { it.id }.toMutableMap()
         val sent = mutableListOf<String>()
         val helper = PeerOutboxRetry(
-            loadPending = { _, _ -> emptyList() }, loadRecent = { _, _ -> snapshots },
+            loadPending = { _, _, _ -> emptyList() }, loadRecent = { _, _, _ -> snapshots },
             loadCurrent = { current[it] }, chatContact = { "pk_peer" },
             send = { id, _, _, _ ->
                 sent += id
@@ -134,7 +134,7 @@ class PeerOutboxRetryTest {
         var errors = 0
         val sent = mutableListOf<String>()
         val helper = PeerOutboxRetry(
-            loadPending = { _, _ -> listOf(row("bad"), row("good")) }, loadRecent = { _, _ -> emptyList() },
+            loadPending = { _, _, _ -> listOf(row("bad"), row("good")) }, loadRecent = { _, _, _ -> emptyList() },
             loadCurrent = { if (it == "bad") error("secret") else row(it) }, chatContact = { null },
             send = { id, _, _, _ -> sent += id; true }, markSent = {}, recordFailure = { errors++ }, nowMs = { 0 },
         )
@@ -146,8 +146,8 @@ class PeerOutboxRetryTest {
     @Test fun cancellationDoesNotLeavePeerBusyOrStartCooldown() = runBlocking {
         var reads = 0
         val helper = PeerOutboxRetry(
-            loadPending = { _, _ -> emptyList() },
-            loadRecent = { _, _ -> if (++reads == 1) throw CancellationException("cancel") else listOf(row("s", "SENT")) },
+            loadPending = { _, _, _ -> emptyList() },
+            loadRecent = { _, _, _ -> if (++reads == 1) throw CancellationException("cancel") else listOf(row("s", "SENT")) },
             loadCurrent = { row(it, "SENT") }, chatContact = { "pk_peer" },
             send = { _, _, _, _ -> true }, markSent = {}, recordFailure = { error("unexpected error") }, nowMs = { 0 },
         )
@@ -162,8 +162,8 @@ class PeerOutboxRetryTest {
         val release = CompletableDeferred<Unit>()
         val calls = mutableListOf<String>()
         val helper = PeerOutboxRetry(
-            loadPending = { peer, _ -> listOf(row(peer, recipient = peer)) },
-            loadRecent = { _, _ -> emptyList() },
+            loadPending = { peer, _, _ -> listOf(row(peer, recipient = peer)) },
+            loadRecent = { _, _, _ -> emptyList() },
             loadCurrent = { id -> row(id, recipient = id) }, chatContact = { null },
             send = { id, _, _, _ ->
                 calls += id
@@ -182,11 +182,95 @@ class PeerOutboxRetryTest {
         assertEquals(listOf("pk_one", "pk_two"), calls)
     }
 
+    @Test fun clearedPendingWindowsRotateAcrossDiscoveriesAndEventuallyWrap() = runBlocking {
+        val rows = (0 until 65).map { row("m%03d".format(it)) }
+        val byId = rows.associateBy { it.id }
+        val network = mutableListOf<String>()
+        var inspected = 0
+        val starts = mutableListOf<String?>()
+        val helper = PeerOutboxRetry(
+            loadPending = { _, after, limit ->
+                starts += after?.id
+                rows.filter { after == null || !OutboxPosition(it.timestamp, it.id).atOrBefore(after) }.take(limit)
+            },
+            loadRecent = { _, _, _ -> emptyList() },
+            loadCurrent = { inspected++; byId[it] }, chatContact = { "pk_peer" },
+            // null represents an automatic-send preflight suppression; no transport call.
+            send = { id, _, _, _ -> if (id < "m060") null else { network += id; true } },
+            markSent = {}, recordFailure = { error("unexpected error") }, nowMs = { 0 },
+        )
+        repeat(3) {
+            val before = inspected
+            assertEquals(0, helper.retry("pk_peer"))
+            assertEquals(20, inspected - before)
+        }
+        assertEquals(5, helper.retry("pk_peer"))
+        assertEquals((60 until 65).map { "m%03d".format(it) }, network)
+        assertEquals(listOf(null, "m019", "m039", "m059"), starts)
+        assertEquals(0, helper.retry("pk_peer"))
+        assertEquals(null, starts.last()) // a short last page wraps the next discovery
+    }
+
+    @Test fun recentWindowResumesAfterTheSharedVisitBudget() = runBlocking {
+        val pending = (0 until 20).map { row("p%03d".format(it)) }
+        val recent = (0 until 80).map { row("s%03d".format(it), "SENT") }.reversed()
+        val byId = (pending + recent).associateBy { it.id }
+        var clock = 0L
+        val sent = mutableListOf<String>()
+        val helper = PeerOutboxRetry(
+            loadPending = { _, _, limit -> pending.take(limit) },
+            loadRecent = { _, before, limit ->
+                recent.filter { before == null || OutboxPosition(it.timestamp, it.id) != before &&
+                    OutboxPosition(it.timestamp, it.id).atOrBefore(before) }.take(limit)
+            },
+            loadCurrent = { byId[it] }, chatContact = { "pk_peer" },
+            send = { id, _, _, _ -> sent += id; true }, markSent = {},
+            recordFailure = { error("unexpected error") }, nowMs = { clock },
+        )
+        assertEquals(50, helper.retry("pk_peer"))
+        assertEquals((50 until 80).reversed().map { "s%03d".format(it) }, sent.filter { it.startsWith("s") })
+        clock += 300_000
+        assertEquals(50, helper.retry("pk_peer"))
+        assertEquals((20 until 80).reversed().map { "s%03d".format(it) }, sent.filter { it.startsWith("s") })
+        clock += 300_000
+        assertEquals(40, helper.retry("pk_peer"))
+        assertEquals((0 until 80).reversed().map { "s%03d".format(it) }, sent.filter { it.startsWith("s") })
+        clock += 300_000
+        assertEquals(50, helper.retry("pk_peer"))
+        assertEquals("s079", sent.filter { it.startsWith("s") }[80])
+    }
+
+    @Test fun cancelledAttemptDoesNotAdvancePastItsPendingRow() = runBlocking {
+        val rows = (0 until 5).map { row("m$it") }
+        var cancel = true
+        val calls = mutableListOf<String>()
+        val starts = mutableListOf<String?>()
+        val helper = PeerOutboxRetry(
+            loadPending = { _, after, limit ->
+                starts += after?.id
+                rows.filter { after == null || !OutboxPosition(it.timestamp, it.id).atOrBefore(after) }.take(limit)
+            },
+            loadRecent = { _, _, _ -> emptyList() }, loadCurrent = { id -> rows.firstOrNull { it.id == id } },
+            chatContact = { "pk_peer" },
+            send = { id, _, _, _ ->
+                calls += id
+                if (id == "m1" && cancel) throw CancellationException("cancel")
+                true
+            },
+            markSent = {}, recordFailure = { error("unexpected error") }, nowMs = { 0 },
+        )
+        assertTrue(runCatching { helper.retry("pk_peer") }.exceptionOrNull() is CancellationException)
+        cancel = false
+        assertEquals(4, helper.retry("pk_peer"))
+        assertEquals(listOf(null, "m0"), starts)
+        assertEquals(listOf("m0", "m1", "m1", "m2", "m3", "m4"), calls)
+    }
+
     @Test fun concurrentPeerWorkHasAHardLimitAndReleasesItOnCancellation() = runBlocking {
         val blocked = CompletableDeferred<Unit>()
         val started = mutableListOf<String>()
         val helper = PeerOutboxRetry(
-            loadPending = { peer, _ -> listOf(row(peer, recipient = peer)) }, loadRecent = { _, _ -> emptyList() },
+            loadPending = { peer, _, _ -> listOf(row(peer, recipient = peer)) }, loadRecent = { _, _, _ -> emptyList() },
             loadCurrent = { id -> row(id, recipient = id) }, chatContact = { null },
             send = { id, _, _, _ -> started += id; blocked.await(); true },
             markSent = {}, recordFailure = { error("unexpected error") }, nowMs = { 0 },

@@ -5,6 +5,10 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -36,6 +40,56 @@ class ChatClearTombstonesInstrumentedTest {
         assertFalse(store.contains("owner", "other", "first"))
         assertFalse(store.contains("other", "peer", "first"))
         assertFalse(store.contains("owner", "peer", "new"))
+    }
+
+    @Test fun firstLookupRequiresIdentityAndUsesRealStorageFromAnAbsentFile() {
+        var owner = ""
+        val lookup = ChatClearLookup({ owner }, { identity, peer, id -> store.contains(identity, peer, id) })
+        assertFalse(file.exists())
+        assertTrue(runCatching { lookup.isCleared("peer", "first") }.exceptionOrNull() is IllegalStateException)
+        assertFalse(file.exists())
+        owner = "owner"
+        assertFalse(lookup.isCleared("peer", "first"))
+        assertTrue(file.exists())
+        assertTrue(store.remember("owner", "peer", listOf("first")))
+        assertTrue(lookup.isCleared("peer", "first"))
+        assertFalse(lookup.isCleared("other", "first"))
+        store.close()
+        store = ChatClearTombstones(context, file)
+        assertTrue(lookup.isCleared("peer", "first"))
+        owner = "other-owner"
+        assertFalse(lookup.isCleared("peer", "first"))
+    }
+
+    @Test fun lookupWaitsForAConcurrentFirstTombstoneTransaction() {
+        val lookup = ChatClearLookup({ "owner" }, { owner, peer, id -> store.contains(owner, peer, id) })
+        val locked = CountDownLatch(1)
+        val readerStarted = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val writer = executor.submit<Boolean> {
+                synchronized(store) {
+                    locked.countDown()
+                    check(release.await(5, TimeUnit.SECONDS))
+                    store.remember("owner", "peer", listOf("first"))
+                }
+            }
+            assertTrue(locked.await(5, TimeUnit.SECONDS))
+            val reader = executor.submit<Boolean> {
+                readerStarted.countDown()
+                lookup.isCleared("peer", "first")
+            }
+            assertTrue(readerStarted.await(5, TimeUnit.SECONDS))
+            assertTrue(runCatching { reader.get(150, TimeUnit.MILLISECONDS) }.exceptionOrNull() is TimeoutException)
+            release.countDown()
+            assertTrue(writer.get(5, TimeUnit.SECONDS))
+            assertTrue(reader.get(5, TimeUnit.SECONDS))
+        } finally {
+            release.countDown()
+            executor.shutdownNow()
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS))
+        }
     }
 
     @Test fun pagesAreStableAndOwnerScoped() {

@@ -7,6 +7,7 @@ from pathlib import Path
 CLASS = "com.vladimir.messenger.data.notification.NotificationArrivalInstrumentedTest"
 INCOMING_CLASS = "com.vladimir.messenger.data.repository.IncomingMessageStoreInstrumentedTest"
 OUTBOX_CLASS = "com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest"
+CLEAR_LOOKUP_CLASS = "com.vladimir.messenger.data.chatclear.ChatClearTombstonesInstrumentedTest"
 PUSH_CLASS = "com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest"
 REGISTRATION_CLASS = "com.vladimir.messenger.data.push.PushRegistrationStoreInstrumentedTest"
 PUSH_INTEGRATION_CLASS = "com.vladimir.messenger.data.push.PushWakeIntegrationInstrumentedTest"
@@ -54,8 +55,14 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "discoveryRoomQueryAndRetryRespectSavedRecipientsAndLiveRows",
     "unconfirmedRoomRetriesLegacyRecipientInsteadOfChangedChat",
     "durableClearTombstonesSuppressAllAutomaticRetriesWithoutBlockingOtherRows",
+    "discoveryRotatesPastClearedRoomWindowsWithoutSendingThem",
     "failedClearPreflightSkipsOnlyThatRowAndNeverCountsAsNetwork",
     "cancelledClearPreflightPropagatesAndEachRetryCanResume",
+}, CLEAR_LOOKUP_CLASS: {
+    "survivesRestartAndScopesByOwnerAndPeer",
+    "pagesAreStableAndOwnerScoped",
+    "firstLookupRequiresIdentityAndUsesRealStorageFromAnAbsentFile",
+    "lookupWaitsForAConcurrentFirstTombstoneTransaction",
 }, PUSH_CLASS: {
     "encryptedStateSurvivesCloseAndReopenAndRejectsRollback",
     "unsealedWrongPinWrongNodeAndWrongTargetNeverCreateState",

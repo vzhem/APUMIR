@@ -115,6 +115,42 @@ class OutboxRecipientSqlTest(unittest.TestCase):
         self.assertEqual([f"right{n:03}" for n in range(20)], pending)
         self.assertEqual([f"right{n:03}" for n in range(29, 9, -1)], recent)
 
+    def test_discovery_keysets_rotate_equal_timestamps_without_losing_recipient_scope(self):
+        for n in range(63):
+            self.add(f"m{n:03}", "node=pk_peer&name=x", 42)
+        for n in range(40):
+            self.add(f"x{n:03}", "pk_other", 42)
+        self.add("wrong-chat", "pk_peer", 42, chat="other")
+        self.add("incoming", "pk_peer", 42, mine=0)
+        ids = []
+        after = None
+        while True:
+            if after is None:
+                page = self.selected("getRetryableOutgoingForPeer", peerId="pk_peer", limit=20)
+            else:
+                page = self.selected("getRetryableOutgoingForPeerAfter", peerId="pk_peer", limit=20,
+                                     afterTimestamp=42, afterId=after)
+            if not page:
+                break
+            self.assertLessEqual(len(page), 20)
+            ids.extend(page)
+            after = page[-1]
+        self.assertEqual([f"m{n:03}" for n in range(63)], ids)
+
+        ids = []
+        before = None
+        while True:
+            if before is None:
+                page = self.selected("getUnconfirmedOutgoingMessages", chatId="chat", peerId="pk_peer", limit=17)
+            else:
+                page = self.selected("getUnconfirmedOutgoingMessagesBefore", chatId="chat", peerId="pk_peer",
+                                     limit=17, beforeTimestamp=42, beforeId=before)
+            if not page:
+                break
+            ids.extend(page)
+            before = page[-1]
+        self.assertEqual([f"m{n:03}" for n in reversed(range(63))], ids)
+
     def test_unconfirmed_count_and_keysets_support_links_without_changing_scope(self):
         self.db.execute("INSERT INTO groups VALUES('group-chat')")
         self.db.execute("INSERT INTO chats VALUES('group-chat','pk_peer')")
