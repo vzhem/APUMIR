@@ -5,15 +5,16 @@ import com.vladimir.messenger.data.local.dao.MessageDao
 
 /**
  * Keep early group replies separate by local identity, group and claimed sender.
- * The database update must compare that sender with the stored parent author and
- * reject conflicting quotes. This is only a scope check: it does not prove the
- * transport's sender identity, or make the in-memory buffer durable.
+ * The database update must check active local membership, compare the sender with
+ * the stored parent author and reject conflicting quotes. This is only a scope check:
+ * it does not authenticate the sender, serialize identity replacement, or make
+ * the in-memory buffer durable.
  */
 internal class GroupReplyIngress(
     private val localId: () -> String?,
     private val isMember: suspend (String, String) -> Boolean,
     private val parentGroup: suspend (String) -> String?,
-    private val apply: suspend (String, GroupWire.Packet.Reply) -> Unit,
+    private val apply: suspend (String, String, GroupWire.Packet.Reply) -> Unit,
     capacity: Int,
     ttlMs: Long,
     clock: () -> Long,
@@ -23,16 +24,18 @@ internal class GroupReplyIngress(
 
     suspend fun receive(sender: String, packet: GroupWire.Packet.Reply) {
         val owner = localId()?.takeIf { it.isNotBlank() } ?: return
-        if (sender.isBlank() || !isMember(packet.groupId, owner)) return
-        if (parentGroup(packet.messageId) != packet.groupId) {
+        if (sender.isBlank() || !isMember(packet.groupId, owner) || localId() != owner) return
+        val parent = parentGroup(packet.messageId)
+        if (localId() != owner) return
+        if (parent != packet.groupId) {
             pending.put(owner, packet.groupId, packet.messageId, sender, Pending(sender, packet))
             // A parent can be inserted and drain the buffer between our first
             // lookup and put. Recheck so that ordering does not strand a reply.
             if (localId() == owner && parentGroup(packet.messageId) == packet.groupId) {
                 drain(owner, packet.groupId, packet.messageId)
             }
-        } else if (localId() == owner) {
-            apply(sender, packet)
+        } else {
+            apply(owner, sender, packet)
         }
     }
 
@@ -45,7 +48,7 @@ internal class GroupReplyIngress(
         if (localId() != owner || !isMember(groupId, owner) || localId() != owner) return
         for (entry in pending.take(owner, groupId, messageId)) {
             if (localId() != owner) return
-            apply(entry.sender, entry.packet)
+            apply(owner, entry.sender, entry.packet)
         }
     }
 }
@@ -59,11 +62,13 @@ internal fun roomGroupReplyIngress(
     clock: () -> Long,
 ): GroupReplyIngress = GroupReplyIngress(
     localId = myId,
-    isMember = { groupId, owner -> groupDao.getMember(groupId, owner) != null },
+    isMember = { groupId, owner ->
+        groupDao.getGroupById(groupId)?.isLeft == false && groupDao.getMember(groupId, owner)?.isBanned == false
+    },
     parentGroup = { id -> messageDao.getMessageById(id)?.chatId },
-    apply = { sender, packet ->
+    apply = { owner, sender, packet ->
         messageDao.applyGroupReply(
-            groupId = packet.groupId, messageId = packet.messageId, senderId = sender,
+            groupId = packet.groupId, messageId = packet.messageId, senderId = sender, ownerId = owner,
             replyToId = packet.replyToId, replyAuthor = packet.replyAuthor,
             replyText = GroupWire.replyPreview(packet.replyText),
         )

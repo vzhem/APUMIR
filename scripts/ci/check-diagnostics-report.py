@@ -845,10 +845,50 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertLess(coordinator.index("val changed = update(messageId)"),
                         coordinator.index("if (alreadyCommitted) release(messageId)"))
         service = source(MAIN / "service/CoreServerService.kt")
-        self.assertIn("applyOutgoingDeliveryAck(messageId", service)
+        self.assertIn("routeOutgoingDeliveryAck(messageId", service)
+        routing = source(MAIN / "service/ScopedDeliveryRouting.kt")
+        self.assertIn("applyOutgoingDeliveryAck(messageId", routing)  # legacy MQTT has no sender
+        self.assertLess(routing.index("applyPeerScopedDeliveryAck("), routing.index("release(messageId)"))
+        self.assertLess(routing.index("release(messageId)"), routing.index("forward?.invoke()"))
+        self.assertIn("result == ScopedDeliveryAck.UPDATED || result == ScopedDeliveryAck.ALREADY_COMMITTED", routing)
+        self.assertIn("if (result != ScopedDeliveryAck.REJECTED)", routing)  # MISSING may exist on the partner
+        scoped = source(MAIN / "data/receipt/ScopedDeliveryAck.kt")
+        for marker in ("database.withTransaction", "!row.isFromMe", 'row.channel == "GROUP"',
+                       "?: return@withTransaction ScopedDeliveryAck.MISSING",
+                       "database.groupDao().getGroupById(row.chatId)", "OutboxRecipient.forMessage(row, chat.contactId) != senderId"):
+            self.assertIn(marker, scoped)
+        ffi = source(ROOT / "rust-core/src/lib.rs")
+        ffi_event = ffi[ffi.index("fn event_to_ffi("):ffi.index("// Error type", ffi.index("fn event_to_ffi("))]
+        self.assertIn("sender_id: None", ffi_event)
+        delivered = ffi_event[ffi_event.index("CoreEvent::MessageDelivered { message_id }"):ffi_event.index("CoreEvent::Error")]
+        self.assertNotIn("sender_id", delivered)  # None, not an empty string, reaches Kotlin
+        events = source(ROOT / "rust-core/src/engine/events.rs")
+        self.assertIn("fn delivery_ack_ffi_preserves_absent_sender()", events)
+        self.assertIn("markMessageDelivered(ackedId, senderId) { mirror?.publishEnvelope", service)
+        self.assertIn("markMessageDelivered(messageId, senderId)", service)
+        self.assertIn("markMessageDelivered(messageId, event.senderId)", service)
+        deferred = source(MAIN / "data/schedule/DeferredDelivery.kt")
+        self.assertIn("DeferredDeliveryPolicy.matchesTransportAckPeer(peer, senderId)", deferred)
+        self.assertIn('DeferredWire.transportId(letter.id, peer, "normal$index") else letter.id', deferred)
+        groups = source(MAIN / "di/GroupsModule.kt")
+        self.assertIn("RustBridge.sendMessage(groupFanoutId(groupId, recipientId, envelope)", groups)
+        self.assertLess(routing.index("noteTransport(messageId, senderId)"), routing.index("applyPeerScopedDeliveryAck("))
+        repository = source(MAIN / "data/repository/ChatRepository.kt")
+        incoming = repository[repository.index("suspend fun applyMirrorIncoming("):repository.index("suspend fun applyMirrorSent(")]
+        sent = repository[repository.index("suspend fun applyMirrorSent("):repository.index("suspend fun scheduledRecipient(")]
+        self.assertIn("applyPeerScopedDeliveryAck(database, it, row.senderId", incoming)
+        self.assertIn("isServicePacket(row.content)) return", sent)
+        self.assertNotIn("markOutgoingMessageDelivered", sent)  # an outgoing ACK is not a receipt
+        self.assertIn("applyPeerScopedDeliveryAck(database, it, senderId", repository)
+        self.assertIn("messageDao.deliveryAckJunkRows(pattern)", repository)
         self.assertIn("RustBridge::confirmMessageDelivered", service)
         self.assertIn("acknowledgeStoredIncomingText(messageId", service)
         self.assertIn("sealed && MessageSealer.openedByExpectedSender(rawText, senderId)", service)
+        self_filter = service[service.index("if (myNodeId.isNotBlank() && senderId == myNodeId)"):
+                              service.index("// ШИФРОВАНИЕ: конверт вскрывается ДО любых разборщиков")]
+        self.assertIn("canAcknowledgeSelfEcho(sealed, preopened)", self_filter)
+        self.assertIn("(!sealed || opened != null)", coordinator)
+        self.assertIn("!DeliveryAckWire.isPacket(opened)", coordinator)  # no ACK-of-ACK
         self.assertLess(coordinator.index("if (!storedIncomingText("), coordinator.index("sendAck(openedByExpectedSender())"))
         # Neither a merely recognized group packet nor a CF duplicate proves
         # a durable personal message/sender match for mesh cleanup. CF must
@@ -863,7 +903,12 @@ class DiagnosticsContractsTest(unittest.TestCase):
         cf_new = service.index("if (cfContent == null) {", cf_duplicate)
         cf = service[cf_duplicate:cf_new]
         self.assertLess(service.index("PushControlIngress.isReserved(cfContent)", cf_start), cf_duplicate)
-        self.assertIn("!existingMsg.isFromMe && existingMsg.senderId == senderId", cf)
+        self.assertIn("classifyCfDuplicate(existingMsg.isFromMe, existingMsg.senderId, existingMsg.content, senderId", cf)
+        self.assertIn("MessageSealer.openedByExpectedSender(parsed.content, senderId)", cf)
+        self.assertIn("if (DeliveryAckWire.isPacket(incomingText)) incomingText else storedText", coordinator)
+        self.assertIn("CfDuplicateAction.ApplyAck(DeliveryAckWire.messageId(ackText))", coordinator)
+        self.assertIn("CfDuplicateAction.Ignore", cf)
+        self.assertIn("CfDuplicateAction.AcknowledgeText ->", cf)
         self.assertIn("RustBridge.sendDeliveryAck(messageId, senderId)", cf)
         self.assertNotIn("roomCommitted = true", cf)
         self.assertNotIn("acknowledgeStoredIncomingText", cf)

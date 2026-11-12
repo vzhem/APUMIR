@@ -1,7 +1,46 @@
 package com.vladimir.messenger.service
 
 import com.vladimir.messenger.data.local.entity.MessageEntity
+import com.vladimir.messenger.data.receipt.DeliveryAckWire
+import com.vladimir.messenger.data.reply.DirectReplyWire
 import com.vladimir.messenger.domain.model.MessageStatus
+
+/** An unknown sealed self-echo may itself be an ACK and is not safe to acknowledge. */
+internal fun canAcknowledgeSelfEcho(sealed: Boolean, opened: String?): Boolean =
+    (!sealed || opened != null) && !DirectReplyWire.isPacket(opened) && !DeliveryAckWire.isPacket(opened)
+
+/** A decrypted CF duplicate is not necessarily signed by its claimed sender. */
+internal fun canAcknowledgeCfDuplicate(
+    isOutgoing: Boolean,
+    storedSender: String,
+    claimedSender: String,
+    sealed: Boolean,
+    openedByExpectedSender: () -> Boolean,
+): Boolean = !isOutgoing && storedSender == claimedSender && (!sealed || openedByExpectedSender())
+
+/** Distinguish a repeated text from either a current or accidentally stored ACK. */
+internal sealed interface CfDuplicateAction {
+    data object Ignore : CfDuplicateAction
+    data object AcknowledgeText : CfDuplicateAction
+    data class ApplyAck(val messageId: String?) : CfDuplicateAction
+}
+
+internal fun classifyCfDuplicate(
+    isOutgoing: Boolean,
+    storedSender: String,
+    storedText: String,
+    claimedSender: String,
+    incomingText: String,
+    sealed: Boolean,
+    openedByExpectedSender: () -> Boolean,
+): CfDuplicateAction {
+    if (!canAcknowledgeCfDuplicate(isOutgoing, storedSender, claimedSender, sealed, openedByExpectedSender)) {
+        return CfDuplicateAction.Ignore
+    }
+    val ackText = if (DeliveryAckWire.isPacket(incomingText)) incomingText else storedText
+    return if (DeliveryAckWire.isPacket(ackText)) CfDuplicateAction.ApplyAck(DeliveryAckWire.messageId(ackText))
+    else CfDuplicateAction.AcknowledgeText
+}
 
 /**
  * A transport event is not a durable inbox commit. A repeated message may be

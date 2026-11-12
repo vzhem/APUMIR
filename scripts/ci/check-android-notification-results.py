@@ -8,6 +8,7 @@ CLASS = "com.vladimir.messenger.data.notification.NotificationArrivalInstrumente
 INCOMING_CLASS = "com.vladimir.messenger.data.repository.IncomingMessageStoreInstrumentedTest"
 DIRECT_REPLY_CLASS = "com.vladimir.messenger.data.reply.DirectReplyIngressInstrumentedTest"
 DIRECT_REPLY_FFI_CLASS = "com.vladimir.messenger.data.reply.DirectReplyRealFfiInstrumentedTest"
+SCOPED_ACK_CLASS = "com.vladimir.messenger.data.receipt.ScopedDeliveryAckInstrumentedTest"
 MIRROR_OUTGOING_CLASS = "com.vladimir.messenger.data.repository.MirrorOutgoingStoreInstrumentedTest"
 OUTBOX_CLASS = "com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest"
 CLEAR_LOOKUP_CLASS = "com.vladimir.messenger.data.chatclear.ChatClearTombstonesInstrumentedTest"
@@ -51,8 +52,21 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "conflictingReplyCannotOverwriteTheFirstQuote",
     "groupReplyUpdateRequiresTheMatchingGroupAtUpdateTime",
     "groupEarlyRepliesRespectOwnerAndStoredAuthorInRealRoom",
+    "groupReplyMembershipMustStillExistAtTheRoomUpdate",
+    "bannedGroupMembershipBlocksImmediateAndBufferedReplies",
+    "leftGroupWithStaleMemberCannotApplyOrBufferReplies",
 }, DIRECT_REPLY_FFI_CLASS: {
     "selfClaimedIdCannotPassThePinnedReplyOrLegacyMirrorBinding",
+}, SCOPED_ACK_CLASS: {
+    "onlyMatchingPeerCanCommitReleaseOrForwardAndDuplicateRecoversCleanup",
+    "savedAndLegacyRecipientsAreScopedAndGroupsNeverMatch",
+    "missingActiveRowCanReachPartnerWithoutReleasingLocalCustody",
+    "repositoryFallbackScopesIncomingButNeverTreatsItsOwnMirrorAckAsDelivery",
+    "repositoryLegacyJunkRepairUsesStoredSenderBeforeDeletingRows",
+    "roomTransactionPreventsRetargetingBetweenScopeCheckAndUpdate",
+    "failedOrCancelledTransactionCannotReleaseOrForward",
+    "observerAndCleanupFailuresAreIndependentButCancellationStillPropagates",
+    "legacyMqttEventWithoutSenderRemainsUnscopedForCompatibility",
 }, MIRROR_OUTGOING_CLASS: {
     "replayedPartnerFramesNeverReplaceDeliveredRows",
     "concurrentFirstFramesHaveExactlyOneInsertionAcrossReopen",

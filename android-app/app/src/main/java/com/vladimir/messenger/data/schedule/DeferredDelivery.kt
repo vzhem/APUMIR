@@ -221,7 +221,7 @@ class DeferredDelivery @Inject constructor(
     }
 
     /** Ordinary delivery ACKs are useful ONLY for post-deadline fallback, never as stored receipts. */
-    fun noteTransportAck(transportId: String) {
+    fun noteTransportAck(transportId: String, senderId: String?) {
         ScheduledSendStore.load(context)
         for (item in ScheduledSendStore.items.value) {
             if (!item.preDeliver || item.cancelRequested || item.ownerId != DeferredInboxStore.owner(context) ||
@@ -229,6 +229,7 @@ class DeferredDelivery @Inject constructor(
             val letter = DeferredWire.parse(item.wire) ?: continue
             val count = if (item.isGroup) groups.deferredPackets(letter).size else 1
             for (peer in item.recipients.orEmpty()) {
+                if (!DeferredDeliveryPolicy.matchesTransportAckPeer(peer, senderId)) continue
                 val ids = (0 until count).map { index ->
                     if (item.isGroup) DeferredWire.transportId(letter.id, peer, "normal$index") else letter.id
                 }

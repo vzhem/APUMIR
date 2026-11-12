@@ -39,6 +39,45 @@ class DeliveryReceiptCoordinatorTest {
         assertEquals(2, checks)
     }
 
+    @Test fun selfEchoNeverAcknowledgesAnAckReplySidecarOrUnopenedSealedPacket() {
+        assertFalse(canAcknowledgeSelfEcho(true, null))
+        assertFalse(canAcknowledgeSelfEcho(true, "ack|message"))
+        assertFalse(canAcknowledgeSelfEcho(false, "  ack|  "))
+        assertFalse(canAcknowledgeSelfEcho(true, "APUDMR1|anything"))
+        assertTrue(canAcknowledgeSelfEcho(true, "ordinary text"))
+        assertTrue(canAcknowledgeSelfEcho(false, "ordinary text"))
+    }
+
+    @Test fun cfDuplicateRequiresMatchingStoredSenderAndOpenedSignerWhenSealed() {
+        var checks = 0
+        fun matched(value: Boolean): () -> Boolean = { checks++; value }
+        assertFalse(canAcknowledgeCfDuplicate(true, "peer", "peer", true, matched(true)))
+        assertFalse(canAcknowledgeCfDuplicate(false, "other", "peer", true, matched(true)))
+        assertEquals(0, checks)
+        assertFalse(canAcknowledgeCfDuplicate(false, "peer", "peer", true, matched(false)))
+        assertTrue(canAcknowledgeCfDuplicate(false, "peer", "peer", true, matched(true)))
+        assertEquals(2, checks)
+        // Old unsealed messages remain compatible, but are not authenticated.
+        assertTrue(canAcknowledgeCfDuplicate(false, "peer", "peer", false, matched(false)))
+        assertEquals(2, checks)
+    }
+
+    @Test fun cfDuplicateClassificationNeverAcknowledgesCurrentOrPreviouslyStoredAck() {
+        fun classify(stored: String, incoming: String, outgoing: Boolean = false,
+                     sender: String = "pk_sender", sealed: Boolean = true, signerMatches: Boolean = true) =
+            classifyCfDuplicate(outgoing, sender, stored, "pk_sender", incoming, sealed) { signerMatches }
+        assertEquals(CfDuplicateAction.AcknowledgeText, classify("stored text", "repeat text"))
+        assertEquals(CfDuplicateAction.AcknowledgeText, classify("stored text", "repeat text", sealed = false, signerMatches = false))
+        assertEquals(CfDuplicateAction.Ignore, classify("stored text", "repeat text", outgoing = true))
+        assertEquals(CfDuplicateAction.Ignore, classify("stored text", "repeat text", sender = "pk_other"))
+        assertEquals(CfDuplicateAction.Ignore, classify("stored text", "repeat text", signerMatches = false))
+        assertEquals(CfDuplicateAction.ApplyAck("one"), classify("stored text", "ack|one"))
+        assertEquals(CfDuplicateAction.ApplyAck("two"), classify("ack|two", "repeat text"))
+        assertEquals(CfDuplicateAction.ApplyAck("new"), classify("ack|old", "ack|new"))
+        assertEquals(CfDuplicateAction.ApplyAck(null), classify("stored text", "ack|"))
+        assertEquals(CfDuplicateAction.Ignore, classify("ack|one", "repeat text", signerMatches = false))
+    }
+
     @Test fun nativeCleanupFollowsCommitAndDuplicateAckRepairsCrashWindow() = runBlocking {
         val released = mutableListOf<String>()
         var lookups = 0

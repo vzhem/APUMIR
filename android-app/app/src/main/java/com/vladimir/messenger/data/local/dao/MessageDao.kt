@@ -20,6 +20,9 @@ data class TypingJunkRow(val chatId: String, val count: Int)
 /** Delivery ACK rows written by pre-fix versions (chat -> how many rows). */
 data class DeliveryAckJunkRow(val chatId: String, val count: Int)
 
+/** Only the sender and control text are needed when repairing a legacy ACK row. */
+data class DeliveryAckJunkReceipt(val senderId: String, val content: String)
+
 // SQLite's default TRIM removes only U+0020. Include Kotlin's whitespace set
 // for legacy blank recipients; runtime rechecks every selected row. Embedded
 // NUL is rejected because SQLite text functions and Kotlin can disagree on it.
@@ -461,7 +464,9 @@ interface MessageDao {
     @Query(
         "UPDATE messages SET replyToId = :replyToId, replyAuthor = :replyAuthor, replyText = :replyText " +
             "WHERE id = :messageId AND chatId = :groupId AND senderId = :senderId " +
-            "AND EXISTS (SELECT 1 FROM groups g WHERE g.id = messages.chatId) " +
+            "AND EXISTS (SELECT 1 FROM groups g WHERE g.id = messages.chatId AND g.isLeft = 0) " +
+            "AND EXISTS (SELECT 1 FROM group_members gm WHERE gm.groupId = messages.chatId " +
+            "AND gm.nodeId = :ownerId AND gm.isBanned = 0) " +
             "AND (replyToId IS NULL OR replyToId = '' OR " +
             "(replyToId = :replyToId AND replyAuthor = :replyAuthor AND replyText = :replyText))"
     )
@@ -469,6 +474,7 @@ interface MessageDao {
         groupId: String,
         messageId: String,
         senderId: String,
+        ownerId: String,
         replyToId: String?,
         replyAuthor: String,
         replyText: String,
@@ -592,8 +598,8 @@ interface MessageDao {
     )
     suspend fun chatsWithDeliveryAckJunk(pattern: String): List<DeliveryAckJunkRow>
 
-    @Query("SELECT content FROM messages WHERE isFromMe = 0 AND trim(content) GLOB :pattern")
-    suspend fun deliveryAckJunkContents(pattern: String): List<String>
+    @Query("SELECT senderId, content FROM messages WHERE isFromMe = 0 AND trim(content) GLOB :pattern")
+    suspend fun deliveryAckJunkRows(pattern: String): List<DeliveryAckJunkReceipt>
 
     @Query("DELETE FROM messages WHERE isFromMe = 0 AND trim(content) GLOB :pattern")
     suspend fun deleteDeliveryAckJunk(pattern: String): Int

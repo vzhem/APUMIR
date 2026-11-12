@@ -488,7 +488,7 @@ class ChatRepository @Inject constructor(
     suspend fun applyMirrorIncoming(row: MirrorRow, notify: Boolean): Pair<String, String> {
         // р239: служебный пакет с партнёра тоже не сообщение.
         if (com.vladimir.messenger.util.ChatPreviews.isServicePacket(row.content)) {
-            DeliveryAckWire.messageId(row.content)?.let { markOutgoingMessageDelivered(it) }
+            DeliveryAckWire.messageId(row.content)?.let { com.vladimir.messenger.data.receipt.applyPeerScopedDeliveryAck(database, it, row.senderId, ::markOutgoingMessageDelivered) }
             return Pair("", "")
         }
         val chat = getOrCreateChat(
@@ -514,12 +514,8 @@ class ChatRepository @Inject constructor(
     suspend fun applyMirrorSent(row: MirrorRow) {
         if (!row.mine || row.id.isBlank() || '\u0000' in row.id || com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context,
                 com.vladimir.messenger.data.schedule.DeferredInboxStore.owner(context), row.id)) return
-        // Служебный пакет не показываем и как своё сообщение. Если он всё же
-        // попал в журнал зеркала, ACK по-прежнему обновляет исходящую строку.
-        if (com.vladimir.messenger.util.ChatPreviews.isServicePacket(row.content)) {
-            DeliveryAckWire.messageId(row.content)?.let { markOutgoingMessageDelivered(it) }
-            return
-        }
+        // Our own service packet is not evidence that a peer received anything.
+        if (com.vladimir.messenger.util.ChatPreviews.isServicePacket(row.content)) return
         if (!mirrorEchoMayResolve(row) { peer, id -> com.vladimir.messenger.data.chatclear.ChatClearRegistry.isCleared(context, peer, id) }) return
         val chat: Chat = if (row.recipientId.isNotBlank()) {
             getChatByContactId(row.recipientId)
@@ -599,9 +595,8 @@ class ChatRepository @Inject constructor(
         // при каком пути приёма: даже если транспортный разборщик его не узнал,
         // мусорной строки не будет.
         if (com.vladimir.messenger.util.ChatPreviews.isServicePacket(cleanContent)) {
-            // Последний общий страж: даже если входящий ACK обошёл разборщик
-            // конкретного транспорта, он подтверждает строку, но не сохраняется.
-            DeliveryAckWire.messageId(cleanContent)?.let { markOutgoingMessageDelivered(it) }
+            // The fallback also matches the claimed sender to the saved recipient.
+            DeliveryAckWire.messageId(cleanContent)?.let { com.vladimir.messenger.data.receipt.applyPeerScopedDeliveryAck(database, it, senderId, ::markOutgoingMessageDelivered) }
             val typing = com.vladimir.messenger.data.typing.TypingWire.parse(cleanContent)
             if (typing == true) {
                 com.vladimir.messenger.data.typing.TypingPeer.peerTyping(senderId)
@@ -768,12 +763,12 @@ class ChatRepository @Inject constructor(
         val pattern = DeliveryAckWire.persistedUuidAckGlobPattern
         val chats = runCatching { messageDao.chatsWithDeliveryAckJunk(pattern) }
             .getOrDefault(emptyList())
-        val oldAcks = runCatching { messageDao.deliveryAckJunkContents(pattern) }
-            .getOrDefault(emptyList())
-        // Preserve the receipt's meaning while removing its accidental chat row.
-        oldAcks.forEach { content ->
-            if (DeliveryAckWire.isPersistedUuidAck(content)) {
-                DeliveryAckWire.messageId(content)?.let { markOutgoingMessageDelivered(it) }
+        // A failed read must not turn into deletion of receipts we never inspected.
+        val oldAcks = messageDao.deliveryAckJunkRows(pattern)
+        // Preserve only receipts scoped to the sender of the old incoming row.
+        oldAcks.forEach { row ->
+            if (DeliveryAckWire.isPersistedUuidAck(row.content)) {
+                DeliveryAckWire.messageId(row.content)?.let { com.vladimir.messenger.data.receipt.applyPeerScopedDeliveryAck(database, it, row.senderId, ::markOutgoingMessageDelivered) }
             }
         }
         val deleted = runCatching { messageDao.deleteDeliveryAckJunk(pattern) }.getOrDefault(0)

@@ -12,6 +12,7 @@ import com.vladimir.messenger.data.local.entity.MessageEntity
 import com.vladimir.messenger.data.mirror.MirrorReplyTrust
 import com.vladimir.messenger.data.security.MessageSealer
 import com.vladimir.messenger.data.security.SealedWire
+import com.vladimir.messenger.service.canAcknowledgeCfDuplicate
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -106,6 +107,8 @@ class DirectReplyRealFfiInstrumentedTest {
             // This is a valid signature over a self-claimed ID, not proof that
             // the signing key belongs to the contact.
             assertTrue(MessageSealer.openedByExpectedSender(forgedWire, senderId))
+            // CF duplicate compatibility checks the claimed node, not the stored pin.
+            assertTrue(canAcknowledgeCfDuplicate(false, senderId, senderId, true) { MessageSealer.openedByExpectedSender(forgedWire, senderId) })
             assertEquals(DirectReplyResult.REJECTED, receiver.network(senderId, "chat", id, forgedText,
                 MessageSealer.openedByExpectedSender(forgedWire, senderId), forgedWire))
             assertNull(db.messageDao().getMessageById("parent")!!.replyToId)
@@ -115,6 +118,7 @@ class DirectReplyRealFfiInstrumentedTest {
             val realWire = seal(senderId, 2, sender, senderSecret)
             val realText = open(realWire)
             assertTrue(MessageSealer.openedByExpectedSender(realWire, senderId))
+            assertTrue(canAcknowledgeCfDuplicate(false, senderId, senderId, true) { MessageSealer.openedByExpectedSender(realWire, senderId) })
             assertEquals(DirectReplyResult.APPLIED, receiver.network(senderId, "chat", id, realText,
                 MessageSealer.openedByExpectedSender(realWire, senderId), realWire))
             assertEquals("target", db.messageDao().getMessageById("parent")!!.replyToId)
@@ -123,6 +127,7 @@ class DirectReplyRealFfiInstrumentedTest {
 
             val fakeSelfWire = seal(recipientId, 8, fakeSelf, attackerSecret)
             assertEquals(text, open(fakeSelfWire))
+            assertFalse(canAcknowledgeCfDuplicate(false, senderId, senderId, true) { MessageSealer.openedByExpectedSender(fakeSelfWire, senderId) })
             assertTrue(MessageSealer.openedByExpectedSender(fakeSelfWire, recipientId))
             assertFalse(MirrorReplyTrust.verified(true, null, fakeSelfWire, { recipient }, { SealedWire.senderBinding(fakeSelfWire) }))
             val realSelfWire = seal(recipientId, 1, recipient, recipientSecret)

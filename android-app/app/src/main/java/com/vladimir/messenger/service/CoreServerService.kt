@@ -319,10 +319,8 @@ class CoreServerService : Service() {
      * конверт - добавьте его и здесь, и в основной цепочке.
      * Возвращает true, если текст служебный и в чат ему дороги нет.
      */
-    private suspend fun markMessageDelivered(messageId: String): Boolean {
-        deferredDelivery.noteTransportAck(messageId)
-        return applyOutgoingDeliveryAck(messageId, chatRepository::markOutgoingMessageDelivered, appDatabase.messageDao()::getMessageById, RustBridge::confirmMessageDelivered)
-    }
+    private suspend fun markMessageDelivered(messageId: String, senderId: String? = null, forward: (() -> Unit)? = null): Boolean =
+        routeOutgoingDeliveryAck(messageId, senderId, appDatabase, chatRepository::markOutgoingMessageDelivered, deferredDelivery::noteTransportAck, RustBridge::confirmMessageDelivered, forward)
 
     /**
      * Уведомить отправителя, что его приглашение отклонено настройками
@@ -395,9 +393,8 @@ class CoreServerService : Service() {
         if (DeliveryAckWire.isPacket(text)) {
             val ackedId = DeliveryAckWire.messageId(text)
             if (ackedId != null) {
-                // ACK-кадр нужен и партнёру той же личности, но не сохраняется.
-                mirror?.publishEnvelope(senderId, chatId, messageId, text)
-                runCatching { markMessageDelivered(ackedId) }
+                // A missing local row may exist on the partner; conflicts stay local.
+                runCatching { markMessageDelivered(ackedId, senderId) { mirror?.publishEnvelope(senderId, chatId, messageId, text) } }
                     .onSuccess { changed ->
                         Log.i(TAG, "📬 direct delivery ACK (relay path): msgId=$ackedId changed=$changed")
                     }
@@ -1182,7 +1179,7 @@ class CoreServerService : Service() {
                             is RelayEnvelope.Parsed.Ack -> {
                                 // G1 fix: ACK, доставленный через relay, → DELIVERED у отправителя.
                                 val messageId = parsed.messageId
-                                if (markMessageDelivered(messageId)) {
+                                if (markMessageDelivered(messageId, senderId)) {
                                     Log.i(TAG, "✅ CF ACK from $senderId → DELIVERED msgId=$messageId")
                                 } else {
                                     Log.d(TAG, "CF ACK ignored (msgId=$messageId not found / not mine / already delivered)")
@@ -1202,17 +1199,13 @@ class CoreServerService : Service() {
                                     acknowledge = directReplies.network(senderId, knownChat?.id ?: "", messageId, cfContent, authenticated, parsed.content) == com.vladimir.messenger.data.reply.DirectReplyResult.APPLIED
                                 } else if (existingMsg != null && cfContent != null) {
                                     Log.i(TAG, "CF duplicate skipped (already in DB): messageId=$messageId")
-                                    if (DeliveryAckWire.isPacket(existingMsg.content)) {
-                                        // Старый ACK мог быть уже записан до обновления.
-                                        // Он всё равно подтверждает исходящую строку, но
-                                        // ACK самому ACK отправлять нельзя.
-                                        DeliveryAckWire.messageId(existingMsg.content)?.let {
-                                            markMessageDelivered(it)
+                                    when (val action = classifyCfDuplicate(existingMsg.isFromMe, existingMsg.senderId, existingMsg.content, senderId, cfContent, SealedWire.isSealed(parsed.content)) { MessageSealer.openedByExpectedSender(parsed.content, senderId) }) {
+                                        is CfDuplicateAction.ApplyAck -> action.messageId?.let { markMessageDelivered(it, senderId) }
+                                        CfDuplicateAction.AcknowledgeText -> {
+                                            acknowledge = true // This is not a verified mesh cleanup receipt.
+                                            runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
                                         }
-                                    } else if (!existingMsg.isFromMe && existingMsg.senderId == senderId) {
-                                        // Opening was only for quarantine; a row-based ACK is not a verified mesh cleanup receipt.
-                                        acknowledge = true
-                                        runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                                        CfDuplicateAction.Ignore -> Unit
                                     }
                                 } else {
                                     if (cfContent == null) {
@@ -1254,6 +1247,7 @@ class CoreServerService : Service() {
                                         // конверта не создаётся.
                                         val knownChat = chatRepository.getChatByContactId(senderId)
                                         val isDeliveryAck = DeliveryAckWire.isPacket(cfContent)
+                                        if (isDeliveryAck && SealedWire.isSealed(parsed.content) && !MessageSealer.openedByExpectedSender(parsed.content, senderId)) return@launch
                                         if (routeIncomingEnvelope(senderId, knownChat?.id ?: "", messageId, cfContent, SealedWire.isSealed(parsed.content) && MessageSealer.openedByExpectedSender(parsed.content, senderId))) {
                                             Log.i(TAG, "CF service envelope handled msgId=$messageId")
                                             // Never generate an ACK-of-ACK. RelayEnvelope's own
@@ -1760,7 +1754,7 @@ class CoreServerService : Service() {
         if (DeliveryAckWire.isPacket(text)) {
             val ackedId = DeliveryAckWire.messageId(text)
             if (ackedId != null) {
-                runCatching { markMessageDelivered(ackedId) }
+                runCatching { markMessageDelivered(ackedId, senderId) }
                     .onSuccess { changed ->
                         Log.i(TAG, "📬 delivery ACK via mirror: msgId=$ackedId changed=$changed")
                     }
@@ -2295,10 +2289,9 @@ class CoreServerService : Service() {
                 if (!SealedWire.isSealed(rawText) && DeliveryAckWire.isPacket(rawText)) {
                     val ackedId = DeliveryAckWire.messageId(rawText)
                     if (ackedId != null) {
-                        mirror?.publishEnvelope(senderId, chatId, messageId, rawText)
                         serviceScope.launch {
                             try {
-                                val changed = markMessageDelivered(ackedId)
+                                val changed = markMessageDelivered(ackedId, senderId) { mirror?.publishEnvelope(senderId, chatId, messageId, rawText) }
                                 Log.i(TAG, "📬 raw delivery ACK: msgId=$ackedId changed=$changed")
                             } catch (error: Exception) {
                                 Log.w(TAG, "raw delivery ACK apply failed: ${error.message}")
@@ -2324,7 +2317,7 @@ class CoreServerService : Service() {
                     // р242: считаем такие пакеты для диагностики - по счётчику
                     // видно, что «собеседник» это собственный узел.
                     com.vladimir.messenger.data.mirror.MirrorHub.noteSelfPacket()
-                    if (!com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(preopened)) runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                    if (canAcknowledgeSelfEcho(sealed, preopened)) runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
                     return
                 }
 
@@ -2419,15 +2412,12 @@ class CoreServerService : Service() {
                 // Raw ACKs are handled before the self-node filter above; keep this guard
                 // for legacy sealed ACKs, whose prefix shows only after MessageSealer.open().
                 if (DeliveryAckWire.isPacket(text)) {
-                    val ackedId = DeliveryAckWire.messageId(text)
+                    val ackedId = DeliveryAckWire.messageId(text)?.takeIf { !sealed || MessageSealer.openedByExpectedSender(rawText, senderId) }
                     if (ackedId != null) {
-                        // р244: сначала партнёрскому устройству той же личности -
-                        // иначе на нём галочка останется одна, хотя сообщение ушло
-                        // именно с него.
-                        mirror?.publishEnvelope(senderId, chatId, messageId, text)
+                        // The partner can still have the row when this device does not.
                         serviceScope.launch {
                             runCatching {
-                                markMessageDelivered(ackedId)
+                                markMessageDelivered(ackedId, senderId) { mirror?.publishEnvelope(senderId, chatId, messageId, text) }
                             }.onSuccess { changed ->
                                 Log.i(TAG, "📬 direct delivery ACK: msgId=$ackedId changed=$changed")
                             }
@@ -2994,7 +2984,7 @@ class CoreServerService : Service() {
                 Log.i(TAG, "✅ DELIVERY_ACK received: msgId=$messageId from ${event.senderId}")
                 serviceScope.launch {
                     try {
-                        markMessageDelivered(messageId)
+                        markMessageDelivered(messageId, event.senderId)
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to mark DELIVERED", e)
                     }

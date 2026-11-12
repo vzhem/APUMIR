@@ -722,6 +722,15 @@ mod tests {
         }
     }
 
+    /// The legacy MQTT event has no peer field; Kotlin must receive null, not an empty sender.
+    #[test]
+    fn delivery_ack_ffi_preserves_absent_sender() {
+        let event = crate::event_to_ffi(CoreEvent::MessageDelivered { message_id: "m1".into() });
+        assert_eq!(event.event_type, "delivery_ack");
+        assert_eq!(event.message_id.as_deref(), Some("m1"));
+        assert_eq!(event.sender_id, None);
+    }
+
     /// Подтверждение доставки (галочка отправителя) - тоже ранг 0.
     #[test]
     fn delivery_ack_survives_flood() {

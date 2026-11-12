@@ -16,7 +16,7 @@ class GroupReplyIngressTest {
         val attempts = mutableListOf<String>()
         val ingress = GroupReplyIngress(
             localId = { "owner" }, isMember = { _, _ -> true }, parentGroup = { parent },
-            apply = { sender, packet ->
+            apply = { _, sender, packet ->
                 attempts += sender
                 if (sender == "author" && quote == null) quote = packet
             }, capacity = 20, ttlMs = 1000, clock = { 0 },
@@ -44,7 +44,7 @@ class GroupReplyIngressTest {
                     null // the first lookup completed before insertion
                 } else parent
             },
-            apply = { sender, _ -> applied += sender }, capacity = 20, ttlMs = 1000, clock = { 0 },
+            apply = { _, sender, _ -> applied += sender }, capacity = 20, ttlMs = 1000, clock = { 0 },
         )
         ingress.receive("author", valid)
         assertEquals(listOf("author"), applied)
@@ -59,7 +59,7 @@ class GroupReplyIngressTest {
         var applied: String? = null
         val ingress = GroupReplyIngress(
             localId = { owner }, isMember = { _, _ -> member }, parentGroup = { parent },
-            apply = { sender, _ -> applied = sender }, capacity = 20, ttlMs = 1000, clock = { 0 },
+            apply = { _, sender, _ -> applied = sender }, capacity = 20, ttlMs = 1000, clock = { 0 },
         )
         ingress.receive("author", valid)
         parent = "group"
@@ -83,7 +83,7 @@ class GroupReplyIngressTest {
         val ingress = GroupReplyIngress(
             localId = { owner },
             isMember = { _, _ -> if (switchWhileChecking) owner = "owner-b"; true },
-            parentGroup = { parent }, apply = { _, _ -> applications++ },
+            parentGroup = { parent }, apply = { _, _, _ -> applications++ },
             capacity = 20, ttlMs = 1000, clock = { 0 },
         )
         ingress.receive("author", valid)
@@ -103,7 +103,7 @@ class GroupReplyIngressTest {
         var attempts = 0
         val ingress = GroupReplyIngress(
             localId = { owner }, isMember = { _, _ -> member }, parentGroup = { "group" },
-            apply = { _, _ -> attempts++ }, capacity = 20, ttlMs = 1000, clock = { 0 },
+            apply = { _, _, _ -> attempts++ }, capacity = 20, ttlMs = 1000, clock = { 0 },
         )
         ingress.receive("author", valid)
         owner = "owner"
@@ -114,5 +114,37 @@ class GroupReplyIngressTest {
         assertEquals(0, attempts)
         ingress.receive("author", valid)
         assertEquals(1, attempts)
+    }
+
+    @Test fun identityChangeDuringReceiveDoesNotBufferForTheOldOwner() = runBlocking {
+        var owner = "owner-a"
+        var phase = "membership"
+        var parent: String? = null
+        var lookups = 0
+        val applications = mutableListOf<String>()
+        val ingress = GroupReplyIngress(
+            localId = { owner },
+            isMember = { _, _ -> if (phase == "membership") owner = "owner-b"; true },
+            parentGroup = {
+                lookups++
+                if (phase == "parent") owner = "owner-b"
+                parent
+            },
+            apply = { localOwner, _, _ -> applications += localOwner },
+            capacity = 20, ttlMs = 1000, clock = { 0 },
+        )
+        ingress.receive("author", valid)
+        assertEquals(0, lookups)
+        owner = "owner-a"
+        phase = "parent"
+        ingress.receive("author", valid)
+        assertEquals(1, lookups)
+        owner = "owner-a"
+        phase = "stable"
+        parent = "group"
+        ingress.parentInserted("group", "message")
+        assertEquals(emptyList<String>(), applications)
+        ingress.receive("author", valid)
+        assertEquals(listOf("owner-a"), applications)
     }
 }

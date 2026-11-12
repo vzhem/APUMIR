@@ -26,13 +26,16 @@ class DirectReplyScopeTest(unittest.TestCase):
         self.db = sqlite3.connect(":memory:")
         self.db.executescript("""
             CREATE TABLE chats(id TEXT PRIMARY KEY, contactId TEXT NOT NULL);
-            CREATE TABLE groups(id TEXT PRIMARY KEY);
+            CREATE TABLE groups(id TEXT PRIMARY KEY, isLeft INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE group_members(groupId TEXT NOT NULL, nodeId TEXT NOT NULL, isBanned INTEGER NOT NULL,
+                PRIMARY KEY(groupId, nodeId));
             CREATE TABLE messages(id TEXT PRIMARY KEY, chatId TEXT NOT NULL, senderId TEXT NOT NULL,
                 isFromMe INTEGER NOT NULL, channel TEXT NOT NULL, topicId TEXT,
                 replyToId TEXT, replyAuthor TEXT NOT NULL, replyText TEXT NOT NULL);
             INSERT INTO chats VALUES ('chat', 'pk_friend123'), ('other', 'pk_other456'),
                                      ('group', 'pk_friend123');
-            INSERT INTO groups VALUES ('group');
+            INSERT INTO groups(id) VALUES ('group');
+            INSERT INTO group_members VALUES ('group', 'pk_local123', 0);
         """)
 
     def tearDown(self):
@@ -42,9 +45,9 @@ class DirectReplyScopeTest(unittest.TestCase):
         self.db.execute("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, NULL, '', '')",
                         (id, chat, sender, mine, channel, topic))
 
-    def update(self, id, peer="pk_friend123", q=None, group="group", target="quoted", author="Alice", text="text"):
+    def update(self, id, peer="pk_friend123", q=None, group="group", target="quoted", author="Alice", text="text", owner="pk_local123"):
         return self.db.execute(q or query("applyDirectReplyFromPeer"), {
-            "senderId": peer, "messageId": id, "groupId": group,
+            "senderId": peer, "messageId": id, "groupId": group, "ownerId": owner,
             "replyToId": target, "replyAuthor": author, "replyText": text,
         }).rowcount
 
@@ -107,7 +110,47 @@ class DirectReplyScopeTest(unittest.TestCase):
         self.assertIn("messageDao.applyGroupReply(", ingress)
         self.assertIn("pending.put(owner, packet.groupId, packet.messageId, sender", ingress)
         self.assertIn("pending.take(owner, groupId, messageId)", ingress)
+        self.assertIn("?.isBanned == false", ingress)
+        self.assertIn("ownerId = owner", ingress)
         self.assertNotIn("applyDirectReplyFromPeer", group)
+
+    def test_group_member_is_checked_by_the_update_not_only_a_preflight(self):
+        self.add("parent", chat="group", channel="GROUP")
+        current = query("applyGroupReply")
+        member_clause = ("AND EXISTS (SELECT 1 FROM group_members gm WHERE gm.groupId = messages.chatId "
+                         "AND gm.nodeId = :ownerId AND gm.isBanned = 0) ")
+        self.assertIn(member_clause, current)
+        before_membership_guard = current.replace(member_clause, "")
+        self.db.execute("DELETE FROM group_members WHERE groupId='group'")
+        self.assertEqual(0, self.update("parent", q=current))
+        # The old scoped query changed a row after membership was removed.
+        self.assertEqual(1, self.update("parent", q=before_membership_guard))
+        self.db.execute("UPDATE messages SET replyToId=NULL, replyAuthor='', replyText='' WHERE id='parent'")
+        self.db.execute("INSERT INTO group_members VALUES ('group', 'pk_local123', 1)")
+        self.assertEqual(0, self.update("parent", q=current))
+        self.db.execute("UPDATE group_members SET isBanned=0 WHERE groupId='group'")
+        self.assertEqual(0, self.update("parent", q=current, owner="pk_other456"))
+        self.assertEqual(1, self.update("parent", q=current))
+        self.db.execute("UPDATE group_members SET isBanned=1 WHERE groupId='group'")
+        self.assertEqual(0, self.update("parent", q=current))  # even an identical replay
+        self.assertEqual("quoted", self.reply("parent"))
+
+    def test_left_group_is_checked_even_if_a_stale_local_member_was_recreated(self):
+        self.add("parent", chat="group", channel="GROUP")
+        current = query("applyGroupReply")
+        self.assertIn("g.id = messages.chatId AND g.isLeft = 0", current)
+        before_left_guard = current.replace("g.id = messages.chatId AND g.isLeft = 0", "g.id = messages.chatId")
+        self.db.execute("UPDATE groups SET isLeft=1 WHERE id='group'")
+        self.assertEqual(0, self.update("parent", q=current))
+        # Model a GroupInfo packet recreating the member after leaving.
+        self.assertEqual(1, self.update("parent", q=before_left_guard))
+        self.db.execute("UPDATE messages SET replyToId=NULL, replyAuthor='', replyText='' WHERE id='parent'")
+        self.db.execute("UPDATE groups SET isLeft=0 WHERE id='group'")
+        self.assertEqual(1, self.update("parent", q=current))
+        self.db.execute("UPDATE groups SET isLeft=1 WHERE id='group'")
+        self.assertEqual(0, self.update("parent", q=current))  # even an identical replay
+        ingress = (BASE / "data/group/GroupReplyIngress.kt").read_text(encoding="utf-8")
+        self.assertIn("groupDao.getGroupById(groupId)?.isLeft == false", ingress)
 
     def test_conflicting_reply_cannot_replace_the_first_but_exact_duplicate_can_ack(self):
         self.add("parent")
@@ -129,7 +172,9 @@ class DirectReplyScopeTest(unittest.TestCase):
         direct = service[service.index('"message_received" ->'):]
         reply = direct[direct.index("DirectReplyWire.isPacket(text)"):]
         self.assertIn("directReplies.network(senderId, chatId, messageId, text, sealed && MessageSealer.openedByExpectedSender(rawText, senderId), rawText)", reply[:650])
-        self.assertIn("if (!com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(preopened))", direct)
+        self.assertIn("if (canAcknowledgeSelfEcho(sealed, preopened))", direct)
+        receipt = (BASE / "service/DeliveryReceiptCoordinator.kt").read_text(encoding="utf-8")
+        self.assertIn("!DirectReplyWire.isPacket(opened)", receipt)
         self.assertIn("if (!com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(opened)) try", direct)
         cf = service[service.index("is RelayEnvelope.Parsed.Message ->"):service.index("is RelayEnvelope.Parsed.Other ->")]
         self.assertLess(cf.index("DirectReplyWire.isPacket(cfContent)"), cf.index("else if (existingMsg != null && cfContent != null)"))
