@@ -1,6 +1,8 @@
 package com.vladimir.messenger.data.reply
 
 import android.content.Context
+import android.content.ContextWrapper
+import android.util.Base64
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -9,10 +11,19 @@ import com.vladimir.messenger.data.file.FileExchangePeerStore
 import com.vladimir.messenger.data.local.AppDatabase
 import com.vladimir.messenger.data.local.entity.ChatEntity
 import com.vladimir.messenger.data.local.entity.MessageEntity
+import com.vladimir.messenger.data.mirror.MirrorFrameCipher
+import com.vladimir.messenger.data.mirror.MirrorOutgoingFrame
 import com.vladimir.messenger.data.mirror.MirrorReplyTrust
+import com.vladimir.messenger.data.mirror.MirrorRoomToken
+import com.vladimir.messenger.data.mirror.MirrorRow
+import com.vladimir.messenger.data.repository.MirrorOutgoingDispatcher
+import com.vladimir.messenger.data.repository.MirrorOutgoingStore
+import com.vladimir.messenger.data.repository.MirrorStage
+import com.vladimir.messenger.data.repository.outgoingTextRow
 import com.vladimir.messenger.data.security.MessageSealer
 import com.vladimir.messenger.data.security.SealedWire
 import com.vladimir.messenger.service.canAcknowledgeCfDuplicate
+import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -23,6 +34,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.json.JSONObject
 import uniffi.p2p_core.clearIdentitySigningSeed
 import uniffi.p2p_core.createFileExchangeBinding
 import uniffi.p2p_core.createFileKeyEnvelope
@@ -46,6 +58,12 @@ class DirectReplyRealFfiInstrumentedTest {
         val recipientSecret = ByteArray(32) { 3 }
         val senderSecret = ByteArray(32) { 4 }
         val attackerSecret = ByteArray(32) { 5 }
+        val prefsPrefix = "mirror-frame-ffi-${UUID.randomUUID()}-"
+        val isolatedContext = object : ContextWrapper(context) {
+            override fun getApplicationContext(): Context = this
+            override fun getSharedPreferences(name: String, mode: Int) =
+                context.getSharedPreferences(prefsPrefix + name, mode)
+        }
         val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
         try {
             fun binding(id: String, seed: Byte, exchange: ByteArray): ByteArray {
@@ -77,13 +95,13 @@ class DirectReplyRealFfiInstrumentedTest {
             val receiver = DirectReplyIngress({ _, _ -> false }, { _, _ -> error("unexpected mirror") }, pinned::apply,
                 { _, _, _, _ -> forwards++ }, { _, _ -> acknowledgements++ }, { _, _ -> error("unexpected storage failure") })
 
-            fun seal(id: String, seed: Byte, from: ByteArray, secret: ByteArray): String {
+            fun seal(id: String, seed: Byte, from: ByteArray, secret: ByteArray, plaintext: String = text): String {
                 installIdentitySigningSeed(1.toUByte(), id, ByteArray(32) { seed })
                 val key = ByteArray(32) { 7 }
                 val iv = ByteArray(12) { (it + 1).toByte() }
                 val ciphertext = Cipher.getInstance("AES/GCM/NoPadding").run {
                     init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
-                    doFinal(text.toByteArray(Charsets.UTF_8))
+                    doFinal(plaintext.toByteArray(Charsets.UTF_8))
                 }
                 val wrapped = createFileKeyEnvelope(from, recipient, secret, SealedWire.manifest(ciphertext), key)
                 key.fill(0)
@@ -134,12 +152,76 @@ class DirectReplyRealFfiInstrumentedTest {
             assertEquals(text, open(realSelfWire))
             assertTrue(MirrorReplyTrust.verified(true, null, realSelfWire, { recipient }, { SealedWire.senderBinding(realSelfWire) }))
 
+            // Model the legacy mirror fallback with real FFI envelopes. An
+            // attacker can seal a valid outgoing row to our public binding and
+            // claim our node ID; opening it alone does not establish pairing.
+            // This invokes the production adapter, trust, dispatcher and Room
+            // store. The channel and network are not run; its open operation
+            // is modeled with the same FFI and AES-GCM primitives above.
+            assertTrue(isolatedContext.getSharedPreferences("apu_file_exchange", Context.MODE_PRIVATE).edit()
+                .putString("signed_public_binding_v1", Base64.encodeToString(recipient, Base64.NO_WRAP)).commit())
+            val outgoing = MirrorRow(id = "paired-outgoing", chatId = "shadow-chat", contactName = "Sender",
+                senderId = "self", content = "answer", timestamp = 42L, mine = true, recipientId = senderId,
+                status = "PENDING", replyToId = "target", replyAuthor = "Alice", replyText = "quoted")
+            val outgoingJson = outgoing.toJson().toString()
+            val store = MirrorOutgoingStore(db) { _, _ -> false }
+            var attempts = 0
+            val dispatcher = MirrorOutgoingDispatcher(
+                isCleared = { _, _ -> false },
+                localChat = { assertEquals(senderId, it); "chat" },
+                initial = { frame, chat ->
+                    val row = outgoingTextRow(frame.id, chat, frame.recipientId, frame.content, frame.timestamp,
+                        DirectReplyWire.Target(frame.replyToId, frame.replyAuthor, frame.replyText),
+                        frame.textColor, frame.senderNameColor)
+                    assertEquals(MirrorStage.Inserted, store.stageNew(row, frame.recipientId, frame.content))
+                    attempts++
+                },
+                manual = { _, _ -> error("unexpected retry") },
+                recordFailure = { throw AssertionError("unexpected dispatch failure", it) },
+            )
+            suspend fun routeOutgoing(wire: String) {
+                val body = MirrorOutgoingFrame.open(isolatedContext, recipientId, wire) { value ->
+                    val key = MirrorRoomToken.loadSyncKey(isolatedContext)
+                    val plaintext = key?.let { MirrorFrameCipher.open(it, value) } ?: open(value)
+                    JSONObject(plaintext)
+                } ?: return
+                dispatcher.dispatch(MirrorRow.fromJson(body))
+            }
+            val forgedOutgoing = seal(recipientId, 8, fakeSelf, attackerSecret, outgoingJson)
+            assertEquals(outgoingJson, open(forgedOutgoing))
+            assertTrue(MessageSealer.openedByExpectedSender(forgedOutgoing, recipientId))
+            routeOutgoing(forgedOutgoing)
+            assertNull(db.messageDao().getMessageById(outgoing.id))
+            assertEquals(0, attempts)
+            val realOutgoing = seal(recipientId, 1, recipient, recipientSecret, outgoingJson)
+            routeOutgoing(realOutgoing)
+            assertEquals(1, attempts)
+            assertEquals("target", db.messageDao().getMessageById(outgoing.id)!!.replyToId)
+            val relabelledEcho = outgoing.copy(id = "relabeled-echo", senderId = "", contactName = "", status = "SENT")
+            routeOutgoing(seal(recipientId, 1, recipient, recipientSecret, relabelledEcho.toJson().toString()))
+            assertEquals(1, attempts)
+            assertNull(db.messageDao().getMessageById(relabelledEcho.id))
+
+            // The modern paired route uses a different device binding and the
+            // shared authenticated room key instead of the legacy self-key.
+            val roomKey = ByteArray(32) { (it + 11).toByte() }
+            assertTrue(isolatedContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE).edit()
+                .putString("mirror_sync_key_v1", Base64.encodeToString(roomKey,
+                    Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)).commit())
+            val paired = outgoing.copy(id = "paired-room-key")
+            routeOutgoing(MirrorFrameCipher.seal(roomKey, paired.toJson().toString())!!)
+            assertEquals(2, attempts)
+            assertEquals("target", db.messageDao().getMessageById(paired.id)!!.replyToId)
+            roomKey.fill(0)
+
             val parts = SealedWire.decode(realWire)!!
             val changed = parts.ciphertext.copyOf().also { it[0] = (it[0].toInt() xor 1).toByte() }
             assertTrue(runCatching { open(SealedWire.encode(parts.keyEnvelope, parts.iv, changed)) }.isFailure)
         } finally {
             clearIdentitySigningSeed()
             db.close()
+            context.deleteSharedPreferences(prefsPrefix + "apu_file_exchange")
+            context.deleteSharedPreferences(prefsPrefix + "p2p_prefs")
             senderSecret.fill(0)
             attackerSecret.fill(0)
             recipientSecret.fill(0)

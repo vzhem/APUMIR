@@ -23,12 +23,31 @@ class MirrorOutgoingDispatcherTest {
         assertTrue(MirrorOutgoingPolicy.accepts(base.copy(manualRetry = true, status = "FAILED")))
         assertTrue(MirrorOutgoingPolicy.accepts(base.copy(recipientId = "https://invite/?node=pk_friend123&x=1")))
         for (bad in listOf(
-            base.copy(mine = false), base.copy(id = ""), base.copy(id = "abc\u0000def"),
+            base.copy(mine = false), base.copy(senderId = ""), base.copy(senderId = "peer"),
+            base.copy(id = ""), base.copy(id = "abc\u0000def"),
             base.copy(id = "abc|def"), base.copy(id = "я".repeat(65)), base.copy(recipientId = ""),
             base.copy(recipientId = "pk_"), base.copy(recipientId = "pk_friend\u0000other"),
             base.copy(recipientId = "pk_friend|other"), base.copy(status = "READ"),
             base.copy(manualRetry = true, status = "READ"), base.copy(manualRetry = true, status = "LOCAL_FILE"),
         )) assertFalse(MirrorOutgoingPolicy.accepts(bad))
+    }
+
+    @Test fun relabelledSentEchoCannotCreateChatOrTriggerSend() = runBlocking {
+        var chats = 0
+        var sends = 0
+        val dispatcher = MirrorOutgoingDispatcher(
+            isCleared = { _, _ -> false },
+            localChat = { chats++; "chat" },
+            initial = { _, _ -> sends++ }, manual = { _, _ -> sends++ },
+            recordFailure = { throw AssertionError("unexpected", it) },
+        )
+        // publishSentEcho currently serializes mine=true but senderId="".
+        dispatcher.dispatch(row().copy(senderId = "", contactName = "", status = "SENT"))
+        assertEquals(0, chats)
+        assertEquals(0, sends)
+        dispatcher.dispatch(row())
+        assertEquals(1, chats)
+        assertEquals(1, sends)
     }
 
     @Test fun scopedTombstoneAndIdentityFailurePreventChatCreationOrSend() = runBlocking {

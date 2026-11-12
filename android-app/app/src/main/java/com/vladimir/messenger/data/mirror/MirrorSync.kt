@@ -2968,7 +2968,7 @@ class MirrorChannel(
             "out" -> {
                 // Только активный отправляет: тень шлёт через партнёра.
                 if (!engineUp) return
-                val row = openPayload(wire)?.let { MirrorRow.fromJson(it) } ?: return
+                val row = MirrorOutgoingFrame.open(context, nodeId, wire, ::openPayload)?.let { MirrorRow.fromJson(it) } ?: return
                 scope.launch { bridge.onOutgoingFromPartner(row) }
             }
             "batch" -> handleEventBatch(wire)

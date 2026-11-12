@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the mailbox and pending-mirror JVM report gate with synthetic Gradle reports."""
+"""Exercise the mailbox and mirror JVM report gate with synthetic Gradle reports."""
 import contextlib
 import importlib.util
 import io
@@ -54,6 +54,16 @@ class MailboxResultsTest(unittest.TestCase):
         classname, name = next(iter(mirror))
         cases = [(*case[:2], "<skipped/>") if case[:2] == (classname, name) else case for case in self.all_cases()]
         self.assertEqual(1, self.run_report(cases))
+
+    def test_each_mirror_outgoing_trust_case_is_required_and_cannot_be_skipped(self):
+        for classname, names in ((checker.MIRROR_OUTGOING_FRAME_CLASS, checker.MIRROR_OUTGOING_FRAME_EXPECTED),
+                                 (checker.MIRROR_OUTGOING_DISPATCH_CLASS, checker.MIRROR_OUTGOING_DISPATCH_EXPECTED)):
+            self.assertEqual(6, len(names))
+            for name in names:
+                cases = [case for case in self.all_cases() if case[:2] != (classname, name)]
+                self.assertEqual(1, self.run_report(cases))
+                skipped = [(*case[:2], "<skipped/>") if case[:2] == (classname, name) else case for case in self.all_cases()]
+                self.assertEqual(1, self.run_report(skipped))
 
     def test_duplicate_or_invalid_report_fails(self):
         cases = self.all_cases()

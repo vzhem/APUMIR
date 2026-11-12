@@ -201,6 +201,42 @@ class MirrorPendingContract(unittest.TestCase):
         for workflow in ("build-release.yml", "unit-tests.yml"):
             self.assertIn("check-push-mailbox-jvm-results.py", (ROOT / ".github/workflows" / workflow).read_text())
 
+    def test_outgoing_frames_require_paired_trust_after_open_before_dispatch(self):
+        mirror = source("data/mirror/MirrorSync.kt")
+        outgoing = mirror.split('"out" -> {', 1)[1].split('"batch" ->', 1)[0]
+        self.assertIn("MirrorOutgoingFrame.open(context, nodeId, wire, ::openPayload)", outgoing)
+        self.assertNotIn("openPayload(wire)?.let", outgoing)
+        self.assertIn("bridge.onOutgoingFromPartner(row)", outgoing)
+        guard = source("data/mirror/MirrorOutgoingFrame.kt")
+        self.assertIn("MirrorReplyTrust.pairedAfterOpen(context, nodeId, it)", guard)
+        self.assertLess(guard.index("val body = openPayload(wire)"), guard.index("pairedAfterOpen(wire)"))
+        trust = source("data/mirror/MirrorReplyTrust.kt")
+        self.assertIn("verified(true, MirrorRoomToken.loadSyncKey(context), wire", trust)
+        self.assertIn("MessageDigest.isEqual(local, signer)", trust)
+        checker_path = ROOT / "scripts/ci/check-push-mailbox-jvm-results.py"
+        spec = importlib.util.spec_from_file_location("mirror_trust_report_gate", checker_path)
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+        kotlin = (ROOT / "android-app/app/src/test/java/com/vladimir/messenger/data/mirror/MirrorOutgoingFrameTest.kt").read_text(encoding="utf-8")
+        self.assertEqual(checker.MIRROR_OUTGOING_FRAME_EXPECTED, set(re.findall(r"@Test\s+fun\s+(\w+)\(", kotlin)))
+        compile_script = (ROOT / "scripts/ci/check-android-compile.sh").read_text()
+        self.assertIn("--tests '*MirrorOutgoingFrameTest*'", compile_script)
+        dispatch_test = (ROOT / "android-app/app/src/test/java/com/vladimir/messenger/data/repository/MirrorOutgoingDispatcherTest.kt").read_text(encoding="utf-8")
+        self.assertEqual(checker.MIRROR_OUTGOING_DISPATCH_EXPECTED, set(re.findall(r"@Test\s+fun\s+(\w+)\(", dispatch_test)))
+        self.assertIn("--tests '*MirrorOutgoingDispatcherTest*'", compile_script)
+        sent_echo = mirror.split("fun publishSentEcho(", 1)[1].split("fun publishOutgoing(", 1)[0]
+        self.assertIn('"sent"', sent_echo)
+        self.assertIn('senderId = ""', sent_echo)
+        policy = source("data/repository/MirrorOutgoingPolicy.kt")
+        self.assertIn('row.senderId != "self"', policy)
+        ffi = (ROOT / "android-app/app/src/androidTest/java/com/vladimir/messenger/data/reply/DirectReplyRealFfiInstrumentedTest.kt").read_text(encoding="utf-8")
+        for seam in ("MirrorOutgoingFrame.open(isolatedContext, recipientId, wire)",
+                     "routeOutgoing(forgedOutgoing)", "routeOutgoing(realOutgoing)",
+                     "relabeled-echo", "routeOutgoing(MirrorFrameCipher.seal(roomKey", "store.stageNew"):
+            self.assertIn(seam, ffi)
+        report = (ROOT / "scripts/ci/check-android-notification-results.py").read_text(encoding="utf-8")
+        self.assertIn('"selfClaimedIdCannotPassThePinnedReplyOrLegacyMirrorBinding"', report)
+
     def test_migrated_and_reopened_database_exercises_all_pending_queries(self):
         test = (ROOT / "android-app/app/src/androidTest/java/com/vladimir/messenger/data/notification/NotificationArrivalInstrumentedTest.kt").read_text(encoding="utf-8")
         case = test.split("fun migrationFortyOneToFortyTwoPreservesRowsAndIndexesSentRetries()", 1)[1].split("@Test", 1)[0]

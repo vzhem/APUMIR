@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Require mailbox and pending-mirror JVM regressions to run, without skips.
+"""Require mailbox and mirror JVM regressions to run, without skips.
 
 The full Gradle test task normally discovers these automatically. This gate
 also detects a missing/renamed class or a test accidentally filtered out. It is
@@ -131,6 +131,28 @@ MIRROR_PENDING_EXPECTED = {
 }
 EXPECTED.update(MIRROR_PENDING_EXPECTED)
 
+MIRROR_OUTGOING_FRAME_CLASS = "com.vladimir.messenger.data.mirror.MirrorOutgoingFrameTest"
+MIRROR_OUTGOING_FRAME_EXPECTED = {
+    "openingPrecedesTrustAndBothSeeTheSameWire",
+    "failedOpenNeverConsultsTrustOrProducesARow",
+    "pairedRoomKeyAcceptsOnlyAnIntactAuthenticatedFrame",
+    "anOpenedPayloadStillNeedsTheCorrectPairingKey",
+    "legacyFallbackRequiresTheExactLocalBindingNotAClaimedNode",
+    "exceptionsCannotTurnAnUnverifiedFrameIntoAnAcceptedRow",
+}
+EXPECTED[MIRROR_OUTGOING_FRAME_CLASS] = MIRROR_OUTGOING_FRAME_EXPECTED
+
+MIRROR_OUTGOING_DISPATCH_CLASS = "com.vladimir.messenger.data.repository.MirrorOutgoingDispatcherTest"
+MIRROR_OUTGOING_DISPATCH_EXPECTED = {
+    "policyAcceptsOnlyRetryableWellFormedPairedRequests",
+    "relabelledSentEchoCannotCreateChatOrTriggerSend",
+    "scopedTombstoneAndIdentityFailurePreventChatCreationOrSend",
+    "aliasChecksBothScopesAndRoutesOnlyTheMatchingMode",
+    "aClearedCanonicalAliasNeverCreatesAChat",
+    "cancellationPropagatesAndOrdinaryFailuresAreReported",
+}
+EXPECTED[MIRROR_OUTGOING_DISPATCH_CLASS] = MIRROR_OUTGOING_DISPATCH_EXPECTED
+
 
 def check(results: Path) -> int:
     expected = {(classname, name) for classname, names in EXPECTED.items() for name in names}
@@ -156,7 +178,7 @@ def check(results: Path) -> int:
     for error in errors:
         safe = error.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
         print(f"::error::{safe}")
-    print(f"::notice::Mailbox and pending-mirror JVM regressions: {len(seen & expected)}/{len(expected)}")
+    print(f"::notice::Mailbox and mirror JVM regressions: {len(seen & expected)}/{len(expected)}")
     return 1 if errors else 0
 
 

@@ -29,12 +29,16 @@ internal object MirrorReplyTrust {
         return MessageDigest.isEqual(local, signer)
     }
 
-    fun afterOpen(context: Context, nodeId: String, wire: String, sourceAuthenticated: Boolean): Boolean =
-        verified(sourceAuthenticated, MirrorRoomToken.loadSyncKey(context), wire,
+    /** Verify possession of the pairing key or our exact legacy binding after open. */
+    fun pairedAfterOpen(context: Context, nodeId: String, wire: String): Boolean =
+        verified(true, MirrorRoomToken.loadSyncKey(context), wire,
             localBinding = { FileExchangeKeyStore.publicBinding(context) },
             signerBinding = {
                 if (nodeId.isNotBlank() && MessageSealer.openedByExpectedSender(wire, nodeId))
                     SealedWire.senderBinding(wire) else null
             },
         )
+
+    fun afterOpen(context: Context, nodeId: String, wire: String, sourceAuthenticated: Boolean): Boolean =
+        sourceAuthenticated && pairedAfterOpen(context, nodeId, wire)
 }
