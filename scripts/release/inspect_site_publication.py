@@ -45,6 +45,8 @@ def last_upload_event(log: bytes) -> tuple[str, str] | None:
     staged = re.compile(rb"^\d{4}-\d\d-\d\dT[^ ]+ (Staging|Promoted) ([A-Za-z0-9._-]+)(?: \([0-9]+ bytes\))?\s*$")
     last = None
     for line in log.splitlines():
+        # gh run view --log prefixes lines with job/step columns separated by tabs.
+        line = line.rsplit(b"\t", 1)[-1]
         old_match = legacy.match(line)
         new_match = staged.match(line)
         if not old_match and not new_match:
@@ -66,7 +68,7 @@ def last_uploaded_name(log: bytes) -> str | None:
 
 def staging_cleanup_failed(log: bytes) -> bool:
     pattern = re.compile(rb"^\d{4}-\d\d-\d\dT[^ ]+ Staging cleanup failed: [A-Za-z_]+\s*$")
-    return any(pattern.match(line) for line in log.splitlines())
+    return any(pattern.match(line.rsplit(b"\t", 1)[-1]) for line in log.splitlines())
 
 
 class SiteRedirectsOnly(urllib.request.HTTPRedirectHandler):
@@ -120,9 +122,12 @@ def gh_json(endpoint: str):
     return json.loads(process.stdout)
 
 
-def job_log_tail(endpoint: str) -> bytes | None:
+def command_log_tail(command: list[str]) -> bytes | None:
     # Avoid retaining the entire log in memory and never output it verbatim.
-    api = subprocess.Popen(["gh", "api", endpoint], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    try:
+        api = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    except OSError:
+        return None
     try:
         assert api.stdout is not None
         tail = subprocess.run(["tail", "-c", str(MAX_LOG_TAIL)], stdin=api.stdout,
@@ -139,6 +144,16 @@ def job_log_tail(endpoint: str) -> bytes | None:
         api.wait()
         if api.stdout is not None:
             api.stdout.close()
+
+
+def job_log_tail(endpoint: str) -> bytes | None:
+    return command_log_tail(["gh", "api", endpoint])
+
+
+def run_log_tail(repo: str, run_id: int) -> bytes | None:
+    # GitHub can expose a completed run archive even if its job-log redirect is
+    # inaccessible. gh extracts it; only the same bounded, whitelisted tail is read.
+    return command_log_tail(["gh", "run", "view", str(run_id), "--repo", repo, "--log"])
 
 
 def report(message: str) -> None:
@@ -213,8 +228,15 @@ def main() -> int:
                     conclusion = "unknown"
                 report(f"FTP upload step completed: {conclusion}")
             log = job_log_tail(f"repos/{repo}/actions/jobs/{int(job['id'])}/logs")
+            if log is None and status == "completed":
+                log = run_log_tail(repo, run_id)
             event = last_upload_event(log) if log is not None else None
-            report(f"Last observed FTP file {event[0]}: {event[1]}" if event else "Job log/progress not available")
+            if event:
+                report(f"Last observed FTP file {event[0]}: {event[1]}")
+            elif log is None:
+                report("Job and run logs are unavailable")
+            else:
+                report("Log was accessible but no whitelisted FTP file progress was found")
             if log is not None and staging_cleanup_failed(log):
                 report("A staging cleanup failed; an isolated temporary file may remain")
     except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError):

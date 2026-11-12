@@ -60,6 +60,8 @@ class SafeLogTest(unittest.TestCase):
         self.assertEqual(inspect.last_upload_event(log), ("started", "feature-pack-translate-x86_64.zip"))
         self.assertTrue(inspect.staging_cleanup_failed(log))
         self.assertEqual(inspect.last_upload_event(log.splitlines()[1]), ("promoted", "feature-pack-translate-arm64-v8a.zip"))
+        prefixed = b'job\tstep\t2026-11-12T17:22:05Z Staging latest.json (123 bytes)\n'
+        self.assertEqual(inspect.last_upload_event(prefixed), ("started", "latest.json"))
 
     def test_does_not_treat_printed_shell_as_progress(self):
         self.assertIsNone(inspect.last_uploaded_name(
@@ -128,6 +130,29 @@ class EndToEndTest(unittest.TestCase):
         self.assertIn("Last observed FTP file started: feature-pack-translate-arm64-v8a.zip", text)
         self.assertIn("A staging cleanup failed", text)
         self.assertNotIn("SECRET-DO-NOT-PRINT", text)
+
+    def test_completed_run_falls_back_to_archive_without_printing_raw_lines(self):
+        tag = "v11.74.509"
+        released = {"tag_name": tag, "assets": [
+            {"name": "app-release.apk", "digest": "sha256:" + "a" * 64, "size": 123},
+            {"name": "feature-packs.json", "digest": "sha256:" + "b" * 64},
+        ]}
+        runs = {"workflow_runs": [{"head_branch": tag, "event": "release", "id": 123, "status": "completed"}]}
+        jobs = {"jobs": [{"name": "Upload release files to apu.clan.su", "id": 456,
+                          "steps": [{"status": "completed", "conclusion": "failure", "name": "Upload to apu.clan.su via FTP"}]}]}
+        log = b'job\tstep\t2026-11-12T17:22:01Z Staging app-release.apk (456 bytes)\nSECRET-DO-NOT-PRINT\n'
+        metadata = json.dumps({"version": "v11.74.508", "sha256": "c" * 64}).encode()
+        out = io.StringIO()
+        with patch.dict(os.environ, {"GITHUB_REPOSITORY": "owner/repo"}), \
+             patch.object(inspect, "gh_json", side_effect=[released, runs, jobs]), \
+             patch.object(inspect, "read_site", side_effect=[metadata, b"{}"]), \
+             patch.object(inspect, "hash_site_apk", return_value=(100, "c" * 64)), \
+             patch.object(inspect, "job_log_tail", return_value=None), \
+             patch.object(inspect, "run_log_tail", return_value=log) as fallback, contextlib.redirect_stdout(out):
+            self.assertEqual(inspect.main(), 0)
+        fallback.assert_called_once_with("owner/repo", 123)
+        self.assertIn("Last observed FTP file started: app-release.apk", out.getvalue())
+        self.assertNotIn("SECRET-DO-NOT-PRINT", out.getvalue())
 
     def test_invalid_repository_never_calls_network(self):
         with patch.dict(os.environ, {"GITHUB_REPOSITORY": "../bad"}), \
