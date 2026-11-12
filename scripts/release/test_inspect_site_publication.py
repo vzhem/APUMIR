@@ -31,6 +31,16 @@ class SiteMetadataTest(unittest.TestCase):
             with self.subTest(url=url), self.assertRaises(ValueError):
                 handler.redirect_request(None, None, 302, "", {}, url)
 
+    def test_streams_apk_and_enforces_exact_size_limit(self):
+        import hashlib
+        data = b"example apk"
+        with patch.object(inspect, "open_site", side_effect=lambda _: io.BytesIO(data)):
+            self.assertEqual(inspect.hash_site_apk(len(data)), (len(data), hashlib.sha256(data).hexdigest()))
+            with self.assertRaises(ValueError):
+                inspect.hash_site_apk(len(data) - 1)
+            with self.assertRaises(ValueError):
+                inspect.hash_site_apk(0)
+
 
 class SafeLogTest(unittest.TestCase):
     def test_only_whitelisted_real_output_lines_count(self):
@@ -58,7 +68,7 @@ class EndToEndTest(unittest.TestCase):
     def test_reports_mismatch_and_safe_progress_without_printing_log(self):
         tag = "v11.74.508"
         released = {"tag_name": tag, "assets": [
-            {"name": "app-release.apk", "digest": "sha256:" + "a" * 64},
+            {"name": "app-release.apk", "digest": "sha256:" + "a" * 64, "size": 123},
             {"name": "feature-packs.json", "digest": "sha256:" + "b" * 64},
         ]}
         runs = {"workflow_runs": [{"head_branch": tag, "event": "release", "id": 123, "status": "in_progress"}]}
@@ -70,11 +80,13 @@ class EndToEndTest(unittest.TestCase):
         with patch.dict(os.environ, {"GITHUB_REPOSITORY": "owner/repo"}), \
              patch.object(inspect, "gh_json", side_effect=[released, runs, jobs]), \
              patch.object(inspect, "read_site", side_effect=[metadata, b"{}"]), \
-             patch.object(inspect, "running_log_tail", return_value=log), contextlib.redirect_stdout(out):
+             patch.object(inspect, "hash_site_apk", return_value=(100, "c" * 64)), \
+             patch.object(inspect, "job_log_tail", return_value=log), contextlib.redirect_stdout(out):
             self.assertEqual(inspect.main(), 0)
         text = out.getvalue()
         self.assertIn("matches Latest: False", text)
         self.assertIn("feature-packs.json SHA-256 matches release: False", text)
+        self.assertIn("Site APK snapshot: 100 bytes; matches Latest: False; matches site metadata: True", text)
         self.assertIn("Last observed FTP file started: app-release.apk", text)
         self.assertNotIn("SECRET-DO-NOT-PRINT", text)
 
