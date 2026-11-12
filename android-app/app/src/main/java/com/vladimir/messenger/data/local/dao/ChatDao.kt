@@ -83,6 +83,10 @@ interface ChatDao {
     @Query("UPDATE chats SET lastMessage = :message, lastMessageTime = :time WHERE id = :chatId")
     suspend fun updateLastMessage(chatId: String, message: String, time: Long)
 
+    /** Used in the same Room transaction as a newly inserted direct message. */
+    @Query("UPDATE chats SET lastMessage = :message, lastMessageTime = :time, unreadCount = unreadCount + :unreadDelta WHERE id = :chatId")
+    suspend fun recordIncoming(chatId: String, message: String, time: Long, unreadDelta: Int): Int
+
     /** р239: снять с чата непрочитанные, накрученные мусорными пакетами. */
     @Query("UPDATE chats SET unreadCount = MAX(0, unreadCount - :count) WHERE id = :chatId")
     suspend fun decrementUnread(chatId: String, count: Int)

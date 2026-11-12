@@ -85,6 +85,10 @@ EXPECTED = {
         "malformedPagesAreRejectedBeforeAnyItemIsCommitted",
         "repeatedIdsAcrossPagesAreRejectedWithoutProcessingThemAgain",
         "boundedCheckpointPreservesUnprocessedStateAndCursorExpiryRestarts",
+        "boundedSnapshotSurvivesPageMutationAndRejectsUnboundedViews",
+        "recentIdsDetectCyclesAcrossDurableContinuationBoundaries",
+        "longerCycleIsBoundedEvenAfterOldIdsLeaveTheCheckpoint",
+        "checkpointValidationAndTotalPageBudgetFailClosedWithoutMoreEffects",
         "transportFailuresAndCancellationNeverTurnIntoCompletedScans",
     },
 }

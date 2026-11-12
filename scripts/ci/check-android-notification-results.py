@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 CLASS = "com.vladimir.messenger.data.notification.NotificationArrivalInstrumentedTest"
+INCOMING_CLASS = "com.vladimir.messenger.data.repository.IncomingMessageStoreInstrumentedTest"
 OUTBOX_CLASS = "com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest"
 PUSH_CLASS = "com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest"
 REGISTRATION_CLASS = "com.vladimir.messenger.data.push.PushRegistrationStoreInstrumentedTest"
@@ -28,7 +29,16 @@ EXPECTED_NOTIFICATION = {
     "backupMergeRollsBackEveryTableWhenAnInsertFails",
     "stagedBackupSanitizerReadsWalAndLeavesTheOriginalUntouched",
 }
-EXPECTED = {CLASS: EXPECTED_NOTIFICATION, OUTBOX_CLASS: {
+EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
+    "rowPreviewUnreadAndNotificationCommitOnceAcrossReopen",
+    "concurrentDuplicatesAndConflictingSenderNeverModifyTheWinner",
+    "suppressedOrMissingChatDoesNotLeaveAnOrphanOrNotification",
+    "suppressionArrivingDuringTheTransactionLeavesNoPartialState",
+    "clearTombstoneWrittenDuringInsertionIsObservedBeforeCommit",
+    "clearAfterAnOldCheckEventuallyRemovesTheCommittedRowAndMetadata",
+    "sqliteFailureRollsBackEverythingAndTheSameIdCanBeRetried",
+    "cancellationRollsBackAndNonAlertingServiceRowsKeepTheirPolicy",
+}, OUTBOX_CLASS: {
     "actualRoomQueueReachesLaterRecipientPastManyBlockedRows",
     "aBadOldestMessageDoesNotHideLaterMessagesInTheSameRoomChat",
     "growingRoomQueueEndsScanAndRetriesBlockedChat",

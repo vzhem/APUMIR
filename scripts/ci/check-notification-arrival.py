@@ -73,6 +73,35 @@ class NotificationArrivalContract(unittest.TestCase):
         self.assertIn('applyMirrorIncoming(row, notify)', mirror_in)
         self.assertNotIn('showMessageNotification', mirror_in)
 
+    def test_direct_message_uses_one_room_transaction_for_arrival_state(self):
+        repo = source('data/repository/ChatRepository.kt')
+        incoming = section(repo, '    suspend fun saveIncomingMessage(', '    suspend fun isInviteBlocked(')
+        self.assertIn('incomingMessageStore.save(entity', incoming)
+        self.assertIn('DeferredInboxStore.isCancelled', incoming)
+        self.assertIn('ChatClearRegistry.isCleared', incoming)
+        self.assertIn('!com.vladimir.messenger.util.ChatPreviews.isServiceEnvelope(cleanContent)', incoming)
+        store = source('data/repository/IncomingMessageStore.kt')
+        for marker in ('database.withTransaction', 'messages.insertMessageIgnore(message)',
+                       'suppressed()', 'database.chatDao().recordIncoming(', 'deleteByIdChatAndSender'):
+            self.assertIn(marker, store)
+        chat_dao = source('data/local/dao/ChatDao.kt')
+        self.assertIn('unreadCount = unreadCount + :unreadDelta', chat_dao)
+        runner = (ROOT / 'scripts/ci/run-android-navigation-tests.sh').read_text()
+        guard = (ROOT / 'scripts/ci/check-android-notification-results.py').read_text()
+        tests = ROOT / 'android-app/app/src/androidTest/java/com/vladimir/messenger/data/repository/IncomingMessageStoreInstrumentedTest.kt'
+        self.assertTrue(tests.is_file())
+        self.assertIn('IncomingMessageStoreInstrumentedTest', runner)
+        for method in ('rowPreviewUnreadAndNotificationCommitOnceAcrossReopen',
+                       'concurrentDuplicatesAndConflictingSenderNeverModifyTheWinner',
+                       'suppressedOrMissingChatDoesNotLeaveAnOrphanOrNotification',
+                       'suppressionArrivingDuringTheTransactionLeavesNoPartialState',
+                       'clearTombstoneWrittenDuringInsertionIsObservedBeforeCommit',
+                       'clearAfterAnOldCheckEventuallyRemovesTheCommittedRowAndMetadata',
+                       'sqliteFailureRollsBackEverythingAndTheSameIdCanBeRetried',
+                       'cancellationRollsBackAndNonAlertingServiceRowsKeepTheirPolicy'):
+            self.assertIn(method, tests.read_text())
+            self.assertIn(method, guard)
+
     def test_history_cannot_rearm_notification_work(self):
         snapshot = source('data/mirror/MirrorAccountSnapshot.kt')
         self.assertIn('"messages" to setOf("notificationPending")', snapshot)

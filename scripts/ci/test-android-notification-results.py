@@ -33,6 +33,8 @@ class NotificationResultsTest(unittest.TestCase):
 
     def test_missing_case_fails(self):
         self.assertEqual(1, self.run_report(self.all_cases()[1:]))
+        missing_incoming = [case for case in self.all_cases() if case[0] != checker.INCOMING_CLASS]
+        self.assertEqual(1, self.run_report(missing_incoming))
         missing_outbox = [case for case in self.all_cases() if case[0] != checker.OUTBOX_CLASS]
         self.assertEqual(1, self.run_report(missing_outbox))
         missing_push = [case for case in self.all_cases() if case[0] != checker.PUSH_CLASS]

@@ -182,13 +182,122 @@ class PushMailboxDrainTest {
         assertEquals(two.id, second.checkpoint.after)
         assertTrue(second.checkpoint.unprocessed)
         assertEquals(PushMailboxDrain.Result.Unprocessed, drain.run(second.checkpoint))
-        assertNull(PushMailboxDrain.Checkpoint.resume("invalid", false))
-        assertNull(PushMailboxDrain.Checkpoint.resume("0".repeat(32), false))
+        assertNull(PushMailboxDrain.Checkpoint.resume("invalid", false, 1, listOf(one.id)))
+        assertNull(PushMailboxDrain.Checkpoint.resume("0".repeat(32), false, 1, listOf(one.id)))
         val expired = PushMailboxDrain(
             pull = { PushMailboxHttpClient.PullResult.CursorExpired }, commit = { error("not called") },
             ack = { error("not called") }, current = { true }, recordFailure = { error("unexpected failure") },
         )
         assertEquals(PushMailboxDrain.Result.Restart, expired.run(second.checkpoint))
+    }
+
+    @Test fun boundedSnapshotSurvivesPageMutationAndRejectsUnboundedViews() = runBlocking {
+        val one = item(1)
+        val two = item(2)
+        val mutable = mutableListOf(one, two)
+        val processed = mutableListOf<String>()
+        val drain = PushMailboxDrain(
+            pull = { after -> if (after == "-") PushMailboxHttpClient.PullResult.Page(mutable, two.id) else page() },
+            commit = { envelope -> mutable.clear(); processed.add(envelope); PushMailboxDrain.Commit.COMMITTED },
+            ack = { accepted }, current = { true }, recordFailure = { error("unexpected failure") },
+        )
+        assertEquals(PushMailboxDrain.Result.Completed, drain.run())
+        assertEquals(listOf(one.envelope, two.envelope), processed)
+
+        var reads = 0
+        var effects = 0
+        val huge = object : AbstractList<PushMailboxItem>() {
+            override val size: Int get() = Int.MAX_VALUE
+            override fun get(index: Int): PushMailboxItem { reads++; return one }
+        }
+        val malformed = PushMailboxDrain(
+            pull = { PushMailboxHttpClient.PullResult.Page(huge, one.id) },
+            commit = { effects++; PushMailboxDrain.Commit.COMMITTED },
+            ack = { effects++; accepted }, current = { true }, recordFailure = { error("unexpected failure") },
+        )
+        assertEquals(PushMailboxDrain.Result.Retry, malformed.run())
+        assertTrue(reads <= PushMailboxProtocol.MAX_PAGE_ITEMS + 1)
+        assertEquals(0, effects)
+    }
+
+    @Test fun recentIdsDetectCyclesAcrossDurableContinuationBoundaries() = runBlocking {
+        val one = item(1)
+        val two = item(2)
+        val processed = mutableListOf<String>()
+        val acknowledged = mutableListOf<String>()
+        val drain = PushMailboxDrain(
+            pull = { after -> when (after) { "-" -> page(one); one.id -> page(two); else -> page(one) } },
+            commit = { processed.add(it); PushMailboxDrain.Commit.COMMITTED },
+            ack = { receipts -> acknowledged.addAll(receipts.map { it.id }); accepted },
+            current = { true }, recordFailure = { error("unexpected failure") }, maxPages = 1,
+        )
+        val first = drain.run() as PushMailboxDrain.Result.Continue
+        val second = drain.run(first.checkpoint) as PushMailboxDrain.Result.Continue
+        assertEquals(listOf(one.id, two.id), second.checkpoint.recent)
+        assertEquals(2, second.checkpoint.pages)
+        // A future store must persist and restore every field together.
+        val restored = PushMailboxDrain.Checkpoint.resume(second.checkpoint.after, second.checkpoint.unprocessed,
+            second.checkpoint.pages, second.checkpoint.recent.toList())!!
+        assertEquals(PushMailboxDrain.Result.Retry, drain.run(restored))
+        assertEquals(listOf(one.envelope, two.envelope), processed)
+        assertEquals(listOf(one.id, two.id), acknowledged)
+        assertFalse(second.checkpoint.toString().contains(one.id))
+    }
+
+    @Test fun longerCycleIsBoundedEvenAfterOldIdsLeaveTheCheckpoint() = runBlocking {
+        val items = (1..65).map(::item)
+        var pulls = 0
+        var commits = 0
+        val drain = PushMailboxDrain(
+            pull = { after ->
+                pulls++
+                val next = if (after == "-") 0 else (items.indexOfFirst { it.id == after } + 1) % items.size
+                page(items[next])
+            },
+            commit = { commits++; PushMailboxDrain.Commit.ALREADY_COMMITTED },
+            ack = { accepted }, current = { true }, recordFailure = { error("unexpected failure") },
+            maxPages = 1, maxScanPages = 66,
+        )
+        var checkpoint = PushMailboxDrain.Checkpoint.first()
+        repeat(66) {
+            val next = drain.run(checkpoint) as PushMailboxDrain.Result.Continue
+            checkpoint = PushMailboxDrain.Checkpoint.resume(next.checkpoint.after, next.checkpoint.unprocessed,
+                next.checkpoint.pages, next.checkpoint.recent)!!
+            assertTrue(checkpoint.recent.size <= PushMailboxDrain.MAX_RECENT_IDS)
+        }
+        assertEquals(items.first().id, checkpoint.after) // 65-item cycle exceeds the recent history
+        assertEquals(66, checkpoint.pages)
+        assertEquals(PushMailboxDrain.Result.Restart, drain.run(checkpoint))
+        assertEquals(66, pulls)
+        assertEquals(66, commits)
+    }
+
+    @Test fun checkpointValidationAndTotalPageBudgetFailClosedWithoutMoreEffects() = runBlocking {
+        val one = item(1)
+        val two = item(2)
+        val mutable = mutableListOf(one.id)
+        val checkpoint = PushMailboxDrain.Checkpoint.resume(one.id, false, 1, mutable)!!
+        mutable.add(two.id)
+        assertEquals(listOf(one.id), checkpoint.recent) // persistence input cannot mutate the snapshot
+        assertNull(PushMailboxDrain.Checkpoint.resume(one.id, false, 0, listOf(one.id)))
+        assertNull(PushMailboxDrain.Checkpoint.resume(one.id, false, PushMailboxDrain.MAX_SCAN_PAGES + 1, listOf(one.id)))
+        assertNull(PushMailboxDrain.Checkpoint.resume(one.id, false, 1, listOf(two.id)))
+        assertNull(PushMailboxDrain.Checkpoint.resume(one.id, false, 1, listOf(one.id, one.id)))
+        assertNull(PushMailboxDrain.Checkpoint.resume(item(5).id, false, 1, (1..5).map { item(it).id }))
+        assertNull(PushMailboxDrain.Checkpoint.resume(item(65).id, false, 100, (1..65).map { item(it).id }))
+        var pulls = 0
+        var commits = 0
+        val drain = PushMailboxDrain(
+            pull = { after -> pulls++; if (after == "-") page(one) else page(two) },
+            commit = { commits++; PushMailboxDrain.Commit.COMMITTED },
+            ack = { accepted }, current = { true }, recordFailure = { error("unexpected failure") },
+            maxPages = 1, maxScanPages = 2,
+        )
+        val first = drain.run() as PushMailboxDrain.Result.Continue
+        val second = drain.run(first.checkpoint) as PushMailboxDrain.Result.Continue
+        assertEquals(PushMailboxDrain.Result.Restart, drain.run(second.checkpoint))
+        assertEquals(2, pulls)
+        assertEquals(2, commits)
     }
 
     @Test fun transportFailuresAndCancellationNeverTurnIntoCompletedScans() = runBlocking {

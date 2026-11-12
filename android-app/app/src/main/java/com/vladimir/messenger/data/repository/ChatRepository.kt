@@ -41,7 +41,9 @@ class ChatRepository @Inject constructor(
     private val storyVideos: com.vladimir.messenger.data.story.StoryVideoDelivery,
     private val referralAttribution: com.vladimir.messenger.data.referral.ReferralAttributionSender,
     private val contactDao: com.vladimir.messenger.data.local.dao.ContactDao,
+    private val database: com.vladimir.messenger.data.local.AppDatabase,
 ) {
+    private val incomingMessageStore = IncomingMessageStore(database)
     companion object {
         /** р249: ключ кадра флагов - личный чат (узел собеседника). */
         const val CHAT_FLAG_PERSONAL = "p"
@@ -735,20 +737,15 @@ class ChatRepository @Inject constructor(
             textColor = receivedTextColor,
             senderNameColor = receivedNameColor,
         )
-        // A due-time fallback may race the local hidden-inbox reveal.
-        if (messageDao.insertMessageIgnore(entity) == -1L) return false
-        if (com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId) || com.vladimir.messenger.data.chatclear.ChatClearRegistry.isCleared(context, senderId, messageId)) {
-            messageDao.deleteByIdChatAndSender(messageId, chatId, senderId)
-            return false
+        // The insert, preview, unread count and local notification flag must
+        // commit together, including when hidden-inbox reveal races fallback.
+        return incomingMessageStore.save(entity,
+            com.vladimir.messenger.util.ChatPreviews.human(cleanContent) ?: cleanContent,
+            !com.vladimir.messenger.util.ChatPreviews.isServiceEnvelope(cleanContent),
+        ) {
+            com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId) ||
+                com.vladimir.messenger.data.chatclear.ChatClearRegistry.isCleared(context, senderId, messageId)
         }
-        chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(cleanContent) ?: cleanContent, timestamp)
-        // Раунд 150: бейдж непрочитанных на пузыре личного чата.
-        // Раунд 156: служебные конверты роя (стикеры/миниатюры) - не
-        // сообщения, непрочитанные не считают (владелец).
-        if (!com.vladimir.messenger.util.ChatPreviews.isServiceEnvelope(cleanContent)) {
-            runCatching { chatDao.incrementUnread(chatId) }
-        }
-        return true
     }
 
     /**
