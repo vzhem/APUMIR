@@ -15,7 +15,7 @@ internal class PeerOutboxRetry(
     private val loadRecent: suspend (String, Int) -> List<MessageEntity>,
     private val loadCurrent: suspend (String) -> MessageEntity?,
     private val chatContact: suspend (String) -> String?,
-    private val send: suspend (String, String, String, String) -> Boolean,
+    private val send: suspend (String, String, String, String) -> Boolean?,
     private val markSent: suspend (String) -> Unit,
     private val recordFailure: () -> Unit,
     private val nowMs: () -> Long = { System.nanoTime() / 1_000_000L },
@@ -28,13 +28,15 @@ internal class PeerOutboxRetry(
         if (!peerId.startsWith("pk_") || '\u0000' in peerId || !begin(peerId)) return 0
         try {
             var sent = 0
-            var attempts = 0
+            // This bounds rows inspected, not network calls: stale or cleared
+            // rows still consume the discovery path's finite scan budget.
+            var visited = 0
             val tried = HashSet<String>()
             val pending = load { loadPending(peerId, PENDING_LIMIT) }.take(PENDING_LIMIT)
             for (row in pending) {
-                if (attempts >= TOTAL_LIMIT) break
+                if (visited >= TOTAL_LIMIT) break
                 if (!tried.add(row.id)) continue
-                attempts++
+                visited++
                 if (attempt(row, peerId, pendingOnly = true)) sent++
             }
 
@@ -48,9 +50,9 @@ internal class PeerOutboxRetry(
                     return sent
                 }
                 for (row in recent) {
-                    if (attempts >= TOTAL_LIMIT) break
+                    if (visited >= TOTAL_LIMIT) break
                     if (!tried.add(row.id)) continue
-                    attempts++
+                    visited++
                     if (attempt(row, peerId, pendingOnly = false)) sent++
                 }
                 // Only a completed pass starts the cooldown: cancellation or a
@@ -98,7 +100,7 @@ internal class PeerOutboxRetry(
             recordFailure()
             false
         }
-        if (delivered && row.status != MessageStatus.SENT.name) {
+        if (delivered == true && row.status != MessageStatus.SENT.name) {
             try {
                 // This guarded update cannot downgrade a delivery/read ACK.
                 markSent(row.id)
@@ -108,7 +110,7 @@ internal class PeerOutboxRetry(
                 recordFailure()
             }
         }
-        return delivered
+        return delivered == true
     }
 
     private fun begin(peerId: String): Boolean = synchronized(gate) {

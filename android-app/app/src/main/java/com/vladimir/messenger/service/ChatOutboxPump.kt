@@ -38,7 +38,7 @@ class ChatOutboxPump(
     private val chatRepository: ChatRepository,
     private val wakeLock: CoreWorkWakeLock? = null,
 ) {
-    private val unconfirmedOutbox = UnconfirmedOutboxPump(messageDao, chatDao, chatRepository::sendViaRust)
+    private val unconfirmedOutbox = UnconfirmedOutboxPump(messageDao, chatDao, chatRepository.automaticOutboxSender::send)
     private val custodyReconciler = RelayCustodyReconciler(RustBridge::relayCustodySnapshot, messageDao::terminalOutgoingIds)
     private var job: Job? = null
     private var unconfirmedJob: Job? = null

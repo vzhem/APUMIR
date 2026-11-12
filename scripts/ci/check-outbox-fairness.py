@@ -47,6 +47,10 @@ class OutboxFairnessContract(unittest.TestCase):
         self.assertIn("getRetryableOutgoingForPeer(peer, limit)", adapter)
         self.assertIn("loadCurrent = messages::getMessageById", adapter)
         self.assertIn("OutboxRecipient.forMessage(current, contact) != peerId", peer)
+        self.assertIn("QueuedOutboxPump(messageDao, chatDao, automaticOutboxSender::send)", repo)
+        self.assertIn("roomPeerOutboxRetry(messageDao, chatDao, automaticOutboxSender::send)", repo)
+        self.assertIn("automaticOutboxSender::send", self.text("service/ChatOutboxPump.kt"))
+        self.assertIn("ChatClearRegistry.isCleared(context, peer, id)", self.text("data/repository/RoomAutomaticOutboxSender.kt"))
         self.assertIn("c.contactId = :peerId", dao)
         self.assertIn("m.timestamp ASC, m.id ASC LIMIT :limit", dao)
         self.assertIn("PENDING_LIMIT = 20", peer)
@@ -69,7 +73,7 @@ class OutboxFairnessContract(unittest.TestCase):
         report = (ROOT / "scripts/ci/check-android-notification-results.py").read_text()
         self.assertIn("OutboxFairnessInstrumentedTest", runner)
         self.assertIn("OutboxFairnessInstrumentedTest", report)
-        for name in ("actualRoomQueueReachesLaterRecipientPastManyBlockedRows", "aBadOldestMessageDoesNotHideLaterMessagesInTheSameRoomChat", "growingRoomQueueEndsScanAndRetriesBlockedChat", "discoveryQueryIsContactScopedAndBoundedAcrossChats", "initialFailureCannotUndoConcurrentSuccessOrAck", "roomKeysetPaginationKeepsAllEqualTimestampIds", "unconfirmedPersonalTextRetriesSameIdAndStopsAfterRoomAck", "unconfirmedPumpSkipsGroupsDeferredMediaAndServicesAndRespectsMirror", "roomReconciliationRepairsCommittedAckAfterRestartWithoutTouchingOtherRows", "ackDuringLateNativeSendReconcilesTheNewlyRetainedCopy", "queuedPageRereadsAcknowledgedDeletedAndEditedRows", "queuedRetriesKeepSavedRecipientAndParseLegacyLinksWithoutUnsafeFallback", "discoveryRoomQueryAndRetryRespectSavedRecipientsAndLiveRows", "unconfirmedRoomRetriesLegacyRecipientInsteadOfChangedChat"):
+        for name in ("actualRoomQueueReachesLaterRecipientPastManyBlockedRows", "aBadOldestMessageDoesNotHideLaterMessagesInTheSameRoomChat", "growingRoomQueueEndsScanAndRetriesBlockedChat", "discoveryQueryIsContactScopedAndBoundedAcrossChats", "initialFailureCannotUndoConcurrentSuccessOrAck", "roomKeysetPaginationKeepsAllEqualTimestampIds", "unconfirmedPersonalTextRetriesSameIdAndStopsAfterRoomAck", "unconfirmedPumpSkipsGroupsDeferredMediaAndServicesAndRespectsMirror", "roomReconciliationRepairsCommittedAckAfterRestartWithoutTouchingOtherRows", "ackDuringLateNativeSendReconcilesTheNewlyRetainedCopy", "queuedPageRereadsAcknowledgedDeletedAndEditedRows", "queuedRetriesKeepSavedRecipientAndParseLegacyLinksWithoutUnsafeFallback", "discoveryRoomQueryAndRetryRespectSavedRecipientsAndLiveRows", "unconfirmedRoomRetriesLegacyRecipientInsteadOfChangedChat", "durableClearTombstonesSuppressAllAutomaticRetriesWithoutBlockingOtherRows", "failedClearPreflightSkipsOnlyThatRowAndNeverCountsAsNetwork", "cancelledClearPreflightPropagatesAndEachRetryCanResume"):
             self.assertIn(f"fun {name}(", test)
             self.assertIn(f'"{name}"', report)
 

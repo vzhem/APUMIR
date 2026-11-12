@@ -20,7 +20,7 @@ import kotlinx.coroutines.CancellationException
 internal class UnconfirmedOutboxPump(
     private val messages: MessageDao,
     private val chats: ChatDao,
-    private val send: suspend (String, String, String, String) -> Boolean,
+    private val send: suspend (String, String, String, String) -> Boolean?,
     private val mirrorIsActive: () -> Boolean = { MirrorHub.routeOutgoing() != null },
 ) {
     // A single older retry per turn leaves room for fresh sends on the same peer.

@@ -4,15 +4,19 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.vladimir.messenger.data.chatclear.ChatClearTombstones
 import com.vladimir.messenger.data.local.AppDatabase
 import com.vladimir.messenger.data.local.entity.ChatEntity
 import com.vladimir.messenger.data.local.entity.MessageEntity
 import com.vladimir.messenger.data.local.entity.GroupEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import java.io.File
+import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -451,6 +455,157 @@ class OutboxFairnessInstrumentedTest {
             var cycles = 0
             do { val progress = pump.pump(20); cycles++; assertTrue(cycles < 5) } while (progress.moreToScan)
             assertEquals(mapOf("m0" to "pk_original", "m1" to "pk_legacy", "m2" to "pk_changed"), sent)
+        } finally { db.close() }
+    }
+
+    @Test fun durableClearTombstonesSuppressAllAutomaticRetriesWithoutBlockingOtherRows() = runBlocking {
+        val file = File(context.noBackupFilesDir, "outbox-clear-${UUID.randomUUID()}.sqlite")
+        val tombstones = ChatClearTombstones(context, file)
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        try {
+            val chats = db.chatDao()
+            val messages = db.messageDao()
+            chats.insertChat(ChatEntity(id = "chat", contactId = "pk_peer", contactName = "Peer"))
+            chats.insertChat(ChatEntity(id = "moved", contactId = "pk_current", contactName = "Current"))
+            suspend fun add(id: String, time: Long, status: String, chat: String = "chat", peer: String = "pk_peer") {
+                messages.insertMessageIgnore(MessageEntity(
+                    id = id, chatId = chat, senderId = "self", content = "body", timestamp = time,
+                    isFromMe = true, status = status, recipientId = peer,
+                ))
+            }
+            add("blocked-pending", 1, "PENDING")
+            add("allowed-pending", 2, "PENDING")
+            add("blocked-sent", 3, "SENT")
+            add("allowed-sent", 4, "SENT")
+            add("moved", 5, "PENDING", "moved", "pk_original")
+            add("orphan", 6, "PENDING", "missing-chat", "pk_original")
+            assertTrue(tombstones.remember("owner", "pk_peer", listOf("blocked-pending", "blocked-sent")))
+            // Clear is scoped to the chat contact even when a moved row kept an older recipient.
+            assertTrue(tombstones.remember("owner", "pk_current", listOf("moved")))
+            assertTrue(tombstones.remember("other-owner", "pk_peer", listOf("allowed-pending")))
+            assertTrue(tombstones.remember("owner", "pk_other", listOf("allowed-sent")))
+            val sent = mutableListOf<String>()
+            val guard = AutomaticOutboxSender(
+                chatContact = { chats.getChatById(it)?.contactId },
+                isCleared = { peer, id -> tombstones.contains("owner", peer, id) },
+                transport = { id, _, _, _ -> sent += id; true },
+                recordFailure = { error("unexpected preflight failure") },
+            )
+            val progress = QueuedOutboxPump(messages, chats, guard::send).pump(20)
+            assertEquals(1, progress.attempted)
+            assertEquals(1, progress.sent)
+            assertFalse(progress.moreToScan)
+            assertEquals(listOf("allowed-pending"), sent)
+            assertEquals("PENDING", messages.getMessageById("blocked-pending")!!.status)
+            assertEquals("PENDING", messages.getMessageById("moved")!!.status)
+            assertEquals("PENDING", messages.getMessageById("orphan")!!.status)
+            sent.clear()
+            val retry = roomPeerOutboxRetry(messages, chats, guard::send) { error("unexpected error") }
+            assertEquals(2, retry.retry("pk_peer"))
+            assertEquals(setOf("allowed-pending", "allowed-sent"), sent.toSet())
+            sent.clear()
+            val unconfirmed = UnconfirmedOutboxPump(messages, chats, guard::send, { false })
+            var cycles = 0
+            do { val step = unconfirmed.pump(20); cycles++; assertTrue(cycles < 5) } while (step.moreToScan)
+            assertEquals(setOf("allowed-pending", "allowed-sent"), sent.toSet())
+            assertEquals("SENT", messages.getMessageById("blocked-sent")!!.status)
+        } finally {
+            db.close()
+            tombstones.close()
+            context.deleteDatabase(file.absolutePath)
+            listOf("-wal", "-shm", "-journal").forEach { File(file.absolutePath + it).delete() }
+        }
+    }
+
+    @Test fun failedClearPreflightSkipsOnlyThatRowAndNeverCountsAsNetwork() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        try {
+            val chats = db.chatDao()
+            val messages = db.messageDao()
+            chats.insertChat(ChatEntity(id = "chat", contactId = "pk_peer", contactName = "Peer"))
+            suspend fun add(id: String, time: Long, status: String) {
+                messages.insertMessageIgnore(MessageEntity(
+                    id = id, chatId = "chat", senderId = "self", content = "body", timestamp = time,
+                    isFromMe = true, status = status, recipientId = "pk_peer",
+                ))
+            }
+            add("error-pending", 1, "PENDING")
+            add("allowed-pending", 2, "PENDING")
+            add("error-sent", 3, "SENT")
+            add("allowed-sent", 4, "SENT")
+            val sent = mutableListOf<String>()
+            var errors = 0
+            val guard = AutomaticOutboxSender(
+                chatContact = { chats.getChatById(it)?.contactId },
+                isCleared = { _, id -> if (id.startsWith("error-")) error("storage unavailable") else false },
+                transport = { id, _, _, _ -> sent += id; true },
+                recordFailure = { errors++ },
+            )
+            val progress = QueuedOutboxPump(messages, chats, guard::send).pump(20)
+            assertEquals(1, progress.attempted)
+            assertEquals(1, progress.sent)
+            assertFalse(progress.moreToScan)
+            assertEquals(listOf("allowed-pending"), sent)
+            assertEquals(1, errors)
+            sent.clear()
+            val retry = roomPeerOutboxRetry(messages, chats, guard::send) { error("unexpected retry error") }
+            assertEquals(2, retry.retry("pk_peer"))
+            assertEquals(setOf("allowed-pending", "allowed-sent"), sent.toSet())
+            assertEquals(3, errors)
+            sent.clear()
+            val unconfirmed = UnconfirmedOutboxPump(messages, chats, guard::send, { false })
+            var attempts = 0
+            var cycles = 0
+            do {
+                val step = unconfirmed.pump(20)
+                attempts += step.attempted
+                cycles++
+                assertTrue(cycles < 5)
+            } while (step.moreToScan)
+            assertEquals(2, attempts)
+            assertEquals(setOf("allowed-pending", "allowed-sent"), sent.toSet())
+            assertEquals(4, errors)
+            assertEquals("PENDING", messages.getMessageById("error-pending")!!.status)
+            assertEquals("SENT", messages.getMessageById("error-sent")!!.status)
+        } finally { db.close() }
+    }
+
+    @Test fun cancelledClearPreflightPropagatesAndEachRetryCanResume() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        try {
+            val chats = db.chatDao()
+            val messages = db.messageDao()
+            chats.insertChat(ChatEntity(id = "chat", contactId = "pk_peer", contactName = "Peer"))
+            messages.insertMessageIgnore(MessageEntity(
+                id = "message", chatId = "chat", senderId = "self", content = "body", timestamp = 1,
+                isFromMe = true, status = "PENDING", recipientId = "pk_peer",
+            ))
+            var cancel = true
+            var sent = 0
+            val guard = AutomaticOutboxSender(
+                chatContact = { if (cancel) throw CancellationException("cancel") else chats.getChatById(it)?.contactId },
+                isCleared = { _, _ -> false }, transport = { _, _, _, _ -> sent++; true },
+                recordFailure = { error("cancellation must not be reported as a failure") },
+            )
+            val queued = QueuedOutboxPump(messages, chats, guard::send)
+            assertTrue(runCatching { queued.pump(20) }.exceptionOrNull() is CancellationException)
+            assertEquals(0, sent)
+            assertEquals("PENDING", messages.getMessageById("message")!!.status)
+            cancel = false
+            assertEquals(1, queued.pump(20).sent)
+            val retry = roomPeerOutboxRetry(messages, chats, guard::send) { error("unexpected retry error") }
+            cancel = true
+            assertTrue(runCatching { retry.retry("pk_peer") }.exceptionOrNull() is CancellationException)
+            assertEquals(1, sent)
+            cancel = false
+            assertEquals(1, retry.retry("pk_peer"))
+            val unconfirmed = UnconfirmedOutboxPump(messages, chats, guard::send, { false })
+            cancel = true
+            assertTrue(runCatching { unconfirmed.pump(20) }.exceptionOrNull() is CancellationException)
+            assertEquals(2, sent)
+            cancel = false
+            assertEquals(1, unconfirmed.pump(20).sent)
+            assertEquals(3, sent)
         } finally { db.close() }
     }
 

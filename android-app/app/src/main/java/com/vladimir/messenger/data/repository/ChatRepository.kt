@@ -479,12 +479,12 @@ class ChatRepository @Inject constructor(
         return Result.success(updated.toDomain())
     }
 
+    internal val automaticOutboxSender by lazy { roomAutomaticOutboxSender(context, chatDao, ::sendViaRust) }
     /** Fair, bounded traversal continues past unavailable destinations. */
-    private val queuedOutbox by lazy { QueuedOutboxPump(messageDao, chatDao, ::sendViaRust) }
+    private val queuedOutbox by lazy { QueuedOutboxPump(messageDao, chatDao, automaticOutboxSender::send) }
     internal suspend fun pumpQueuedOffline(limit: Int = 20): OutboxProgress = queuedOutbox.pump(limit)
-
     private val peerOutbox by lazy {
-        roomPeerOutboxRetry(messageDao, chatDao, ::sendViaRust) { Log.w(TAG, "Peer outbox retry failed") }
+        roomPeerOutboxRetry(messageDao, chatDao, automaticOutboxSender::send)
     }
 
     suspend fun retryPendingMessagesForPeer(peerId: String): Int = peerOutbox.retry(peerId)

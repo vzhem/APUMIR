@@ -53,6 +53,9 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "queuedRetriesKeepSavedRecipientAndParseLegacyLinksWithoutUnsafeFallback",
     "discoveryRoomQueryAndRetryRespectSavedRecipientsAndLiveRows",
     "unconfirmedRoomRetriesLegacyRecipientInsteadOfChangedChat",
+    "durableClearTombstonesSuppressAllAutomaticRetriesWithoutBlockingOtherRows",
+    "failedClearPreflightSkipsOnlyThatRowAndNeverCountsAsNetwork",
+    "cancelledClearPreflightPropagatesAndEachRetryCanResume",
 }, PUSH_CLASS: {
     "encryptedStateSurvivesCloseAndReopenAndRejectsRollback",
     "unsealedWrongPinWrongNodeAndWrongTargetNeverCreateState",

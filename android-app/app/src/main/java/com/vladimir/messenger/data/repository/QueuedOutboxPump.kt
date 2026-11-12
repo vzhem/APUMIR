@@ -13,7 +13,7 @@ import kotlinx.coroutines.CancellationException
 internal class QueuedOutboxPump(
     private val messages: MessageDao,
     private val chats: ChatDao,
-    private val send: suspend (String, String, String, String) -> Boolean,
+    private val send: suspend (String, String, String, String) -> Boolean?,
 ) {
     private val scan = FairOutboxScan<MessageEntity>()
 
@@ -45,7 +45,7 @@ internal class QueuedOutboxPump(
                             row.id, row.chatId, peer,
                             TextColorWire.wrap(row.content, row.textColor, row.senderNameColor),
                         )
-                        if (delivered) {
+                        if (delivered == true) {
                             // An ACK may have arrived while send was in progress.
                             messages.updateOutgoingRetryResult(row.id, MessageStatus.SENT.name, MessageChannel.LOCAL.name)
                         }
