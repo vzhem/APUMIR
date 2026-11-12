@@ -6,6 +6,7 @@ from pathlib import Path
 
 CLASS = "com.vladimir.messenger.data.notification.NotificationArrivalInstrumentedTest"
 INCOMING_CLASS = "com.vladimir.messenger.data.repository.IncomingMessageStoreInstrumentedTest"
+MIRROR_OUTGOING_CLASS = "com.vladimir.messenger.data.repository.MirrorOutgoingStoreInstrumentedTest"
 OUTBOX_CLASS = "com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest"
 CLEAR_LOOKUP_CLASS = "com.vladimir.messenger.data.chatclear.ChatClearTombstonesInstrumentedTest"
 PUSH_CLASS = "com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest"
@@ -39,6 +40,18 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "clearAfterAnOldCheckEventuallyRemovesTheCommittedRowAndMetadata",
     "sqliteFailureRollsBackEverythingAndTheSameIdCanBeRetried",
     "cancellationRollsBackAndNonAlertingServiceRowsKeepTheirPolicy",
+}, MIRROR_OUTGOING_CLASS: {
+    "replayedPartnerFramesNeverReplaceDeliveredRows",
+    "concurrentFirstFramesHaveExactlyOneInsertionAcrossReopen",
+    "idCollisionsCannotTouchAnotherChatOrIncomingRow",
+    "peerScopedClearBlocksAllMirrorPathsWithoutTouchingOtherPeers",
+    "missingOrChangedChatAndMalformedRecipientFailClosed",
+    "clearDuringInsertionRemovesOnlyTheNewRowAndLeavesNoPreview",
+    "retryRequiresSameScopeBodyAndCurrentNonterminalStatus",
+    "missingManualRetryIsDurableButClearedIdsAreNotRecreated",
+    "echoIsScopedAndNeverDowngradesSentOrDeliveryReceipt",
+    "storageFailureAndCancellationRollbackInsertedRowAndPreview",
+    "echoNeverDeletesAnIgnoredConflictingRowWhenClearArrives",
 }, OUTBOX_CLASS: {
     "actualRoomQueueReachesLaterRecipientPastManyBlockedRows",
     "aBadOldestMessageDoesNotHideLaterMessagesInTheSameRoomChat",

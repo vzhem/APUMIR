@@ -44,6 +44,9 @@ class ChatRepository @Inject constructor(
     private val database: com.vladimir.messenger.data.local.AppDatabase,
 ) {
     private val incomingMessageStore = IncomingMessageStore(database)
+    private val mirrorOutgoingStore = MirrorOutgoingStore(database) { peer, id ->
+        com.vladimir.messenger.data.chatclear.ChatClearRegistry.isCleared(context, peer, id)
+    }
     companion object {
         /** р249: ключ кадра флагов - личный чат (узел собеседника). */
         const val CHAT_FLAG_PERSONAL = "p"
@@ -152,7 +155,7 @@ class ChatRepository @Inject constructor(
         reply: DirectReplyWire.Target? = null,
         /** р226: чужая строка идёт с СОБСТВЕННЫМ id - одинаковые id на обоих устройствах. */
         fixedMessageId: String? = null,
-        /** р226: true - строка пришла от зеркала-партнёра, эхо назад не слать. */
+        /** Строка партнёра: не перенаправлять обратно, но отразить текущий статус. */
         fromMirror: Boolean = false,
     ): Result<Message> {
         return try {
@@ -250,16 +253,30 @@ class ChatRepository @Inject constructor(
                 textColor = textColor,
                 senderNameColor = senderNameColor,
             )
-            messageDao.insertMessage(entity)
+            val preview = com.vladimir.messenger.util.ChatPreviews.human(content) ?: content
+            if (fromMirror) {
+                when (val stage = mirrorOutgoingStore.stageNew(entity, recipientId, preview)) {
+                    MirrorStage.Inserted -> Unit
+                    is MirrorStage.Existing -> {
+                        mirrorEcho.publish(messageId, chatId, actualRecipientId)
+                        return Result.success(stage.message.toDomain())
+                    }
+                    MirrorStage.Rejected -> return Result.failure(IllegalStateException("Mirror outgoing row rejected"))
+                }
+            } else {
+                messageDao.insertMessage(entity)
+                chatDao.updateLastMessage(chatId, preview, timestamp)
+            }
             OperationalDiagnostics.tracker.persisted(messageId)
-            chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
 
             // ШАГ 3: Rust owns direct QUIC and the bounded persistent MQTT/mesh offline path.
             val sentDirectly = if (actualRecipientId.isNotBlank()) {
                 Log.i(TAG, "🚀 SENDING via Rust: messageId=$messageId recipient=$actualRecipientId")
                 // В IO: вызов ядра блокирующий (QUIC до 10 с), а сюда приходят
                 // из viewModelScope, то есть с главного потока.
-                sendViaRust(messageId, chatId, actualRecipientId, wireContent)
+                if (fromMirror) automaticOutboxSender.send(messageId, chatId, actualRecipientId, wireContent)
+                    ?: return Result.failure(IllegalStateException("Mirror send suppressed"))
+                else sendViaRust(messageId, chatId, actualRecipientId, wireContent)
             } else {
                 Log.w(TAG, "❌ sendMessage: recipient id is blank for chatId=$chatId")
                 false
@@ -294,25 +311,9 @@ class ChatRepository @Inject constructor(
                 }
             }
 
-            // р226: отразить отправленное на зеркале второго устройства.
-            if (!fromMirror) {
-                MirrorHub.publishSentEcho(
-                    id = messageId,
-                    chatId = chatId,
-                    content = content,
-                    ts = timestamp,
-                    recipientId = actualRecipientId,
-                    // A concurrent retry or ACK may have advanced the row while
-                    // the original send was in flight; mirror the stored state.
-                    status = messageDao.getMessageById(messageId)?.status
-                        ?: if (sentDirectly) MessageStatus.SENT.name else MessageStatus.QUEUED_OFFLINE.name,
-                    replyToId = reply?.messageId.orEmpty(),
-                    replyAuthor = reply?.author.orEmpty(),
-                    replyText = reply?.let { DirectReplyWire.preview(it.text) }.orEmpty(),
-                    textColor = textColor,
-                    senderNameColor = senderNameColor,
-                )
-            }
+            // The shadow needs the active phone's current status too; this
+            // echo is not a second send and cannot recreate a deleted row here.
+            mirrorEcho.publish(messageId, chatId, actualRecipientId)
 
             // Реферальная атрибуция: если контакт добавлен по пригласительной
             // ссылке, пригласившему уходит отдельный служебный конверт (один раз
@@ -340,6 +341,8 @@ class ChatRepository @Inject constructor(
                     .onFailure { Log.w(TAG, "direct reply metadata send failed: ${it.message}") }
             }
             Result.success(entity.toDomain())
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             Log.e(TAG, "sendMessage error", e)
             // Только вид ошибки: текст исключения может нести идентификаторы
@@ -353,62 +356,42 @@ class ChatRepository @Inject constructor(
     /** Explicit user retry for an outgoing text message; keeps the original ID. */
     suspend fun retryOutgoingMessage(messageId: String): Result<Message> {
         val row = messageDao.getMessageById(messageId)
-            ?: return Result.failure(IllegalArgumentException("Исходящее сообщение не найдено"))
+            ?: return Result.failure(IllegalArgumentException(context.getString(com.vladimir.messenger.R.string.cdv_retry_message_unavailable)))
         return retryOutgoingEntity(row, fromMirror = false)
     }
 
     /** Active phone receives a manual retry request from its paired mirror. */
     suspend fun retryOutgoingFromMirror(row: MirrorRow, localChatId: String): Result<Message> {
-        val existing = messageDao.getMessageById(row.id)
-        val entity = existing ?: MessageEntity(
-            id = row.id,
-            chatId = localChatId,
-            senderId = "self",
-            content = row.content,
-            timestamp = row.timestamp,
-            isFromMe = true,
-            status = row.status,
-            channel = MessageChannel.UNKNOWN.name,
-            recipientId = row.recipientId,
-            replyToId = row.replyToId.takeIf { it.isNotBlank() },
-            replyAuthor = row.replyAuthor,
-            replyText = row.replyText,
-            textColor = row.textColor,
-            senderNameColor = row.senderNameColor,
-        ).also { messageDao.insertMessageIgnore(it) }
-        if (!entity.isFromMe) {
-            return Result.failure(IllegalArgumentException("Нельзя повторить входящее сообщение"))
-        }
-        return retryOutgoingEntity(entity.copy(chatId = localChatId), fromMirror = true)
+        if (!row.mine) return Result.failure(IllegalArgumentException("Mirror outgoing row is not ours"))
+        val candidate = MessageEntity(
+            id = row.id, chatId = localChatId, senderId = "self", content = row.content,
+            timestamp = row.timestamp, isFromMe = true, status = row.status,
+            channel = MessageChannel.UNKNOWN.name, recipientId = row.recipientId,
+            replyToId = row.replyToId.takeIf { it.isNotBlank() }, replyAuthor = row.replyAuthor,
+            replyText = row.replyText, textColor = row.textColor, senderNameColor = row.senderNameColor,
+        )
+        val entity = mirrorOutgoingStore.prepareRetry(candidate, row.recipientId)
+            ?: return Result.failure(IllegalStateException("Mirror retry rejected"))
+        return retryOutgoingEntity(entity, fromMirror = true)
     }
 
     private suspend fun retryOutgoingEntity(
-        original: MessageEntity,
+        snapshot: MessageEntity,
         fromMirror: Boolean,
     ): Result<Message> {
-        if (!original.isFromMe) {
-            return Result.failure(IllegalArgumentException("Нельзя повторить входящее сообщение"))
-        }
-        if (original.status in setOf(
-                MessageStatus.DELIVERED.name,
-                MessageStatus.READ.name,
-                MessageStatus.LOCAL_FILE.name,
-                MessageStatus.FILE_EXPIRED.name,
+        val original = messageDao.getMessageById(snapshot.id)
+            ?.takeIf { it.isFromMe && it.chatId == snapshot.chatId && it.recipientId == snapshot.recipientId &&
+                (!fromMirror || it.content == snapshot.content) }
+            ?: return Result.failure(IllegalStateException(context.getString(com.vladimir.messenger.R.string.cdv_retry_message_unavailable)))
+        if (original.status !in setOf(
+                MessageStatus.PENDING.name, MessageStatus.QUEUED_OFFLINE.name,
+                MessageStatus.SENT.name, MessageStatus.FAILED.name,
             )
-        ) {
-            return Result.failure(IllegalStateException("Это сообщение нельзя повторить этим способом"))
-        }
-
+        ) return Result.failure(IllegalStateException(context.getString(com.vladimir.messenger.R.string.cdv_retry_message_unsupported)))
         val chat = chatDao.getChatById(original.chatId)
-        val rawRecipient = original.recipientId.ifBlank { chat?.contactId.orEmpty() }
-        val recipientId = when {
-            rawRecipient.startsWith("pk_") -> rawRecipient
-            rawRecipient.contains("node=pk_") ->
-                "pk_" + rawRecipient.substringAfter("node=pk_").substringBefore("&")
-            else -> rawRecipient
-        }
-        if (recipientId.isBlank()) {
-            return Result.failure(IllegalStateException("У сообщения не найден адресат"))
+        val recipientId = OutboxRecipient.forMessage(original, chat?.contactId)
+        if (!recipientId.startsWith("pk_") || !automaticOutboxSender.preflight(original.id, original.chatId, recipientId)) {
+            return Result.failure(IllegalStateException(context.getString(com.vladimir.messenger.R.string.cdv_retry_message_blocked)))
         }
 
         // Теневой телефон не обновляет TTL локальной first-wins очереди:
@@ -446,12 +429,12 @@ class ChatRepository @Inject constructor(
             }
         }
 
-        val sentDirectly = sendViaRustRetry(
+        val sentDirectly = manualOutboxSender.send(
             original.id,
             original.chatId,
             recipientId,
             TextColorWire.wrap(original.content, original.textColor, original.senderNameColor),
-        )
+        ) ?: return Result.failure(IllegalStateException(context.getString(com.vladimir.messenger.R.string.cdv_retry_message_blocked)))
         val nextStatus = if (sentDirectly) MessageStatus.SENT else MessageStatus.QUEUED_OFFLINE
         val nextChannel = if (sentDirectly) MessageChannel.LOCAL else MessageChannel.STORE_FORWARD
         messageDao.updateOutgoingRetryResult(original.id, nextStatus.name, nextChannel.name)
@@ -463,23 +446,13 @@ class ChatRepository @Inject constructor(
         }
         // Return the delivery/READ status if an ACK raced this retry.
         val updated = messageDao.getMessageById(original.id) ?: original
-        MirrorHub.publishSentEcho(
-            id = original.id,
-            chatId = original.chatId,
-            content = original.content,
-            ts = original.timestamp,
-            recipientId = recipientId,
-            status = updated.status,
-            replyToId = original.replyToId.orEmpty(),
-            replyAuthor = original.replyAuthor,
-            replyText = original.replyText,
-            textColor = original.textColor,
-            senderNameColor = original.senderNameColor,
-        )
+        mirrorEcho.publish(original.id, original.chatId, recipientId)
         return Result.success(updated.toDomain())
     }
 
     internal val automaticOutboxSender by lazy { roomAutomaticOutboxSender(context, chatDao, ::sendViaRust) }
+    private val manualOutboxSender by lazy { roomAutomaticOutboxSender(context, chatDao, ::sendViaRustRetry) }
+    private val mirrorEcho by lazy { roomMirrorOutgoingEcho(messageDao, automaticOutboxSender) }
     /** Fair, bounded traversal continues past unavailable destinations. */
     private val queuedOutbox by lazy { QueuedOutboxPump(messageDao, chatDao, automaticOutboxSender::send) }
     internal suspend fun pumpQueuedOffline(limit: Int = 20): OutboxProgress = queuedOutbox.pump(limit)
@@ -571,7 +544,7 @@ class ChatRepository @Inject constructor(
 
     /** Отправленное с зеркала (эхо или доган): своя строка «отправлено». */
     suspend fun applyMirrorSent(row: MirrorRow) {
-        if (com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context,
+        if (!row.mine || row.id.isBlank() || '\u0000' in row.id || com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context,
                 com.vladimir.messenger.data.schedule.DeferredInboxStore.owner(context), row.id)) return
         // Служебный пакет не показываем и как своё сообщение. Если он всё же
         // попал в журнал зеркала, ACK по-прежнему обновляет исходящую строку.
@@ -586,46 +559,21 @@ class ChatRepository @Inject constructor(
             val entity = chatDao.getChatById(row.chatId) ?: return
             Chat(id = entity.id, contactId = entity.contactId, contactName = entity.contactName)
         }
-        if (com.vladimir.messenger.data.chatclear.ChatClearRegistry.isCleared(context, chat.contactId, row.id)) return
         val mirrorStatus = when (row.status) {
-            MessageStatus.SENT.name,
-            MessageStatus.QUEUED_OFFLINE.name,
-            MessageStatus.PENDING.name,
-            MessageStatus.LOCAL_FILE.name,
-            MessageStatus.FILE_EXPIRED.name -> row.status
+            MessageStatus.SENT.name, MessageStatus.QUEUED_OFFLINE.name, MessageStatus.PENDING.name,
+            MessageStatus.LOCAL_FILE.name, MessageStatus.FILE_EXPIRED.name -> row.status
             else -> MessageStatus.SENT.name
         }
-        if (messageDao.messageExists(row.id)) {
-            if (getMessageById(row.id)?.isFromMe == true) {
-                // Mirror echoes are transport state, not authority to downgrade
-                // DELIVERED/READ after a receipt raced the echo.
-                messageDao.updateOutgoingRetryResult(
-                    row.id,
-                    mirrorStatus,
-                    MessageChannel.LOCAL.name,
-                )
-            }
-            return
-        }
-        messageDao.insertMessageIgnore(
+        mirrorOutgoingStore.applyEcho(
             MessageEntity(
-                id = row.id,
-                chatId = chat.id,
-                senderId = "self",
-                content = row.content,
-                timestamp = row.timestamp,
-                isFromMe = true,
-                status = mirrorStatus,
-                channel = MessageChannel.LOCAL.name,
-                recipientId = row.recipientId,
-                textColor = row.textColor,
-                senderNameColor = row.senderNameColor,
-            )
+                id = row.id, chatId = chat.id, senderId = "self", content = row.content, timestamp = row.timestamp,
+                isFromMe = true, status = mirrorStatus, channel = MessageChannel.LOCAL.name, recipientId = row.recipientId,
+                replyToId = row.replyToId.takeIf { it.isNotBlank() }, replyAuthor = row.replyAuthor, replyText = row.replyText,
+                textColor = row.textColor, senderNameColor = row.senderNameColor,
+            ),
+            chat.contactId,
+            com.vladimir.messenger.util.ChatPreviews.human(row.content) ?: row.content,
         )
-        if (com.vladimir.messenger.data.chatclear.ChatClearRegistry.isCleared(context, chat.contactId, row.id)) {
-            messageDao.deleteByIdAndChat(row.id, chat.id); return
-        }
-        chatDao.updateLastMessage(chat.id, com.vladimir.messenger.util.ChatPreviews.human(row.content) ?: row.content, row.timestamp)
     }
 
     suspend fun scheduledRecipient(chatId: String): String? {

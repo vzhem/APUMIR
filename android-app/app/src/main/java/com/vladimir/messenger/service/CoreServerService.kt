@@ -1617,33 +1617,7 @@ class CoreServerService : Service() {
             com.vladimir.messenger.data.mirror.MirrorAccountSnapshot.applyRows(applicationContext, appDatabase, rows)
 
         override suspend fun onOutgoingFromPartner(row: com.vladimir.messenger.data.mirror.MirrorRow) {
-            // id чатов на устройствах разные - ищем чат по узлу получателя.
-            val chat = chatRepository.getChatByContactId(row.recipientId)
-                ?: chatRepository.getOrCreateChat(
-                    row.recipientId,
-                    NodeIds.autoName(row.recipientId),
-                )
-            if (row.manualRetry) {
-                chatRepository.retryOutgoingFromMirror(
-                    row = row,
-                    localChatId = chat.id,
-                )
-            } else {
-                chatRepository.sendMessage(
-                    chatId = chat.id,
-                    recipientId = row.recipientId,
-                    content = row.content,
-                    fixedMessageId = row.id,
-                    fromMirror = true,
-                    reply = row.replyToId.takeIf { it.isNotBlank() }?.let {
-                        com.vladimir.messenger.data.reply.DirectReplyWire.Target(
-                            messageId = it,
-                            author = row.replyAuthor,
-                            text = row.replyText,
-                        )
-                    },
-                )
-            }
+            com.vladimir.messenger.data.repository.dispatchMirrorOutgoing(applicationContext, chatRepository, row)
         }
 
         override fun onPromote() {

@@ -76,6 +76,41 @@ class OutboxFairnessContract(unittest.TestCase):
                      "lookupWaitsForAConcurrentFirstTombstoneTransaction"):
             self.assertIn(f'"{case}"', report)
 
+    def test_paired_outgoing_is_staged_and_scoped_without_replacing_a_row(self):
+        repo = self.text("data/repository/ChatRepository.kt")
+        store = self.text("data/repository/MirrorOutgoingStore.kt")
+        dispatch = self.text("data/repository/MirrorOutgoingDispatch.kt")
+        echo = self.text("data/repository/MirrorOutgoingEcho.kt")
+        service = self.text("service/CoreServerService.kt")
+        self.assertIn("dispatchMirrorOutgoing(applicationContext, chatRepository, row)", service)
+        self.assertIn("MirrorOutgoingPolicy.accepts(row)", dispatch)
+        self.assertIn("mirrorOutgoingStore.stageNew(entity, recipientId, preview)", repo)
+        self.assertIn("mirrorOutgoingStore.prepareRetry(candidate, row.recipientId)", repo)
+        self.assertIn("mirrorOutgoingStore.applyEcho(", repo)
+        echo_section = repo.split("suspend fun applyMirrorSent(", 1)[1].split("suspend fun scheduledRecipient(", 1)[0]
+        self.assertIn("!row.mine || row.id.isBlank()", echo_section)
+        self.assertIn("manualOutboxSender.send(", repo)
+        self.assertIn("mirrorEcho.publish(messageId, chatId, actualRecipientId)", repo)
+        self.assertIn("messages.insertMessageIgnore(", store)
+        self.assertNotIn("messages.insertMessage(", store)
+        self.assertIn("current.chatId == candidate.chatId", store)
+        self.assertIn("current.content == candidate.content", store)
+        self.assertIn("deleteByIdChatAndSender", store)
+        self.assertIn("guard::preflight", echo)
+        test = (ROOT / "android-app/app/src/androidTest/java/com/vladimir/messenger/data/repository/MirrorOutgoingStoreInstrumentedTest.kt").read_text()
+        runner = (ROOT / "scripts/ci/run-android-navigation-tests.sh").read_text()
+        report = (ROOT / "scripts/ci/check-android-notification-results.py").read_text()
+        self.assertIn("MirrorOutgoingStoreInstrumentedTest", runner)
+        self.assertIn("MirrorOutgoingStoreInstrumentedTest", report)
+        for case in ("replayedPartnerFramesNeverReplaceDeliveredRows", "concurrentFirstFramesHaveExactlyOneInsertionAcrossReopen",
+                     "idCollisionsCannotTouchAnotherChatOrIncomingRow", "peerScopedClearBlocksAllMirrorPathsWithoutTouchingOtherPeers",
+                     "missingOrChangedChatAndMalformedRecipientFailClosed", "clearDuringInsertionRemovesOnlyTheNewRowAndLeavesNoPreview",
+                     "retryRequiresSameScopeBodyAndCurrentNonterminalStatus",
+                     "missingManualRetryIsDurableButClearedIdsAreNotRecreated", "echoIsScopedAndNeverDowngradesSentOrDeliveryReceipt",
+                     "storageFailureAndCancellationRollbackInsertedRowAndPreview", "echoNeverDeletesAnIgnoredConflictingRowWhenClearArrives"):
+            self.assertIn(f"fun {case}(", test)
+            self.assertIn(f'"{case}"', report)
+
     def test_unfinished_scan_does_not_wait_for_failure_backoff(self):
         cadence = self.text("service/DeliveryCadence.kt")
         pump = self.text("service/ChatOutboxPump.kt")

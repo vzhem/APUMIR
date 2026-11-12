@@ -91,6 +91,19 @@ class AutomaticOutboxSenderTest {
         assertFalse(sent)
     }
 
+    @Test fun preflightAloneNeverCallsTransportAndStillFailsClosed() = runBlocking {
+        var sends = 0
+        var cleared = false
+        val guard = AutomaticOutboxSender(
+            chatContact = { "pk_peer" }, isCleared = { _, _ -> cleared },
+            transport = { _, _, _, _ -> sends++; true }, recordFailure = ::unexpected,
+        )
+        assertTrue(guard.preflight("id", "chat", "pk_peer"))
+        cleared = true
+        assertFalse(guard.preflight("id", "chat", "pk_peer"))
+        assertEquals(0, sends)
+    }
+
     @Test fun transportFailureStillBelongsToTheCaller() = runBlocking {
         val guard = AutomaticOutboxSender(
             chatContact = { "pk_peer" }, isCleared = { _, _ -> false },

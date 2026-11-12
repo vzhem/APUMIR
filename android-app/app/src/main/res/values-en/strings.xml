@@ -1736,6 +1736,9 @@
     <string name="cdv_request_sent">Request sent: %1$s</string>
     <string name="cdv_join_failed">Couldn’t join: %1$s</string>
     <string name="cdv_retry_failed">Couldn’t resend: %1$s</string>
+    <string name="cdv_retry_message_unavailable">The outgoing message is no longer available</string>
+    <string name="cdv_retry_message_unsupported">This message cannot be resent this way</string>
+    <string name="cdv_retry_message_blocked">Resending this message is unavailable</string>
     <string name="gif_server_busy">The server is overloaded — showing saved GIFs.</string>
     <string name="cdv_downloading_from">Downloading from %1$s — will send now</string>
     <string name="cdv_asked_by">Requested by: %1$s</string>

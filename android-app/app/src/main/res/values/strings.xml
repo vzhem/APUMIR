@@ -1859,6 +1859,9 @@
     <string name="cdv_request_sent">Заявка отправлена: %1$s</string>
     <string name="cdv_join_failed">Не удалось войти: %1$s</string>
     <string name="cdv_retry_failed">Повторить отправку не удалось: %1$s</string>
+    <string name="cdv_retry_message_unavailable">Исходящее сообщение больше недоступно</string>
+    <string name="cdv_retry_message_unsupported">Это сообщение нельзя повторить этим способом</string>
+    <string name="cdv_retry_message_blocked">Повтор исходящего сообщения недоступен</string>
     <string name="gif_server_busy">Сервер перегружен — показываю сохранённые гифки.</string>
     <string name="cdv_downloading_from">Качается с %1$s - сейчас отправим</string>
     <string name="cdv_asked_by">Просили: %1$s</string>

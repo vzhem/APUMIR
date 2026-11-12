@@ -16,22 +16,27 @@ internal class AutomaticOutboxSender(
     private val transport: suspend (String, String, String, String) -> Boolean,
     private val recordFailure: (Exception) -> Unit,
 ) {
-    suspend fun send(messageId: String, chatId: String, peer: String, content: String): Boolean? {
+    suspend fun preflight(messageId: String, chatId: String, peer: String): Boolean {
         try {
-            if (peer.isNotBlank() && isCleared(peer, messageId)) return null
+            if (peer.isNotBlank() && isCleared(peer, messageId)) return false
             // A clear is recorded against the chat's contact, which may differ
             // from the saved recipient after a history move or contact change.
             // If the chat disappeared, its clear scope cannot be checked safely.
-            val contact = chatContact(chatId) ?: return null
-            if (contact.isNotBlank() && contact != peer && isCleared(contact, messageId)) return null
+            val contact = chatContact(chatId) ?: return false
+            if (contact.isNotBlank() && contact != peer && isCleared(contact, messageId)) return false
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
             recordFailure(error)
             // No network attempt took place. Let the scan visit later rows and
             // retry this one in a future pass instead of blocking its chat.
-            return null
+            return false
         }
+        return true
+    }
+
+    suspend fun send(messageId: String, chatId: String, peer: String, content: String): Boolean? {
+        if (!preflight(messageId, chatId, peer)) return null
         // Transport errors belong to the caller's normal network handling.
         return transport(messageId, chatId, peer, content)
     }
