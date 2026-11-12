@@ -46,6 +46,7 @@ packs_script = load_module("make_feature_packs", ROOT / "scripts/release/make-fe
 chunked = load_module("chunked_upload", ROOT / "scripts/release/chunked_upload.py")
 ftp_upload = load_module("ftp_upload", ROOT / "scripts/release/ftp_upload.py")
 ftp_cleanup = load_module("ftp_cleanup", ROOT / "scripts/release/ftp_cleanup.py")
+site_inputs = load_module("site_release_files", ROOT / "scripts/release/site_release_files.py")
 
 
 class CatalogParityTest(unittest.TestCase):
@@ -91,16 +92,14 @@ class ReleasePipelineTest(unittest.TestCase):
         self.assertIn("types: [published]", workflow)
         for secret in ("APU_UCOZ_FTP_HOST", "APU_UCOZ_FTP_USER", "APU_UCOZ_FTP_PASSWORD"):
             self.assertIn(secret, workflow)
-        # Манифесты уходят после файлов, которые они описывают: порядок
-        # аргументов кусковой загрузки — zip-ы, манифест пакетов, APK, latest.
-        upload_block = workflow.split("--ftp-create-dirs", 1)[1]
-        order = [
-            upload_block.index("feature-pack-*.zip"),
-            upload_block.index("site-files/feature-packs.json"),
-            upload_block.index("site-files/app-release.apk"),
-            upload_block.index("site-files/latest.json"),
-        ]
-        self.assertEqual(order, sorted(order))
+        # Each file is staged separately; metadata pointers follow their data.
+        self.assertEqual(len(site_inputs.PACK_NAMES), 9)
+        self.assertEqual(site_inputs.SITE_NAMES[-3:], ("feature-packs.json", "app-release.apk", "latest.json"))
+        self.assertEqual(site_inputs.SITE_NAMES[:9], site_inputs.PACK_NAMES)
+        self.assertIn("site_staged_upload.py", workflow)
+        self.assertIn("site_verify_http.py", workflow)
+        self.assertIn("test_site_staged_upload.py", workflow)
+        self.assertIn("Require the published Latest release", workflow)
         # REST-канал кусками для больших файлов подключён, но не обязателен.
         self.assertIn("chunked_upload.py", workflow)
         self.assertIn("APU_UPLOAD_REST_BASE", workflow)
@@ -108,9 +107,9 @@ class ReleasePipelineTest(unittest.TestCase):
         self.assertIn("make-feature-packs.py site-files/app-release.apk", workflow)
         # Система кусков обязана доказывать работоспособность в каждом запуске.
         self.assertIn("chunked_upload.py --self-test", workflow)
-        # Загрузка на сайт — простой curl по маленьким файлам лёгкой базы
-        # в /downloads; кусковые системы остаются для больших файлов.
-        self.assertIn('REMOTE_DIR="${APU_FTP_REMOTE_DIR:-/downloads}"', workflow)
+        # Empty remote directory defaults to /downloads; big REST transfers
+        # retain their owner-requested pauses.
+        self.assertIn('APU_FTP_REMOTE_DIR: ${{ vars.APU_UCOZ_FTP_REMOTE_DIR }}', workflow)
         self.assertIn('APU_UPLOAD_DELAY_SECONDS: "300"', workflow)
 
 
