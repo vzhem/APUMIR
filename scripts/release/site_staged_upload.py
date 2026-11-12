@@ -15,7 +15,7 @@ import re
 import subprocess
 import sys
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from site_release_files import MAX_METADATA_BYTES, SITE_NAMES, SiteFile, tracked_fingerprint, validate_inputs
 
@@ -64,21 +64,36 @@ def normalize_host(raw: str) -> str:
     return host
 
 
+def _remote_names(ftp) -> set[str]:
+    # Some FTP servers return paths in NLST rather than bare filenames. Treat
+    # case variants as collisions too, including on case-insensitive servers.
+    return {PurePosixPath(name).name.casefold() for name in ftp.nlst()}
+
+
 def publish_one(ftp, directory: Path, spec: SiteFile, still_current, log=print, token_factory=uuid.uuid4) -> None:
     """Stage, size-check and rename one file; keep the destination on failure."""
-    # Names are checked by validate_inputs before calling this function. Keep a
-    # second guard here so FTP commands cannot contain paths or line breaks.
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", spec.name):
+    # Restrict both the destination and the extension before constructing FTP
+    # commands. The shorter names were tested against uCoz's FTP name rules.
+    if spec.name not in SITE_NAMES:
         raise ValueError("unsafe site filename")
+    suffix = Path(spec.name).suffix
+    if suffix not in {".zip", ".json", ".apk"}:
+        raise ValueError("unsafe staging extension")
     token = token_factory().hex
     if not re.fullmatch(r"[0-9a-f]{32}", token):
         raise ValueError("invalid staging token")
-    temp_name = f"apumir-stage-{token}-{spec.name}"
-    cleanup = True
+    temp_name = f"apu-stage-{token}{suffix}"
+    # NLST cannot guarantee exclusive creation against an unrelated external
+    # FTP writer, so use a fresh UUID4 as well and serialize our jobs.
+    # Never overwrite or delete a pre-existing name, even on an error path.
+    if temp_name.casefold() in _remote_names(ftp):
+        raise FileExistsError("staging name already exists")
+    cleanup = False
     try:
         with (directory / spec.name).open("rb") as source:
             reader = CheckedReader(source, spec)
             log(f"Staging {spec.name} ({spec.size} bytes)")
+            cleanup = True  # A failed STOR may leave a partial temporary file.
             ftp.storbinary(f"STOR {temp_name}", reader, blocksize=FTP_BLOCK_BYTES)
             if not reader.matches():
                 raise ValueError("local file changed during transfer")
@@ -96,7 +111,10 @@ def publish_one(ftp, directory: Path, spec: SiteFile, still_current, log=print, 
     finally:
         if cleanup:
             try:
-                ftp.delete(temp_name)
+                if temp_name.casefold() in _remote_names(ftp):
+                    ftp.delete(temp_name)
+                    if temp_name.casefold() in _remote_names(ftp):
+                        raise OSError("staging file remains after cleanup")
             except Exception as error:
                 # An interrupted connection can leave a uniquely named orphan;
                 # this is visible but is not the public release filename.

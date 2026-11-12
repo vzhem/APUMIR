@@ -10,6 +10,7 @@ import logging
 import tempfile
 import threading
 import unittest
+import uuid
 from pathlib import Path
 
 from pyftpdlib.authorizers import DummyAuthorizer
@@ -98,6 +99,27 @@ class LocalFtpIntegrationTest(unittest.TestCase):
             publish_one(self.ftp, self.local, self.spec, lambda: False, lambda _: None)
         self.assertEqual((self.downloads / self.name).read_bytes(), self.old)
         self.assertEqual(sorted(p.name for p in self.downloads.iterdir()), [self.name])
+
+    def test_short_stage_publishes_long_public_name_when_long_stor_is_denied(self):
+        name = "feature-pack-translate-arm64-v8a.zip"
+        (self.downloads / name).write_bytes(self.old)
+        (self.local / name).write_bytes(self.new)
+        spec = SiteFile(name, len(self.new), hashlib.sha256(self.new).hexdigest())
+        self.start_server(reject_long_names=True)
+        publish_one(self.ftp, self.local, spec, lambda: True, lambda _: None)
+        self.assertEqual((self.downloads / name).read_bytes(), self.new)
+        self.assertEqual((self.downloads / self.name).read_bytes(), self.old)
+        self.assertEqual(sorted(p.name for p in self.downloads.iterdir()), sorted([name, self.name]))
+
+    def test_real_ftp_preexisting_stage_is_never_overwritten_or_removed(self):
+        token = uuid.UUID(int=1)
+        name = f"apu-stage-{token.hex}.apk"
+        (self.downloads / name).write_bytes(b"somebody else's file")
+        self.start_server()
+        with self.assertRaises(FileExistsError):
+            publish_one(self.ftp, self.local, self.spec, lambda: True, lambda _: None, lambda: token)
+        self.assertEqual((self.downloads / name).read_bytes(), b"somebody else's file")
+        self.assertEqual((self.downloads / self.name).read_bytes(), self.old)
 
     def test_real_ftp_refused_overwrite_keeps_old_file_and_cleans_stage(self):
         self.start_server(reject_overwrite=True)

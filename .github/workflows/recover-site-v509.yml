@@ -1,0 +1,129 @@
+name: Recover v11.74.509 site publication
+
+# One explicitly requested recovery, not a general-purpose release trigger.
+# The first step that can mutate FTP is gated on every old public file matching
+# the verified .508 snapshot and .509 remaining stable Latest.
+on:
+  push:
+    branches: ['arena/1266946d-apumir']
+    paths:
+      - '.github/workflows/recover-site-v509.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-publish
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    if: github.repository == 'vzhem/APUMIR' && github.ref == 'refs/heads/arena/1266946d-apumir' && contains(github.event.head_commit.message, '[publish-site-509]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ github.token }}
+      APU_RELEASE_TAG: v11.74.509
+      APU_REFERENCE_TAG: v11.74.508
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test publication and read-only comparison offline
+        run: |
+          set -euo pipefail
+          python3 scripts/release/test_site_staged_upload.py
+          python3 scripts/release/test_site_compare_snapshots.py
+
+      - name: Prepare and validate both release snapshots
+        id: prepare
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/releases/latest" > site-release.json
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${APU_REFERENCE_TAG}" > site-reference.json
+          mkdir -p site-files reference-files
+          gh release download "$APU_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir site-files \
+            --pattern app-release.apk --pattern SHA256SUMS.txt --pattern feature-packs.json \
+            --pattern 'feature-pack-*.zip'
+          gh release download "$APU_REFERENCE_TAG" --repo "$GITHUB_REPOSITORY" --dir reference-files \
+            --pattern app-release.apk --pattern SHA256SUMS.txt --pattern feature-packs.json \
+            --pattern 'feature-pack-*.zip'
+          PYTHONPATH=scripts/release python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          from site_release_files import MAX_METADATA_BYTES, _asset_spec, release_assets, tracked_fingerprint, validate_inputs
+          from site_staged_upload import current_release_matches
+          from site_verify_http import open_site
+
+          def load(path):
+              with Path(path).open('rb') as source:
+                  data = source.read(MAX_METADATA_BYTES + 1)
+              if len(data) > MAX_METADATA_BYTES:
+                  raise ValueError('release metadata too large')
+              return json.loads(data)
+
+          release = load('site-release.json')
+          reference = load('site-reference.json')
+          tag, old_tag = os.environ['APU_RELEASE_TAG'], os.environ['APU_REFERENCE_TAG']
+          _, digest = _asset_spec(release_assets(release, tag), 'app-release.apk')
+          Path('site-files/latest.json').write_text(json.dumps({'version': tag, 'sha256': digest}, ensure_ascii=False, indent=2) + '\n')
+          with open_site('latest.json') as response:
+              old_latest = response.read(MAX_METADATA_BYTES + 1)
+          if len(old_latest) > MAX_METADATA_BYTES:
+              raise ValueError('site metadata too large')
+          Path('reference-files/latest.json').write_bytes(old_latest)
+          validate_inputs(Path('reference-files'), reference, old_tag)
+          validate_inputs(Path('site-files'), release, tag)
+          if not current_release_matches(os.environ['GITHUB_REPOSITORY'], tag, tracked_fingerprint(release, tag)):
+              raise ValueError('release is no longer stable Latest')
+          print('Both release snapshots validated; old site pointer and stable Latest match')
+          PY
+
+      - name: Verify every old public file before touching FTP
+        id: baseline
+        timeout-minutes: 35
+        run: |
+          set -euo pipefail
+          PYTHONPATH=scripts/release python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          from site_release_files import MAX_METADATA_BYTES, tracked_fingerprint, validate_inputs
+          from site_staged_upload import current_release_matches
+          from site_verify_http import SiteFileError, verify_all
+
+          def load(path):
+              with Path(path).open('rb') as source:
+                  data = source.read(MAX_METADATA_BYTES + 1)
+              if len(data) > MAX_METADATA_BYTES:
+                  raise ValueError('release metadata too large')
+              return json.loads(data)
+
+          reference, release = load('site-reference.json'), load('site-release.json')
+          tag = os.environ['APU_RELEASE_TAG']
+          files = validate_inputs(Path('reference-files'), reference, os.environ['APU_REFERENCE_TAG'])
+          fingerprint = tracked_fingerprint(release, tag)
+          guard = lambda: current_release_matches(os.environ['GITHUB_REPOSITORY'], tag, fingerprint)
+          try:
+              verify_all(files, guard)
+          except SiteFileError as error:
+              print(f'::error title=Old site baseline::{error.name}: {error.reason}')
+              raise SystemExit(1)
+          print('All old public files match the reference; proceeding with guarded staging')
+          PY
+
+      - name: Stage and promote the verified Latest files
+        id: upload
+        env:
+          APU_FTP_HOST: ${{ secrets.APU_UCOZ_FTP_HOST }}
+          APU_FTP_USER: ${{ secrets.APU_UCOZ_FTP_USER }}
+          APU_FTP_PASSWORD: ${{ secrets.APU_UCOZ_FTP_PASSWORD }}
+          APU_FTP_REMOTE_DIR: ${{ vars.APU_UCOZ_FTP_REMOTE_DIR }}
+        run: python3 scripts/release/site_staged_upload.py
+
+      - name: Verify every public file against v11.74.509
+        id: verify
+        timeout-minutes: 35
+        run: python3 scripts/release/site_verify_http.py
+
+      - name: Compare all old and new site files after a failure (read only)
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' && (steps.baseline.outcome == 'failure' || steps.upload.outcome == 'failure' || steps.verify.outcome == 'failure') }}
+        timeout-minutes: 45
+        run: python3 scripts/release/site_compare_snapshots.py

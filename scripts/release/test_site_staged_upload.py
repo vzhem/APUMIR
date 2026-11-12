@@ -179,6 +179,14 @@ class FakeFtp:
         self.fail_store = False
         self.fail_rename = False
         self.fail_delete = False
+        self.fail_listing = False
+        self.list_prefix = ""
+
+    def nlst(self):
+        self.commands.append(("list",))
+        if self.fail_listing:
+            raise ftplib.error_perm("550 private listing error")
+        return [self.list_prefix + name for name in self.files]
 
     def storbinary(self, command, reader, blocksize):
         name = command.removeprefix("STOR ")
@@ -230,17 +238,18 @@ class StagedUploadTest(unittest.TestCase):
     def test_complete_stage_promotes_once_and_never_stores_public_name(self):
         self.send()
         self.assertEqual(self.ftp.files[self.spec.name], (self.directory / self.spec.name).read_bytes())
-        self.assertEqual([c[0] for c in self.ftp.commands], ["store", "command", "rename"])
-        self.assertNotEqual(self.ftp.commands[0][1], self.spec.name)
-        self.assertFalse(any(k.startswith("apumir-stage-") for k in self.ftp.files))
+        self.assertEqual([c[0] for c in self.ftp.commands], ["list", "store", "command", "rename"])
+        self.assertRegex(self.ftp.commands[1][1], r"^apu-stage-[0-9a-f]{32}\.apk$")
+        self.assertNotEqual(self.ftp.commands[1][1], self.spec.name)
+        self.assertFalse(any(k.startswith("apu-stage-") for k in self.ftp.files))
 
     def test_failed_or_interrupted_transfer_preserves_old_public_file(self):
         self.ftp.fail_store = True
         with self.assertRaises(OSError):
             self.send()
         self.assertEqual(self.ftp.files[self.spec.name], b"old complete APK")
-        self.assertEqual(self.ftp.commands[-1][0], "delete")
-        self.assertFalse(any(k.startswith("apumir-stage-") for k in self.ftp.files))
+        self.assertTrue(any(c[0] == "delete" for c in self.ftp.commands))
+        self.assertFalse(any(k.startswith("apu-stage-") for k in self.ftp.files))
 
     def test_wrong_or_missing_size_never_promotes(self):
         for size in (None, 1, self.spec.size + 1):
@@ -249,13 +258,61 @@ class StagedUploadTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.send()
                 self.assertEqual(self.ftp.files[self.spec.name], b"old complete APK")
-                self.assertFalse(any(k.startswith("apumir-stage-") for k in self.ftp.files))
+                self.assertFalse(any(k.startswith("apu-stage-") for k in self.ftp.files))
 
     def test_changed_latest_never_promotes(self):
         with self.assertRaises(ValueError):
             self.send(lambda: False)
         self.assertEqual(self.ftp.files[self.spec.name], b"old complete APK")
         self.assertFalse(any(c[0] == "rename" for c in self.ftp.commands))
+
+    def test_existing_temporary_name_is_never_written_or_deleted(self):
+        name = f"apu-stage-{uuid.UUID(int=1).hex}.apk"
+        self.ftp.files[name] = b"someone else's temporary file"
+        self.ftp.list_prefix = "/downloads/"
+        with self.assertRaises(FileExistsError):
+            self.send()
+        self.assertEqual(self.ftp.files[name], b"someone else's temporary file")
+        self.assertEqual(self.ftp.files[self.spec.name], b"old complete APK")
+        self.assertEqual(self.ftp.commands, [("list",)])
+
+    def test_case_variant_name_is_also_a_collision(self):
+        name = f"APU-STAGE-{uuid.UUID(int=1).hex}.APK"
+        self.ftp.files[name] = b"owned by another process"
+        with self.assertRaises(FileExistsError):
+            self.send()
+        self.assertEqual(self.ftp.files[name], b"owned by another process")
+        self.assertEqual(self.ftp.commands, [("list",)])
+
+    def test_unavailable_listing_prevents_writes_and_cleanup(self):
+        self.ftp.fail_listing = True
+        with self.assertRaises(ftplib.error_perm):
+            self.send()
+        self.assertEqual(self.ftp.files, {self.spec.name: b"old complete APK"})
+        self.assertEqual(self.ftp.commands, [("list",)])
+
+    def test_denied_store_with_no_created_file_never_blindly_deletes(self):
+        def deny(command, reader, blocksize):
+            self.ftp.commands.append(("store", command.removeprefix("STOR ")))
+            raise ftplib.error_perm("553 private server detail")
+        with patch.object(self.ftp, "storbinary", side_effect=deny), self.assertRaises(ftplib.error_perm):
+            self.send()
+        self.assertEqual([c[0] for c in self.ftp.commands], ["list", "store", "list"])
+        self.assertEqual(self.ftp.files, {self.spec.name: b"old complete APK"})
+        self.assertFalse(any("cleanup failed" in message for message in self.messages))
+
+    def test_unavailable_cleanup_listing_reports_possible_orphan(self):
+        original_store = self.ftp.storbinary
+        def interrupted(command, reader, blocksize):
+            self.ftp.fail_store = True
+            self.ftp.fail_listing = True
+            original_store(command, reader, blocksize)
+        with patch.object(self.ftp, "storbinary", side_effect=interrupted), self.assertRaises(OSError):
+            self.send()
+        self.assertIn("Staging cleanup failed: error_perm", self.messages)
+        self.assertEqual(self.ftp.files[self.spec.name], b"old complete APK")
+        self.assertFalse(any(c[0] == "delete" for c in self.ftp.commands))
+        self.assertTrue(any(k.startswith("apu-stage-") for k in self.ftp.files))
 
     def test_failed_overwrite_rename_never_deletes_old_destination(self):
         self.ftp.fail_rename = True
@@ -294,6 +351,12 @@ class StagedUploadTest(unittest.TestCase):
         upload.publish_all(self.ftp, self.directory, self.files, lambda: calls.append(True) or True, self.messages.append)
         renamed = [c[2] for c in self.ftp.commands if c[0] == "rename"]
         self.assertEqual(renamed, list(inputs.SITE_NAMES))
+        staged = [c[1] for c in self.ftp.commands if c[0] == "store"]
+        self.assertEqual(len(staged), len(set(staged)))
+        for name, spec in zip(staged, self.files):
+            self.assertRegex(name, r"^apu-stage-[0-9a-f]{32}\.(?:zip|json|apk)$")
+            self.assertEqual(Path(name).suffix, Path(spec.name).suffix)
+            self.assertLessEqual(len(name), 47)
         self.assertEqual(len(calls), 12)
         for spec in self.files:
             self.assertEqual(self.ftp.files[spec.name], (self.directory / spec.name).read_bytes())
