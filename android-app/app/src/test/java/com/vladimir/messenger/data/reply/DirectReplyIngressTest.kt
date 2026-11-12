@@ -18,6 +18,9 @@ class DirectReplyIngressTest {
     private val packet = DirectReplyWire.build("parent-1", "quoted-1", "Alice", "first\nsecond")
     private val id = DirectReplyWire.transportMessageId("parent-1")
 
+    private suspend fun DirectReplyIngress.testNetwork(sender: String, chat: String, id: String, text: String, authenticated: Boolean) =
+        network(sender, chat, id, text, authenticated, "opened-test-wire")
+
     private class Fixture {
         var cleared: (String, String) -> Boolean = { _, _ -> false }
         var apply: suspend (String, DirectReplyWire.Packet) -> Boolean = { _, _ -> true }
@@ -30,6 +33,7 @@ class DirectReplyIngressTest {
         val ingress = DirectReplyIngress(
             isCleared = { sender, parent -> cleared(sender, parent) },
             apply = { sender, reply -> applied += sender to reply; apply(sender, reply) },
+            applyNetwork = { sender, reply, _ -> applied += sender to reply; apply(sender, reply) },
             forwardVerified = { sender, chat, id, text ->
                 forward(sender, chat, id, text)
                 forwarded += listOf(sender, chat, id, text)
@@ -45,7 +49,7 @@ class DirectReplyIngressTest {
         f.apply = { _, _ -> order += "apply"; true }
         f.forward = { _, _, _, _ -> order += "forward" }
         f.ack = { _, _ -> order += "ack" }
-        assertEquals(DirectReplyResult.APPLIED, f.ingress.network(peer, "local-chat", id, packet, true))
+        assertEquals(DirectReplyResult.APPLIED, f.ingress.testNetwork(peer, "local-chat", id, packet, true))
         assertEquals(listOf("apply", "forward", "ack"), order)
         assertEquals(peer, f.applied.single().first)
         assertEquals("parent-1", f.applied.single().second.messageId)
@@ -56,16 +60,16 @@ class DirectReplyIngressTest {
 
     @Test fun untrustedMalformedAndMismatchedTransportPacketsNeverTouchStorageOrAck() = runBlocking {
         val f = Fixture()
-        assertEquals(DirectReplyResult.NOT_PACKET, f.ingress.network(peer, "chat", id, "hello", true))
-        assertEquals(DirectReplyResult.REJECTED, f.ingress.network(peer, "chat", id, packet, false))
-        assertEquals(DirectReplyResult.REJECTED, f.ingress.network("not-a-node", "chat", id, packet, true))
-        assertEquals(DirectReplyResult.REJECTED, f.ingress.network(peer, "chat", "other-id", packet, true))
-        assertEquals(DirectReplyResult.REJECTED, f.ingress.network(peer, "chat", id, "APUDMR1|bad", true))
+        assertEquals(DirectReplyResult.NOT_PACKET, f.ingress.testNetwork(peer, "chat", id, "hello", true))
+        assertEquals(DirectReplyResult.REJECTED, f.ingress.testNetwork(peer, "chat", id, packet, false))
+        assertEquals(DirectReplyResult.REJECTED, f.ingress.testNetwork("not-a-node", "chat", id, packet, true))
+        assertEquals(DirectReplyResult.REJECTED, f.ingress.testNetwork(peer, "chat", "other-id", packet, true))
+        assertEquals(DirectReplyResult.REJECTED, f.ingress.testNetwork(peer, "chat", id, "APUDMR1|bad", true))
         val badParent = "x".repeat(129)
-        assertEquals(DirectReplyResult.REJECTED, f.ingress.network(peer, "chat", DirectReplyWire.transportMessageId(badParent),
+        assertEquals(DirectReplyResult.REJECTED, f.ingress.testNetwork(peer, "chat", DirectReplyWire.transportMessageId(badParent),
             DirectReplyWire.build(badParent, "target", "a", "b"), true))
         val nulParent = "parent\u0000tail"
-        assertEquals(DirectReplyResult.REJECTED, f.ingress.network(peer, "chat", DirectReplyWire.transportMessageId(nulParent),
+        assertEquals(DirectReplyResult.REJECTED, f.ingress.testNetwork(peer, "chat", DirectReplyWire.transportMessageId(nulParent),
             DirectReplyWire.build(nulParent, "target", "a", "b"), true))
         assertTrue(f.applied.isEmpty())
         assertTrue(f.forwarded.isEmpty())
@@ -75,7 +79,7 @@ class DirectReplyIngressTest {
     @Test fun missingOrConflictingParentNeverAcksButMayReachPairedDevice() = runBlocking {
         val f = Fixture()
         f.apply = { _, _ -> false }
-        assertEquals(DirectReplyResult.UNAPPLIED, f.ingress.network(peer, "chat", id, packet, true))
+        assertEquals(DirectReplyResult.UNAPPLIED, f.ingress.testNetwork(peer, "chat", id, packet, true))
         assertTrue(f.acknowledgements.isEmpty())
         assertEquals(1, f.forwarded.size)
         assertEquals(DirectReplyResult.UNAPPLIED, f.ingress.mirror(peer, id, packet, true))
@@ -96,9 +100,9 @@ class DirectReplyIngressTest {
     @Test fun clearedAndUnavailableClearStateFailClosed() = runBlocking {
         val f = Fixture()
         f.cleared = { sender, parent -> sender == peer && parent == "parent-1" }
-        assertEquals(DirectReplyResult.REJECTED, f.ingress.network(peer, "chat", id, packet, true))
+        assertEquals(DirectReplyResult.REJECTED, f.ingress.testNetwork(peer, "chat", id, packet, true))
         f.cleared = { _, _ -> throw IllegalStateException("identity unavailable") }
-        assertEquals(DirectReplyResult.UNAPPLIED, f.ingress.network(peer, "chat", id, packet, true))
+        assertEquals(DirectReplyResult.UNAPPLIED, f.ingress.testNetwork(peer, "chat", id, packet, true))
         assertEquals(listOf("apply"), f.failures)
         assertTrue(f.applied.isEmpty())
         assertTrue(f.forwarded.isEmpty())
@@ -108,12 +112,12 @@ class DirectReplyIngressTest {
     @Test fun storageFailureDoesNotAckOrForwardAndCanBeRetried() = runBlocking {
         val f = Fixture()
         f.apply = { _, _ -> throw IllegalStateException("sqlite") }
-        assertEquals(DirectReplyResult.UNAPPLIED, f.ingress.network(peer, "chat", id, packet, true))
+        assertEquals(DirectReplyResult.UNAPPLIED, f.ingress.testNetwork(peer, "chat", id, packet, true))
         assertTrue(f.acknowledgements.isEmpty())
         assertTrue(f.forwarded.isEmpty())
         assertEquals(listOf("apply"), f.failures)
         f.apply = { _, _ -> true }
-        assertEquals(DirectReplyResult.APPLIED, f.ingress.network(peer, "chat", id, packet, true))
+        assertEquals(DirectReplyResult.APPLIED, f.ingress.testNetwork(peer, "chat", id, packet, true))
         assertEquals(1, f.acknowledgements.size)
     }
 
@@ -122,7 +126,7 @@ class DirectReplyIngressTest {
         val started = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
         f.apply = { _, _ -> started.complete(Unit); release.await(); true }
-        val job = async { f.ingress.network(peer, "chat", id, packet, true) }
+        val job = async { f.ingress.testNetwork(peer, "chat", id, packet, true) }
         started.await()
         assertTrue(f.acknowledgements.isEmpty())
         assertTrue(f.forwarded.isEmpty())
@@ -136,7 +140,7 @@ class DirectReplyIngressTest {
     @Test fun cancellationAfterApplyWithoutSuspensionStillWithholdsAck() = runBlocking {
         val f = Fixture()
         f.apply = { _, _ -> currentCoroutineContext().cancel(CancellationException("stopped")); true }
-        val job = async { f.ingress.network(peer, "chat", id, packet, true) }
+        val job = async { f.ingress.testNetwork(peer, "chat", id, packet, true) }
         var caught = false
         try { job.await() } catch (_: CancellationException) { caught = true }
         assertTrue(caught && job.isCancelled)
@@ -149,7 +153,7 @@ class DirectReplyIngressTest {
         val job = async {
             val ownJob = currentCoroutineContext()[Job]!!
             f.forward = { _, _, _, _ -> ownJob.cancel(CancellationException("stopped")) }
-            f.ingress.network(peer, "chat", id, packet, true)
+            f.ingress.testNetwork(peer, "chat", id, packet, true)
         }
         var caught = false
         try { job.await() } catch (_: CancellationException) { caught = true }
@@ -168,7 +172,7 @@ class DirectReplyIngressTest {
                 else -> f.ack = { _, _ -> throw cancelled }
             }
             var caught = false
-            try { f.ingress.network(peer, "chat", id, packet, true) }
+            try { f.ingress.testNetwork(peer, "chat", id, packet, true) }
             catch (actual: CancellationException) { assertTrue(actual === cancelled); caught = true }
             assertTrue(caught)
             assertTrue(f.failures.isEmpty())
@@ -179,7 +183,7 @@ class DirectReplyIngressTest {
     @Test fun forwardFailureDoesNotPreventAckForTheCommittedLocalRow() = runBlocking {
         val f = Fixture()
         f.forward = { _, _, _, _ -> throw IllegalStateException("mirror unavailable") }
-        assertEquals(DirectReplyResult.APPLIED, f.ingress.network(peer, "chat", id, packet, true))
+        assertEquals(DirectReplyResult.APPLIED, f.ingress.testNetwork(peer, "chat", id, packet, true))
         assertEquals(listOf("forward"), f.failures)
         assertEquals(id to peer, f.acknowledgements.single())
         assertFalse(f.applied.isEmpty())

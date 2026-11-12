@@ -11,9 +11,11 @@ internal enum class DirectReplyResult { NOT_PACKET, REJECTED, UNAPPLIED, APPLIED
 /**
  * Direct-reply metadata is authoritative only for a verified sender and a
  * matching incoming personal-chat row. The caller establishes sender binding
- * after opening the network envelope, or verifies the paired frame and its
- * source attestation for a mirror. Remote chat IDs are deliberately not used:
- * local chat IDs differ between devices.
+ * after opening the network envelope, and [applyNetwork] compares it with the
+ * existing pin while the row is updated. Mirrors require a verified paired
+ * frame and its source attestation. Remote chat IDs are deliberately not used:
+ * local chat IDs differ between devices. A TOFU pin is not proof of a person's
+ * identity, nor of the authenticity of the previously stored message body.
  *
  * An early or conflicting sidecar is not acknowledged here. There is no
  * durable pending-reply inbox yet, so withholding an ACK is not a promise of
@@ -23,6 +25,8 @@ internal enum class DirectReplyResult { NOT_PACKET, REJECTED, UNAPPLIED, APPLIED
 internal class DirectReplyIngress(
     private val isCleared: (String, String) -> Boolean,
     private val apply: suspend (String, DirectReplyWire.Packet) -> Boolean,
+    // null means the network signer does not match a pre-existing pin.
+    private val applyNetwork: suspend (String, DirectReplyWire.Packet, String) -> Boolean?,
     private val forwardVerified: (String, String, String, String) -> Unit,
     private val acknowledge: (String, String) -> Unit,
     private val recordFailure: (String, Exception) -> Unit,
@@ -33,14 +37,15 @@ internal class DirectReplyIngress(
         transportId: String,
         text: String,
         authenticated: Boolean,
-    ): DirectReplyResult = receive(sender, chat, transportId, text, authenticated, fromMirror = false)
+        openedWire: String,
+    ): DirectReplyResult = receive(sender, chat, transportId, text, authenticated, openedWire, fromMirror = false)
 
     suspend fun mirror(
         sender: String,
         transportId: String,
         text: String,
         authenticatedSource: Boolean,
-    ): DirectReplyResult = receive(sender, "", transportId, text, authenticatedSource, fromMirror = true)
+    ): DirectReplyResult = receive(sender, "", transportId, text, authenticatedSource, "", fromMirror = true)
 
     private suspend fun receive(
         sender: String,
@@ -48,6 +53,7 @@ internal class DirectReplyIngress(
         transportId: String,
         text: String,
         authenticated: Boolean,
+        openedWire: String,
         fromMirror: Boolean,
     ): DirectReplyResult {
         currentCoroutineContext().ensureActive()
@@ -61,7 +67,7 @@ internal class DirectReplyIngress(
         val applied = try {
             if (isCleared(sender, parent)) return DirectReplyResult.REJECTED
             currentCoroutineContext().ensureActive()
-            apply(sender, packet)
+            if (fromMirror) apply(sender, packet) else applyNetwork(sender, packet, openedWire)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
@@ -69,6 +75,7 @@ internal class DirectReplyIngress(
             return DirectReplyResult.UNAPPLIED
         }
         currentCoroutineContext().ensureActive()
+        if (applied == null) return DirectReplyResult.REJECTED
         if (!fromMirror) {
             // A verified sidecar may precede its parent on one device but not
             // on the other. This is best-effort, not a durable mirror queue.

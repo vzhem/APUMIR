@@ -1720,10 +1720,8 @@ class GroupRepository(
 
     // ── р250: приём новых конвертов ─────────────────────────────────────────
 
-    /** Цитата, приехавшая раньше своего сообщения: ключ - id сообщения. */
-    private class PendingReply(val groupId: String, val packet: GroupWire.Packet.Reply)
-
-    private val pendingReplies = SwarmBuffer<PendingReply>(PENDING_REPLIES, PENDING_TTL_MS, clock)
+    /** Цитаты, пришедшие раньше сообщения, изолированы по группе и ID. */
+    private val pendingReplies = GroupReplyBuffer<GroupWire.Packet.Reply>(PENDING_REPLIES, PENDING_TTL_MS, clock)
 
     private suspend fun handleReply(senderId: String, packet: GroupWire.Packet.Reply) {
         val me = myId().orEmpty()
@@ -1733,15 +1731,15 @@ class GroupRepository(
         // Сообщение ещё в пути (цитата пришла быстрее): подождём его в буфере,
         // как куски поста ждут манифест.
         if (message == null || message.chatId != packet.groupId) {
-            pendingReplies.put(packet.messageId, PendingReply(packet.groupId, packet))
+            pendingReplies.put(packet.groupId, packet.messageId, packet)
             return
         }
         applyReply(packet)
     }
 
     private suspend fun applyReply(packet: GroupWire.Packet.Reply) {
-        messageDao.applyReply(
-            messageId = packet.messageId,
+        messageDao.applyGroupReply(
+            groupId = packet.groupId, messageId = packet.messageId,
             replyToId = packet.replyToId,
             replyAuthor = packet.replyAuthor,
             replyText = GroupWire.replyPreview(packet.replyText),
@@ -3144,7 +3142,7 @@ class GroupRepository(
                 }
                 // р250: цитата ответа могла приехать раньше самого сообщения -
                 // забираем её из буфера (как куски поста ждут манифест).
-                pendingReplies.take { it.packet.messageId == localId }.forEach { applyReply(it.packet) }
+                pendingReplies.take(packet.groupId, localId).forEach { applyReply(it) }
                 if (packet.senderNameColor.isNotBlank()) {
                     onPeerNameColor(authorId, packet.senderNameColor)
                 }

@@ -851,15 +851,15 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertIn("sealed && MessageSealer.openedByExpectedSender(rawText, senderId)", service)
         self.assertLess(coordinator.index("if (!storedIncomingText("), coordinator.index("sendAck(openedByExpectedSender())"))
         # Neither a merely recognized group packet nor a CF duplicate proves
-        # a durable personal message/sender match for mesh cleanup. CF now
-        # tries to open *before* this branch only to quarantine push controls:
-        # a duplicate that did not open still retains its row-based ACK path.
+        # a durable personal message/sender match for mesh cleanup. CF must
+        # open before deduplication: an unopenable copy cannot receive an ACK
+        # based solely on another row that happens to have the same ID.
         group = service[service.rindex("if (groupRouter.routeIncoming(senderId, chatId, messageId, text))"):
                         service.rindex("// Реакции на сообщения:")]
         self.assertIn("RustBridge.sendDeliveryAck(messageId, senderId)", group)
         self.assertNotIn("roomCommitted = true", group)
         cf_start = service.index("is RelayEnvelope.Parsed.Message -> {")
-        cf_duplicate = service.index("if (existingMsg != null) {", cf_start)
+        cf_duplicate = service.index("if (existingMsg != null && cfContent != null) {", cf_start)
         cf_new = service.index("if (cfContent == null) {", cf_duplicate)
         cf = service[cf_duplicate:cf_new]
         self.assertLess(service.index("PushControlIngress.isReserved(cfContent)", cf_start), cf_duplicate)

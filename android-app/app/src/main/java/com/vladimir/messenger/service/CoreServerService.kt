@@ -100,11 +100,11 @@ class CoreServerService : Service() {
     @Inject lateinit var peerRankBroadcaster: com.vladimir.messenger.data.rank.PeerRankBroadcaster
     @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
     @Inject lateinit var reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository
-    // р252: опросы личных чатов (ранг 3) - служебный конверт APUPOLL1.
     /** р252: опросы личных чатов - через посредника, чтобы не растить этот файл. */
     @Inject lateinit var directPollRepository: com.vladimir.messenger.data.directpoll.DirectPollRepository
     private val directPolls by lazy { DirectPollRouting.bind(this, directPollRepository) }
-    private val directReplies by lazy { directReplyIngress(applicationContext, chatRepository) { mirror } }
+    @Inject lateinit var replyPeerPins: com.vladimir.messenger.data.file.FileExchangePeerStore
+    private val directReplies by lazy { directReplyIngress(applicationContext, chatRepository, replyPeerPins) { mirror } }
     @Inject lateinit var repostRepository: com.vladimir.messenger.data.repost.RepostRepository
     // Отклики на истории: значки и комментарии зрителей (см. docs/STORY_REACTIONS_AND_COMMENTS.md).
     @Inject lateinit var storyFeedback: com.vladimir.messenger.data.story.StoryFeedbackRepository
@@ -1199,8 +1199,8 @@ class CoreServerService : Service() {
                                 if (cfContent != null && com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(cfContent)) {
                                     val knownChat = chatRepository.getChatByContactId(senderId)
                                     val authenticated = SealedWire.isSealed(parsed.content) && MessageSealer.openedByExpectedSender(parsed.content, senderId)
-                                    acknowledge = directReplies.network(senderId, knownChat?.id ?: "", messageId, cfContent, authenticated) == com.vladimir.messenger.data.reply.DirectReplyResult.APPLIED
-                                } else if (existingMsg != null) {
+                                    acknowledge = directReplies.network(senderId, knownChat?.id ?: "", messageId, cfContent, authenticated, parsed.content) == com.vladimir.messenger.data.reply.DirectReplyResult.APPLIED
+                                } else if (existingMsg != null && cfContent != null) {
                                     Log.i(TAG, "CF duplicate skipped (already in DB): messageId=$messageId")
                                     if (DeliveryAckWire.isPacket(existingMsg.content)) {
                                         // Старый ACK мог быть уже записан до обновления.
@@ -2379,7 +2379,7 @@ class CoreServerService : Service() {
                     // открывается» больше не нужна и не должна висеть сутками.
                     com.vladimir.messenger.data.security.KeyDesyncNotice
                         .opened(applicationContext, senderId)
-                    try {
+                    if (!com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(opened)) try {
                         rememberOpenedMessageBinding(fileTransferRouter, senderId, rawText)
                     } catch (error: Exception) {
                         Log.w(TAG, "opened message binding learn failed: ${error.message}")
@@ -2407,7 +2407,7 @@ class CoreServerService : Service() {
                 // В v140 оно стало идти обычным P2P-пакетом `ack|id`; клиенты
                 // до v140 не распознавали его, поэтому свежая версия фильтрует
                 if (com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(text)) {
-                    directReplies.network(senderId, chatId, messageId, text, sealed && MessageSealer.openedByExpectedSender(rawText, senderId))
+                    directReplies.network(senderId, chatId, messageId, text, sealed && MessageSealer.openedByExpectedSender(rawText, senderId), rawText)
                     return
                 }
 

@@ -49,11 +49,11 @@ class PushIngressContracts(unittest.TestCase):
                           "DirectReplyWire.isPacket(cfContent)")
         # A reply is classified before ordinary ID-based deduplication and can
         # ACK only through the verified, scoped reply router.
-        reply = section(message, "DirectReplyWire.isPacket(cfContent)", "} else if (existingMsg != null)")
+        reply = section(message, "DirectReplyWire.isPacket(cfContent)", "} else if (existingMsg != null && cfContent != null)")
         self.assert_order(reply, "chatRepository.getChatByContactId(senderId)",
                           "MessageSealer.openedByExpectedSender(parsed.content, senderId)",
                           "directReplies.network(", "DirectReplyResult.APPLIED")
-        ordinary = message.split("} else if (existingMsg != null)", 1)[1]
+        ordinary = message.split("} else if (existingMsg != null && cfContent != null)", 1)[1]
         self.assert_order(ordinary, "RustBridge.sendDeliveryAck(messageId, senderId)",
                           ".opened(applicationContext, senderId)",
                           "rememberOpenedMessageBinding(fileTransferRouter, senderId, parsed.content)",

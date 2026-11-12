@@ -2077,17 +2077,17 @@ class MirrorChannel(
      * потолок открытого текста - [MAX_ENVELOPE_CHARS].
      */
     fun publishEnvelope(senderId: String, chatId: String, messageId: String, text: String, replySourceAuthenticated: Boolean = false) {
-        if (!engineUp) return
-        if (senderId.isBlank() || text.isEmpty() || text.length > MAX_ENVELOPE_CHARS) return
-        if (!MirrorEnvelopes.isSafe(text) || (com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(text) && !replySourceAuthenticated)) return
+        if (!engineUp || senderId.isBlank() || text.isEmpty() || text.length > MAX_ENVELOPE_CHARS) return
+        if (!MirrorEnvelopes.isSafe(text)) return
+        val fields = MirrorReplyPayload.forSend(text, replySourceAuthenticated) ?: return
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val body = JSONObject()
                 .put("s", senderId)
                 .put("c", chatId)
                 .put("m", messageId)
-                .put("t", text).put("ra", replySourceAuthenticated && com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(text))
+                .put("t", fields.legacyText).put("r", fields.replyText).put("ra", fields.verifiedSource)
             val sealed = sealPayload(body) ?: return@launch
-            sendJson(JSONObject().put("t", "ev").put("k", if (replySourceAuthenticated && com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(text)) "reply2" else "env").put("d", sealed))
+            sendJson(JSONObject().put("t", "ev").put("k", fields.kind).put("d", sealed))
         }
     }
 
@@ -3406,17 +3406,17 @@ class MirrorChannel(
                 }
             }
             "env", "reply2" -> {
-                // reply2 is deliberately unknown to older, unscoped receivers.
-                val body = openPayload(wire)?.takeIf { kind != "reply2" || com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(it.optString("t")) } ?: return
-                val senderId = body.optString("s")
-                if (senderId.isBlank()) return
+                // A relabelled reply2 has an empty legacy text field.
+                val body = openPayload(wire) ?: return
+                val envelopeText = MirrorReplyPayload.forReceive(kind, body.optString("t"), body.optString("r")) ?: return
+                val senderId = body.optString("s").takeIf { it.isNotBlank() } ?: return
                 scope.launch {
                     MirrorHub.duringApply {
                         bridge.applyEnvelope(
                             senderId,
                             body.optString("c"),
                             body.optString("m"),
-                            body.optString("t"), kind == "reply2" && MirrorReplyTrust.afterOpen(context, nodeId, wire, body.optBoolean("ra", false)),
+                            envelopeText, kind == "reply2" && MirrorReplyTrust.afterOpen(context, nodeId, wire, body.optBoolean("ra", false)),
                         )
                     }
                 }

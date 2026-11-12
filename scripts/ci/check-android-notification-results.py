@@ -7,6 +7,7 @@ from pathlib import Path
 CLASS = "com.vladimir.messenger.data.notification.NotificationArrivalInstrumentedTest"
 INCOMING_CLASS = "com.vladimir.messenger.data.repository.IncomingMessageStoreInstrumentedTest"
 DIRECT_REPLY_CLASS = "com.vladimir.messenger.data.reply.DirectReplyIngressInstrumentedTest"
+DIRECT_REPLY_FFI_CLASS = "com.vladimir.messenger.data.reply.DirectReplyRealFfiInstrumentedTest"
 MIRROR_OUTGOING_CLASS = "com.vladimir.messenger.data.repository.MirrorOutgoingStoreInstrumentedTest"
 OUTBOX_CLASS = "com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest"
 CLEAR_LOOKUP_CLASS = "com.vladimir.messenger.data.chatclear.ChatClearTombstonesInstrumentedTest"
@@ -47,6 +48,10 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "unauthenticatedAndEarlyPacketsAreNotAcknowledged",
     "cancellationRollsBackTheRowAndNeverAcknowledges",
     "sqliteFailureAndClearPreflightCannotAcknowledge",
+    "conflictingReplyCannotOverwriteTheFirstQuote",
+    "groupReplyUpdateRequiresTheMatchingGroupAtUpdateTime",
+}, DIRECT_REPLY_FFI_CLASS: {
+    "selfClaimedIdCannotPassThePinnedReplyOrLegacyMirrorBinding",
 }, MIRROR_OUTGOING_CLASS: {
     "replayedPartnerFramesNeverReplaceDeliveredRows",
     "concurrentFirstFramesHaveExactlyOneInsertionAcrossReopen",

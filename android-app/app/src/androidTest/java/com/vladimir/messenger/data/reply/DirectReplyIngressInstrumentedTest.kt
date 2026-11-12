@@ -56,14 +56,14 @@ class DirectReplyIngressInstrumentedTest {
         apply: suspend (String, DirectReplyWire.Packet) -> Boolean = { sender, packet ->
             db.messageDao().applyDirectReplyFromPeer(sender, packet.messageId, packet.replyToId, packet.replyAuthor, packet.replyText) > 0
         },
-    ) = DirectReplyIngress(cleared, apply,
+    ) = DirectReplyIngress(cleared, apply, { sender, packet, _ -> apply(sender, packet) },
         { _, _, id, _ -> forwarded += id },
         { id, sender -> acknowledgements += id to sender },
         { stage, _ -> failures += stage },
     )
     private suspend fun send(ingress: DirectReplyIngress, parent: String, sender: String = peer, authenticated: Boolean = true): DirectReplyResult {
         val text = DirectReplyWire.build(parent, "quoted", "Alice", "original text")
-        return ingress.network(sender, "remote-chat-id", DirectReplyWire.transportMessageId(parent), text, authenticated)
+        return ingress.network(sender, "remote-chat-id", DirectReplyWire.transportMessageId(parent), text, authenticated, "opened-test-wire")
     }
 
     @Test fun verifiedReplyCommitsBeforeAckAndSurvivesReopen() = runBlocking {
@@ -94,9 +94,36 @@ class DirectReplyIngressInstrumentedTest {
         rows.forEach { assertEquals(DirectReplyResult.UNAPPLIED, send(receiver, it.id)) }
         assertTrue(acknowledgements.isEmpty())
         rows.forEach { assertNull(db.messageDao().getMessageById(it.id)!!.replyToId) }
-        // The pre-existing group query remains available to GroupRepository.
-        assertEquals(1, db.messageDao().applyReply("group-parent", "group-target", "Bob", "group quote"))
+        // A matching group reply still works through its own scoped query.
+        assertEquals(1, db.messageDao().applyGroupReply("group", "group-parent", "group-target", "Bob", "group quote"))
         assertEquals("group-target", db.messageDao().getMessageById("group-parent")!!.replyToId)
+    }
+
+    @Test fun conflictingReplyCannotOverwriteTheFirstQuote() = runBlocking {
+        db.messageDao().insertMessage(row("parent"))
+        val receiver = ingress()
+        assertEquals(DirectReplyResult.APPLIED, send(receiver, "parent"))
+        val changed = DirectReplyWire.build("parent", "different-target", "Mallory", "different quote")
+        assertEquals(DirectReplyResult.UNAPPLIED, receiver.network(peer, "chat", DirectReplyWire.transportMessageId("parent"), changed, true, "opened-test-wire"))
+        val stored = db.messageDao().getMessageById("parent")!!
+        assertEquals("quoted", stored.replyToId)
+        assertEquals("Alice", stored.replyAuthor)
+        assertEquals("original text", stored.replyText)
+        assertEquals(1, acknowledgements.size)
+        assertEquals(DirectReplyResult.APPLIED, send(receiver, "parent"))
+        assertEquals(2, acknowledgements.size)
+    }
+
+    @Test fun groupReplyUpdateRequiresTheMatchingGroupAtUpdateTime() = runBlocking {
+        db.groupDao().insertGroup(GroupEntity(id = "group-a", title = "A", ownerId = peer))
+        db.groupDao().insertGroup(GroupEntity(id = "group-b", title = "B", ownerId = peer))
+        db.messageDao().insertMessage(row("personal"))
+        db.messageDao().insertMessage(row("group-parent", "group-b", peer).copy(channel = "GROUP"))
+        assertEquals(0, db.messageDao().applyGroupReply("group-a", "group-parent", "target", "A", "wrong"))
+        assertEquals(0, db.messageDao().applyGroupReply("group-a", "personal", "target", "A", "wrong"))
+        assertEquals(1, db.messageDao().applyGroupReply("group-b", "group-parent", "target", "B", "right"))
+        assertNull(db.messageDao().getMessageById("personal")!!.replyToId)
+        assertEquals("right", db.messageDao().getMessageById("group-parent")!!.replyText)
     }
 
     @Test fun unauthenticatedAndEarlyPacketsAreNotAcknowledged() = runBlocking {

@@ -460,22 +460,26 @@ interface MessageDao {
      */
     @Query(
         "UPDATE messages SET replyToId = :replyToId, replyAuthor = :replyAuthor, replyText = :replyText " +
-            "WHERE id = :messageId"
+            "WHERE id = :messageId AND chatId = :groupId " +
+            "AND EXISTS (SELECT 1 FROM groups g WHERE g.id = messages.chatId)"
     )
-    suspend fun applyReply(
+    suspend fun applyGroupReply(
+        groupId: String,
         messageId: String,
         replyToId: String?,
         replyAuthor: String,
         replyText: String,
     ): Int
 
-    /** Direct sidecars cannot modify outgoing, group, topic or another peer's rows. */
+    /** Direct sidecars are peer-scoped and cannot overwrite a different stored quote. */
     @Query(
         "UPDATE messages SET replyToId = :replyToId, replyAuthor = :replyAuthor, replyText = :replyText " +
             "WHERE id = :messageId AND senderId = :senderId AND isFromMe = 0 AND channel != 'GROUP' " +
             "AND (topicId IS NULL OR topicId = '') " +
             "AND EXISTS (SELECT 1 FROM chats c WHERE c.id = messages.chatId AND c.contactId = :senderId) " +
-            "AND NOT EXISTS (SELECT 1 FROM groups g WHERE g.id = messages.chatId)"
+            "AND NOT EXISTS (SELECT 1 FROM groups g WHERE g.id = messages.chatId) " +
+            "AND (replyToId IS NULL OR replyToId = '' OR " +
+            "(replyToId = :replyToId AND replyAuthor = :replyAuthor AND replyText = :replyText))"
     )
     suspend fun applyDirectReplyFromPeer(
         senderId: String,
