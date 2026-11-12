@@ -108,11 +108,11 @@ class HistoryHarnessIsComplete(unittest.TestCase):
         main = MAIN / "com/vladimir/messenger/data/push"
         tests = ROOT / "android-app/app/src/test/java/com/vladimir/messenger/data/push"
         for name in ("PushWakeQueue", "PushWakeDrain", "PushWakeIntake", "PushWakeDispatcher",
-                     "PushWakeAdmission", "PushEpochProtocol", "PushRegistrationState"):
+                     "PushWakeAdmission", "PushEpochProtocol", "PushRegistrationState", "PushWakeRunLoop"):
             self.assertIn(main / (name + ".kt"), files)
         script = SCRIPT.read_text()
         for name in ("PushWakeScheduleGate", "PushWakeAdmission", "PushWakeIntake",
-                     "PushWakeDispatcher", "PushWakeDrain"):
+                     "PushWakeDispatcher", "PushWakeDrain", "PushWakeRunLoop"):
             self.assertIn(tests / (name + "Test.kt"), files)
             self.assertIn("com.vladimir.messenger.data.push." + name + "Test", script)
         self.assertIn("generate-push-inbox-model.py", script)

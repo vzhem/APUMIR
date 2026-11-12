@@ -27,8 +27,9 @@ import java.util.concurrent.CancellationException
  * or an earlier, unleased snapshot is restored and the counter repeats, except
  * for a negligible random collision. Restoring a snapshot that contains the
  * SAME live claim is not detected. Nor does this detect database deletion or
- * protect identity/pin/restore from ABA. Rows expire after an hour; overflow
- * coalesces a generic recovery marker instead of silently dropping a contact.
+ * protect identity/pin/restore from ABA. Expired routes and overflow coalesce
+ * into a generic recovery marker. The marker is renewed across long outages
+ * and may be removed only after its own successful, current recovery pass.
  */
 internal class PushWakeInbox(
     context: Context,
@@ -281,7 +282,32 @@ internal class PushWakeInbox(
     }
 
     private fun normalize(db: SQLiteDatabase, nowMs: Long) {
-        db.execSQL("DELETE FROM pending WHERE expires_at<=?", arrayOf(nowMs))
+        val hasExpired = db.rawQuery(
+            "SELECT 1 FROM pending WHERE expires_at<=? LIMIT 1", arrayOf(nowMs.toString()),
+        ).use { it.moveToFirst() }
+        if (hasExpired) {
+            // Never silently forget a wake after a prolonged outage. Advance an
+            // existing recovery revision even if it is leased: an older pass
+            // cannot consume newly expired routes. Renew an expired recovery
+            // itself as well. All of this and deletion run in one transaction.
+            val previous = revision(db, RECOVERY)
+            check(previous != Long.MAX_VALUE) { "push wake recovery sequence exhausted" }
+            val values = ContentValues().apply {
+                put("expires_at", nowMs + TTL_MS)
+                put("revision", if (previous == null) 1L else previous + 1L)
+            }
+            if (previous == null) {
+                values.put("route", RECOVERY)
+                values.put("due_at", nowMs)
+                values.putNull("lease")
+                values.putNull("lease_nonce")
+                values.put("lease_until", 0L)
+                check(db.insertOrThrow("pending", null, values) != -1L)
+            } else {
+                check(db.update("pending", values, "route=? AND revision=?", arrayOf(RECOVERY, previous.toString())) == 1)
+            }
+            db.execSQL("DELETE FROM pending WHERE route<>? AND expires_at<=?", arrayOf(RECOVERY, nowMs))
+        }
         // A backwards wall-clock change must not hide a row or lease for years.
         db.execSQL("UPDATE pending SET expires_at=? WHERE expires_at>?", arrayOf(nowMs + TTL_MS, nowMs + TTL_MS))
         db.execSQL("UPDATE pending SET due_at=? WHERE due_at>?", arrayOf(nowMs + RETRY_MS, nowMs + RETRY_MS))

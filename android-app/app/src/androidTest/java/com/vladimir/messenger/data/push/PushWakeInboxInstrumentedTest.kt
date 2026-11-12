@@ -108,11 +108,129 @@ class PushWakeInboxInstrumentedTest {
         val old = ready(store, now)
         val afterExpiry = now + PushWakeInbox.TTL_MS
         assertEquals(PushWakeInbox.EnqueueResult.QUEUED, store.enqueueRoute(a, afterExpiry))
+        val recovery = ready(store, afterExpiry)
+        assertNull(recovery.route) // the expired signal also requests a full recovery
+        assertEquals(PushWakeInbox.Completion.COMPLETED, store.complete(recovery, true, afterExpiry))
         val current = ready(store, afterExpiry)
         assertEquals(old.revision, current.revision) // the row was recreated
         assertTrue(old.lease != current.lease)
         assertEquals(PushWakeInbox.Completion.STALE, store.complete(old, true, afterExpiry + 1))
         assertEquals(PushWakeInbox.Completion.COMPLETED, store.complete(current, true, afterExpiry + 1))
+    }
+
+    @Test fun expiredRoutesCoalesceIntoDurableRecoveryRatherThanDisappearing() {
+        val store = inbox(2)
+        assertEquals(PushWakeInbox.EnqueueResult.QUEUED, store.enqueueRoute(a, now))
+        assertEquals(PushWakeInbox.EnqueueResult.QUEUED, store.enqueueRoute(b, now + 1))
+        val afterExpiry = now + PushWakeInbox.TTL_MS + 1
+        assertEquals(afterExpiry, due(store, afterExpiry))
+        store.close()
+
+        val reopened = inbox(2)
+        val recovery = ready(reopened, afterExpiry)
+        assertNull(recovery.route)
+        assertEquals(PushWakeInbox.Completion.COMPLETED, reopened.complete(recovery, true, afterExpiry + 1))
+        assertEquals(PushWakeInbox.PendingResult.Empty, reopened.pending(afterExpiry + 1))
+    }
+
+    @Test fun recoveryMarkerSurvivesMultipleExpiryPeriodsAndReopen() {
+        val store = inbox()
+        assertEquals(PushWakeInbox.EnqueueResult.RECOVERY_QUEUED, store.enqueueRecovery(now))
+        val afterLongOutage = now + PushWakeInbox.TTL_MS * 5
+        assertEquals(afterLongOutage, due(store, afterLongOutage))
+        store.close()
+
+        val reopened = inbox()
+        val later = afterLongOutage + PushWakeInbox.TTL_MS * 3
+        assertEquals(later, due(reopened, later))
+        reopened.close()
+        val recovery = ready(reopened, later)
+        assertNull(recovery.route)
+        assertEquals(PushWakeInbox.Completion.COMPLETED, reopened.complete(recovery, true, later + 1))
+        assertEquals(PushWakeInbox.PendingResult.Empty, reopened.pending(later + 1))
+    }
+
+    @Test fun expiringRouteCannotBeErasedByAnInflightRecoveryCompletion() {
+        val store = inbox()
+        assertEquals(PushWakeInbox.EnqueueResult.QUEUED, store.enqueueRoute(a, now))
+        assertEquals(PushWakeInbox.EnqueueResult.RECOVERY_QUEUED, store.enqueueRecovery(now + 10))
+        val beforeExpiry = now + PushWakeInbox.TTL_MS - 10_000
+        val old = ready(store, beforeExpiry)
+        assertNull(old.route)
+        val afterExpiry = now + PushWakeInbox.TTL_MS
+        assertEquals(beforeExpiry + PushWakeInbox.LEASE_MS, due(store, afterExpiry))
+        assertEquals(PushWakeInbox.Completion.NEWER_QUEUED, store.complete(old, true, afterExpiry + 1))
+        val recovery = ready(store, afterExpiry + 1)
+        assertNull(recovery.route)
+        assertTrue(recovery.revision > old.revision)
+        assertEquals(PushWakeInbox.Completion.COMPLETED, store.complete(recovery, true, afterExpiry + 2))
+        assertEquals(PushWakeInbox.PendingResult.Empty, store.pending(afterExpiry + 2))
+    }
+
+    @Test fun expiredRecoveryLeaseRequiresANewRecoveryPass() {
+        val store = inbox()
+        assertEquals(PushWakeInbox.EnqueueResult.RECOVERY_QUEUED, store.enqueueRecovery(now))
+        val beforeExpiry = now + PushWakeInbox.TTL_MS - 1
+        val old = ready(store, beforeExpiry)
+        assertNull(old.route)
+        val afterExpiry = now + PushWakeInbox.TTL_MS
+        assertEquals(PushWakeInbox.Completion.NEWER_QUEUED, store.complete(old, true, afterExpiry))
+        val recovery = ready(store, afterExpiry)
+        assertNull(recovery.route)
+        assertEquals(PushWakeInbox.Completion.COMPLETED, store.complete(recovery, true, afterExpiry + 1))
+        assertEquals(PushWakeInbox.PendingResult.Empty, store.pending(afterExpiry + 1))
+    }
+
+    @Test fun recoveryAndExpiredRouteDeletionRollBackTogetherOnSqlFailure() {
+        val store = inbox()
+        assertEquals(PushWakeInbox.EnqueueResult.QUEUED, store.enqueueRoute(a, now))
+        store.close()
+        SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.execSQL("CREATE TRIGGER deny_expiry_delete BEFORE DELETE ON pending WHEN OLD.route <> '*' " +
+                "BEGIN SELECT RAISE(ABORT, 'test failure'); END")
+        }
+        val afterExpiry = now + PushWakeInbox.TTL_MS
+        assertEquals(PushWakeInbox.PendingResult.Unavailable, store.pending(afterExpiry))
+        store.close()
+        SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.rawQuery("SELECT count(*) FROM pending WHERE route=?", arrayOf(a)).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(1, cursor.getInt(0))
+            }
+            db.rawQuery("SELECT count(*) FROM pending WHERE route='*'", null).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(0, cursor.getInt(0))
+            }
+            db.execSQL("DROP TRIGGER deny_expiry_delete")
+        }
+        val recovery = ready(store, afterExpiry)
+        assertNull(recovery.route)
+        assertEquals(PushWakeInbox.Completion.COMPLETED, store.complete(recovery, true, afterExpiry + 1))
+        assertEquals(PushWakeInbox.PendingResult.Empty, store.pending(afterExpiry + 1))
+    }
+
+    @Test fun exhaustedRecoveryRevisionDoesNotDiscardExpiredRoutes() {
+        val store = inbox()
+        assertEquals(PushWakeInbox.EnqueueResult.QUEUED, store.enqueueRoute(a, now))
+        assertEquals(PushWakeInbox.EnqueueResult.RECOVERY_QUEUED, store.enqueueRecovery(now + 10))
+        store.close()
+        SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.execSQL("UPDATE pending SET revision=? WHERE route='*'", arrayOf(Long.MAX_VALUE))
+        }
+        val afterExpiry = now + PushWakeInbox.TTL_MS
+        assertEquals(PushWakeInbox.PendingResult.Unavailable, store.pending(afterExpiry))
+        store.close()
+        SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.rawQuery("SELECT count(*) FROM pending WHERE route=?", arrayOf(a)).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(1, cursor.getInt(0))
+            }
+            db.execSQL("UPDATE pending SET revision=1 WHERE route='*'")
+        }
+        val recovery = ready(store, afterExpiry)
+        assertNull(recovery.route)
+        assertEquals(PushWakeInbox.Completion.COMPLETED, store.complete(recovery, true, afterExpiry + 1))
+        assertEquals(PushWakeInbox.PendingResult.Empty, store.pending(afterExpiry + 1))
     }
 
     @Test fun recreatedDatabaseRejectsAnOldClaimWithMatchingCounters() {

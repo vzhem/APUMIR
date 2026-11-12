@@ -14,6 +14,7 @@ MAILBOX_OUTBOX_CLASS = "com.vladimir.messenger.data.push.PushMailboxOutboxInstru
 MAILBOX_OUTBOX_FFI_CLASS = "com.vladimir.messenger.data.push.PushMailboxOutboxRealFfiInstrumentedTest"
 PUSH_INBOX_CLASS = "com.vladimir.messenger.data.push.PushWakeInboxInstrumentedTest"
 PUSH_DRAIN_CLASS = "com.vladimir.messenger.data.push.PushWakeDrainInstrumentedTest"
+PUSH_WORK_CLASS = "com.vladimir.messenger.data.push.PushWakeWorkManagerInstrumentedTest"
 FIREBASE_CLASS = "com.vladimir.messenger.data.push.FirebaseClientConfigurationInstrumentedTest"
 CORE_LIFECYCLE_CLASS = "com.vladimir.messenger.data.CoreLifecycleOwnershipInstrumentedTest"
 HEARTBEAT_CLASS = "com.vladimir.messenger.service.DeliveryHeartbeatInstrumentedTest"
@@ -87,6 +88,12 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, OUTBOX_CLASS: {
     "newWakeDuringLeaseCannotBeErasedByTheOldCompletion",
     "abandonedLeaseRecoversAndLateOwnerCannotDeleteReplacement",
     "expiryAndReinsertionCannotReuseAnOldLease",
+    "expiredRoutesCoalesceIntoDurableRecoveryRatherThanDisappearing",
+    "recoveryMarkerSurvivesMultipleExpiryPeriodsAndReopen",
+    "expiringRouteCannotBeErasedByAnInflightRecoveryCompletion",
+    "expiredRecoveryLeaseRequiresANewRecoveryPass",
+    "recoveryAndExpiredRouteDeletionRollBackTogetherOnSqlFailure",
+    "exhaustedRecoveryRevisionDoesNotDiscardExpiredRoutes",
     "recreatedDatabaseRejectsAnOldClaimWithMatchingCounters",
     "restoredPreLeaseSnapshotRejectsOldClaimEvenWhenCountersRepeat",
     "versionOneMigrationPreservesWakesAndReleasesLegacyLeases",
@@ -107,6 +114,11 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, OUTBOX_CLASS: {
     "startingWithoutACompletedReceiveWindowDoesNotConsumeTheWake",
     "cancellationKeepsLeaseAndRecoveryCanRetryAfterDeadline",
     "eachPassIsBoundedAndUnprocessedRoutesRemainPending",
+}, PUSH_WORK_CLASS: {
+    "independentSuccessorRunsBeforeOlderWorkerReturnsAndSurvivesItsFailure",
+    "enqueueFailuresReleaseTheGateAndPreserveThePersistedSignal",
+    "retryResultKeepsTheSignalUntilIndependentPeriodicRecovery",
+    "periodicRecoveryDirectlyDrainsPersistentInboxDespiteStaleTicket",
 }, FIREBASE_CLASS: {
     "configuredSdkHasAutoInitDisabledWithoutTokenRequest",
     "wakeCryptoFfiRejectsInvalidInputWithoutStartingPush",

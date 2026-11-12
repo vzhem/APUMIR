@@ -47,6 +47,8 @@ class NotificationResultsTest(unittest.TestCase):
         self.assertEqual(1, self.run_report(missing_mailbox_outbox))
         missing_mailbox_outbox_ffi = [case for case in self.all_cases() if case[0] != checker.MAILBOX_OUTBOX_FFI_CLASS]
         self.assertEqual(1, self.run_report(missing_mailbox_outbox_ffi))
+        for classname in (checker.PUSH_INBOX_CLASS, checker.PUSH_DRAIN_CLASS, checker.PUSH_WORK_CLASS):
+            self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[0] != classname]))
         missing_firebase = [case for case in self.all_cases() if case[0] != checker.FIREBASE_CLASS]
         self.assertEqual(1, self.run_report(missing_firebase))
         missing_lifecycle = [case for case in self.all_cases() if case[0] != checker.CORE_LIFECYCLE_CLASS]
