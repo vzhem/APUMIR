@@ -72,13 +72,17 @@ jobs:
           import json
           from pathlib import Path
           from site_release_files import MAX_METADATA_BYTES, validate_inputs
-          from site_verify_http import verify_all
+          from site_verify_http import SiteFileError, verify_all
           with Path('site-reference.json').open('rb') as source:
               metadata = source.read(MAX_METADATA_BYTES + 1)
           if len(metadata) > MAX_METADATA_BYTES:
               raise ValueError('release metadata too large')
           files = validate_inputs(Path('reference-files'), json.loads(metadata), 'v11.74.508')
-          verify_all(files, lambda: True)
+          try:
+              verify_all(files, lambda: True)
+          except SiteFileError as error:
+              print(f'::error title=Reference site verification::{error.name}: {error.reason}')
+              raise SystemExit(1)
           print('All public files match the old release snapshot before the probe')
           PY
 
@@ -99,12 +103,16 @@ jobs:
           import json
           from pathlib import Path
           from site_release_files import MAX_METADATA_BYTES, validate_inputs
-          from site_verify_http import verify_all
+          from site_verify_http import SiteFileError, verify_all
           with Path('site-reference.json').open('rb') as source:
               metadata = source.read(MAX_METADATA_BYTES + 1)
           if len(metadata) > MAX_METADATA_BYTES:
               raise ValueError('release metadata too large')
           files = validate_inputs(Path('reference-files'), json.loads(metadata), 'v11.74.508')
-          verify_all(files, lambda: True)
+          try:
+              verify_all(files, lambda: True)
+          except SiteFileError as error:
+              print(f'::error title=Reference site verification::{error.name}: {error.reason}')
+              raise SystemExit(1)
           print('All public files still match the old release snapshot after the probe')
           PY
