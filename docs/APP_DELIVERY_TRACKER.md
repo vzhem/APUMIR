@@ -37,6 +37,11 @@
   `check-android-compile.sh`), Android-instrumented `FcmTokenJournalInstrumentedTest`
   (настоящие Keystore/SQLite; **на эмуляторе ещё не запускался**), `kt_syntax` и
   `check_unresolved_symbols` — 0.
+- На `e0d48e7` в ветке прошли [JVM](https://github.com/vzhem/APUMIR/actions/runs/43470325396)
+  (весь набор, включая 25 новых кейсов), [Android](https://github.com/vzhem/APUMIR/actions/runs/43470325381),
+  [Worker prototype](https://github.com/vzhem/APUMIR/actions/runs/43470325385) (64/64) и
+  [Firebase preflight](https://github.com/vzhem/APUMIR/actions/runs/43470325435); сборка APK
+  ветки без публикации ещё выполнялась на момент записи. Это не сквозная доставка.
 - **Чего нет и что блокирует включение:** реальный `FirebaseMessagingService`,
   регистрация маршрута от настоящей пары key/pin, производственный callback
   приёма, уведомления без foreground-службы, tombstone обычного одиночного
