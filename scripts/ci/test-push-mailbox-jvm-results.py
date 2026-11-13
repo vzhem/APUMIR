@@ -82,6 +82,18 @@ class MailboxResultsTest(unittest.TestCase):
             self.assertEqual(len(methods), len(set(methods)))
             self.assertEqual(expected, set(methods))
 
+    def test_deletion_outbox_source_cases_are_all_required(self):
+        source = (Path(__file__).resolve().parents[2] /
+                  "android-app/app/src/test/java/com/vladimir/messenger/data/repository/DeletionOutboxTest.kt").read_text(encoding="utf-8")
+        methods = re.findall(r"@Test\s+fun\s+([A-Za-z_]\w*)\s*\(", source)
+        self.assertEqual(8, len(methods))
+        self.assertEqual(checker.DELETION_OUTBOX_EXPECTED, set(methods))
+        for name in checker.DELETION_OUTBOX_EXPECTED:
+            key = (checker.DELETION_OUTBOX_CLASS, name)
+            self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[:2] != key]))
+            skipped = [(*case[:2], "<skipped/>") if case[:2] == key else case for case in self.all_cases()]
+            self.assertEqual(1, self.run_report(skipped))
+
     def test_filtered_android_compile_selects_every_required_class(self):
         script = Path(__file__).with_name("check-android-compile.sh").read_text(encoding="utf-8")
         selected = set(re.findall(r"--tests '\*(\w+)\*'", script))

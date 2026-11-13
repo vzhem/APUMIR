@@ -98,6 +98,18 @@ class NotificationResultsTest(unittest.TestCase):
             self.assertEqual(len(methods), len(set(methods)))
             self.assertEqual(checker.EXPECTED[classname], set(methods))
 
+    def test_deletion_ack_routing_cases_are_all_required(self):
+        source = (Path(__file__).resolve().parents[2] /
+                  "android-app/app/src/androidTest/java/com/vladimir/messenger/data/repository/DeletionOutboxRoutingInstrumentedTest.kt").read_text(encoding="utf-8")
+        methods = re.findall(r"@Test\s+fun\s+([A-Za-z_]\w*)\s*\(", source)
+        self.assertEqual(2, len(methods))
+        self.assertEqual(checker.EXPECTED[checker.DELETION_OUTBOX_ROUTING_CLASS], set(methods))
+        for name in methods:
+            key = (checker.DELETION_OUTBOX_ROUTING_CLASS, name)
+            self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[:2] != key]))
+            skipped = [(*case[:2], "<skipped/>") if case[:2] == key else case for case in self.all_cases()]
+            self.assertEqual(1, self.run_report(skipped))
+
     def test_instrumentation_runner_selects_every_required_class(self):
         runner = Path(__file__).with_name("run-android-navigation-tests.sh").read_text(encoding="utf-8")
         selected = re.search(r"-Pandroid\.testInstrumentationRunnerArguments\.class=([^\s]+)", runner)

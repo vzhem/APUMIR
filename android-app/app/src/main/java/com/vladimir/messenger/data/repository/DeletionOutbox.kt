@@ -31,9 +31,8 @@ import javax.inject.Singleton
  * через `|`, атомарная перезапись.
  */
 @Singleton
-class DeletionOutbox @Inject constructor(
-    @ApplicationContext context: Context,
-) {
+class DeletionOutbox internal constructor(private val root: File) {
+    @Inject constructor(@ApplicationContext context: Context) : this(File(context.noBackupFilesDir, DIR_NAME))
     data class Entry(
         /** Идентификатор УДАЛЯЕМОГО сообщения. */
         val targetId: String,
@@ -51,8 +50,6 @@ class DeletionOutbox @Inject constructor(
         /** Кому уже досылали (группа): повторно не дёргаем. */
         var tried: List<String>,
     )
-
-    private val root = File(context.noBackupFilesDir, DIR_NAME)
 
     @Synchronized
     fun add(entry: Entry) {
@@ -79,15 +76,19 @@ class DeletionOutbox @Inject constructor(
 
     @Synchronized
     fun markTried(entry: Entry, now: Long, peer: String? = null) {
-        val current = all().firstOrNull {
-            it.kind == entry.kind && it.chatId == entry.chatId && it.targetId == entry.targetId
+        // Keep the objects read from this snapshot: rereading the file after
+        // mutation would discard the updated retry time, count and group peers.
+        val entries = all()
+        val current = entries.firstOrNull {
+            it.kind == entry.kind && it.chatId == entry.chatId && it.targetId == entry.targetId &&
+                it.peerId == entry.peerId && it.deleterId == entry.deleterId && it.atMs == entry.atMs
         } ?: return
         current.lastTryMs = now
         current.attempts += 1
         if (!peer.isNullOrBlank() && peer !in current.tried) {
             current.tried = current.tried + peer
         }
-        saveAll(all())
+        saveAll(entries)
     }
 
     @Synchronized
@@ -96,10 +97,20 @@ class DeletionOutbox @Inject constructor(
         if (next.size != all().size) saveAll(next)
     }
 
+    /**
+     * Remove only the single direct request named by both peer and target.
+     * Multiple matches are ambiguous (for example after chat restoration), so
+     * leave them for retry rather than guessing. This is NOT authentication:
+     * callers must also establish the actual origin of an acknowledgement.
+     */
     @Synchronized
-    fun removeByTarget(kind: String, targetId: String) {
-        val next = all().filterNot { it.kind == kind && it.targetId == targetId }
-        if (next.size != all().size) saveAll(next)
+    fun acknowledgeDirect(peerId: String, targetId: String): Boolean {
+        if (peerId.isBlank() || targetId.isBlank()) return false
+        val entries = all()
+        val matches = entries.filter { it.kind == KIND_DIRECT && it.peerId == peerId && it.targetId == targetId }
+        if (matches.size != 1) return false
+        saveAll(entries - matches.single())
+        return true
     }
 
     @Synchronized

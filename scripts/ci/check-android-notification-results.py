@@ -13,6 +13,7 @@ MIRROR_OUTGOING_CLASS = "com.vladimir.messenger.data.repository.MirrorOutgoingSt
 MIRROR_PENDING_CLASS = "com.vladimir.messenger.data.repository.MirrorPendingOutgoingInstrumentedTest"
 OUTBOX_CLASS = "com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest"
 REPLY_OUTBOX_CLASS = "com.vladimir.messenger.data.repository.ReplyAwareOutboxSenderInstrumentedTest"
+DELETION_OUTBOX_ROUTING_CLASS = "com.vladimir.messenger.data.repository.DeletionOutboxRoutingInstrumentedTest"
 CLEAR_LOOKUP_CLASS = "com.vladimir.messenger.data.chatclear.ChatClearTombstonesInstrumentedTest"
 PUSH_CLASS = "com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest"
 REGISTRATION_CLASS = "com.vladimir.messenger.data.push.PushRegistrationStoreInstrumentedTest"
@@ -121,6 +122,9 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "parentAckDuringBodyKeepsCurrentReplyButStopsLaterScans",
     "failedReplyAndParentAckLeaveNoDurableSidecarRetry",
     "manualRetryUsesManualTransportAndParentClearScope",
+}, DELETION_OUTBOX_ROUTING_CLASS: {
+    "legacyAckRouteRemovesOnlyTheNamedPeerRequest",
+    "legacyAckRouteLeavesAmbiguousRequestsForRetry",
 }, CLEAR_LOOKUP_CLASS: {
     "survivesRestartAndScopesByOwnerAndPeer",
     "pagesAreStableAndOwnerScoped",

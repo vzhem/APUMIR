@@ -77,6 +77,11 @@ class DeleteReadTest(unittest.TestCase):
         incoming = group[group.index("is GroupWire.Packet.MessageDelete -> {"):group.index("is GroupWire.Packet.PostsRequest -> {")]
         self.assertNotRegex(incoming, r'\.(?:status|isRead|readAt)\b')
 
+    def test_direct_delete_ack_routes_through_peer_scoped_queue_operation(self):
+        body = method(source("data/repository/MessageDeletionRepository.kt"), "routeIncoming")
+        self.assertIn("outbox.acknowledgeDirect(senderId, ackedId)", body)
+        self.assertNotIn("removeByTarget", body)
+
     def test_delete_action_is_based_on_ownership_or_moderation_not_read(self):
         ui = source("ui/screens/chat/ChatDetailScreen.kt")
         block = ui[ui.index("// Раунд 135: удаление своего сообщения"):]

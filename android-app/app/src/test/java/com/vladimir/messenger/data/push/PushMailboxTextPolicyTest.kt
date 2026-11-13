@@ -12,6 +12,8 @@ class PushMailboxTextPolicyTest {
             "123 + 456 = 579",
             "Семья 👨‍👩‍👧, ❤️ и 😀",
             "café e\u0301 ١٢٣",
+            // Bare domains are accepted: this policy is not a URL detector.
+            "www.example.org",
             "x".repeat(PushMailboxTextPolicy.MAX_CODE_UNITS),
         ).forEach { assertTrue("expected supported text", PushMailboxTextPolicy.accepts(it)) }
     }

@@ -300,6 +300,19 @@ REPLY_OUTBOX_EXPECTED = {
 }
 EXPECTED[REPLY_OUTBOX_CLASS] = REPLY_OUTBOX_EXPECTED
 
+DELETION_OUTBOX_CLASS = "com.vladimir.messenger.data.repository.DeletionOutboxTest"
+DELETION_OUTBOX_EXPECTED = {
+    "retryUpdatesPersistAndRespectTheNextInterval",
+    "groupRetryPersistsDistinctTargetsAndDoesNotChangeOtherEntries",
+    "staleAttemptCannotModifyAReplacedRequestWithDifferentIdentity",
+    "directAcknowledgementOnlyRemovesTheMatchingPeerAndLeavesGroups",
+    "ambiguousDirectAcknowledgementDoesNotGuessBetweenChats",
+    "concurrentRetriesOnOneInstanceDoNotLoseCountsOrGroupTargets",
+    "failedRewriteDoesNotReportAcknowledgementOrEraseTheOldFile",
+    "missingAttemptAndAcknowledgementDoNotCreateAnOutbox",
+}
+EXPECTED[DELETION_OUTBOX_CLASS] = DELETION_OUTBOX_EXPECTED
+
 
 def check(results: Path) -> int:
     expected = {(classname, name) for classname, names in EXPECTED.items() for name in names}
