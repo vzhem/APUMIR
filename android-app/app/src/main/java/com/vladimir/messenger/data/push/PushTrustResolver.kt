@@ -56,7 +56,7 @@ internal class PushTrustResolver(
         /** Derive material for [epochHex] in the receiver direction. */
         fun derive(epochHex: String): PushWakeCrypto.Material? {
             if (closed || epochHex.isEmpty()) return null
-            return crypto.derive(localBinding, pinnedPeerBinding, localSecret, epochHex, false)
+            return crypto.material(localBinding, pinnedPeerBinding, localSecret, epochHex, false)
         }
 
         /** The route for the registered epoch, or null when nothing is registered. */

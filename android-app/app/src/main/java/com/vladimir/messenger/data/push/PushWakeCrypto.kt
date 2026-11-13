@@ -16,7 +16,8 @@ import uniffi.p2p_core.signPushWakeRegistration
  * value is safe to log, save in a backup or pass to a different recipient.
  */
 internal class PushWakeCrypto(
-    private val deriveFfi: (ByteArray, ByteArray, ByteArray, ByteArray, Boolean) -> ByteArray = ::derivePushWakeMaterial,
+    // Named `derive` because the existing JVM tests construct it that way.
+    private val derive: (ByteArray, ByteArray, ByteArray, ByteArray, Boolean) -> ByteArray = ::derivePushWakeMaterial,
     private val sign: (ByteArray, ByteArray, ByteArray, ULong, ULong, ByteArray, Boolean) -> ByteArray = ::signPushWakeRegistration,
     private val signMailbox: (ByteArray, ByteArray, ByteArray, ULong, ByteArray, ByteArray, Boolean) -> ByteArray = ::signPushMailboxAccess,
     private val recordFailure: () -> Unit,
@@ -25,7 +26,7 @@ internal class PushWakeCrypto(
      * Derives material through the FFI entry point bound at construction. The
      * class stays final: a subclass could otherwise bypass these checks.
      */
-    fun derive(
+    fun material(
         localBinding: ByteArray,
         pinnedPeerBinding: ByteArray,
         localSecret: ByteArray,
@@ -53,7 +54,7 @@ internal class PushWakeCrypto(
             val peerHash = PushEpochProtocol.bindingHash(expectedPeer)
             val expectedEpochHash = sha256(expectedEpoch)
             epochHash = expectedEpochHash
-            output = deriveFfi(local, peer, secret, epoch, localIsSender)
+            output = derive(local, peer, secret, epoch, localIsSender)
             if (!MessageDigest.isEqual(local, expectedLocal) || !MessageDigest.isEqual(peer, expectedPeer) ||
                 !MessageDigest.isEqual(secret, expectedSecret) || !MessageDigest.isEqual(epoch, expectedEpoch)
             ) {
