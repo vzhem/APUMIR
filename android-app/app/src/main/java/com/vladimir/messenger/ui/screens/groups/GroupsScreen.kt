@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.groups
 
+import com.vladimir.messenger.ui.components.ApuBackButton
+
 // =============================================================================
 // GROUPSSCREEN.KT — раздел «Сообщества»: группы и каналы, создание новых
 // =============================================================================
@@ -41,7 +43,6 @@ import com.vladimir.messenger.data.group.GroupRole
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import com.vladimir.messenger.ui.components.ApuPremiumIconTile
 import com.vladimir.messenger.ui.components.ApuSettingsCard
@@ -230,11 +231,7 @@ fun GroupsScreen(
                     scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
                 ),
                 title = { ApuSettingsHeader(stringResource(R.string.nav_communities)) },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                    }
-                },
+                navigationIcon = { ApuBackButton(onClick = onBackClick) },
                 actions = {
                     // Кроме QR: вставить скопированную ссылку и войти.
                     IconButton(onClick = { showJoin = true }) {
@@ -636,77 +633,19 @@ fun GroupsScreen(
 
     // QR, внешняя ссылка и отправка приглашения в личные чаты APU.
     inviteChoice?.let { group ->
-        val what = if (group.isChannel) stringResource(R.string.word_channel_acc) else stringResource(R.string.word_group_acc)
-        // Раунд 198: получателя ссылки может не быть с APU - по умолчанию
-        // прикладываем установочный APK; галочка позволяет не таскать 40 МБ.
-        var attachApk by remember { mutableStateOf(true) }
-        ApuSettingsDialog(
-            onDismissRequest = { inviteChoice = null },
-            title = { Text(stringResource(R.string.invite_title, what)) },
-            text = {
-                Column {
-                    ApuPremiumContentButton(
-                        onClick = {
-                            inviteChoice = null
-                            inviteApu = group
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        style = DiagnosticsActionStyle.PRIMARY,
-                    ) {
-                        Icon(Icons.Filled.PersonAdd, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            stringResource(R.string.contacts_send_in_apu),
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                    Text(
-                        stringResource(R.string.invite_send_apu_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = ApuBubbleMutedColor,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(stringResource(R.string.grp_qr_hint))
-                    Spacer(Modifier.height(8.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(14.dp))
-                            .clickable { attachApk = !attachApk }
-                            .padding(horizontal = 4.dp),
-                    ) {
-                        ApuPremiumCheckbox(checked = attachApk, onCheckedChange = { attachApk = it })
-                        Text(
-                            stringResource(R.string.contacts_attach_apk),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
+        CommunityInviteChoiceDialog(
+            isChannel = group.isChannel,
+            onDismiss = { inviteChoice = null },
+            onSendInApu = { inviteChoice = null; inviteApu = group },
+            onShowQr = {
+                inviteChoice = null
+                viewModel.prepareQrInvite(group.id) { title, link -> qrInvite = title to link }
+            },
+            onShareLink = { attachApk ->
+                inviteChoice = null
+                viewModel.shareInvite(group.id) { title, link ->
+                    AppShare.shareGroupInvite(context, title, link, group.isChannel, attachApk)
                 }
-            },
-            confirmButton = {
-                ApuTextAction(
-                    label = stringResource(R.string.groups_show_qr),
-                    onClick = {
-                    val chosen = group
-                    inviteChoice = null
-                    viewModel.prepareQrInvite(chosen.id) { title, link ->
-                        qrInvite = title to link
-                    }
-                },
-                )
-            },
-            dismissButton = {
-                ApuTextAction(
-                    label = stringResource(R.string.groups_send_link),
-                    onClick = {
-                    val chosen = group
-                    inviteChoice = null
-                    viewModel.shareInvite(chosen.id) { title, link ->
-
-                        AppShare.shareGroupInvite(context, title, link, chosen.isChannel, attachApk)
-                    }
-                },
-                )
             },
         )
     }

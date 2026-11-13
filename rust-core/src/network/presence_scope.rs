@@ -10,16 +10,15 @@
 //!
 //! - помнит список «своих» (`node_id`), которых просит приложение через
 //!   `set_presence_audience` и/или которых ядро запомнило само (переписка);
-//! - в маленькой сети (меньше [`SCALING_MIN_PEERS`] узлов) НИЧЕГО не меняет:
-//!   режим [`PresenceMode::Broadcast`] — presence идёт в общий топик раз в
-//!   минуту, как раньше (телефоны владельца и старые сборки видят старое
-//!   поведение);
+//! - в маленькой сети режим [`PresenceMode::Broadcast`] сохраняет общий
+//!   топик раз в минуту для совместимости со старыми сборками;
 //! - в большой сети ([`PresenceMode::Scoped`]) объявление в общий топик
 //!   уходит редко — это «маяк» раз в [`BEACON_INTERVAL_MS`]. Он остаётся
 //!   retained: новый узел, подписавшись, сразу получает последний адрес и
 //!   может дозвониться напрямую, не дожидаясь маяка;
-//! - «своим» presence уходит лично, прямо по QUIC ([`DIRECT_PRESENCE_TAG`]),
-//!   раз в [`OWN_INTERVAL_MS`] — без брокера, без общего эфира.
+//! - в обоих режимах «своим» presence уходит лично по QUIC без брокера:
+//!   не более 32 адресатов за минуту, с вращением очереди. При 256 контактах
+//!   полный круг требует минимум 8 минут; это не гарантия онлайна всех сразу.
 //!
 //! Формат личного кадра — текстовая строка «тег|поля», первое поле не
 //! `pk_…`, поэтому старые сборки молча отбрасывают её так же, как чужие
@@ -27,7 +26,7 @@
 //! существующих форматах не меняется — правило N ↔ N-1 соблюдено.
 
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 /// Как часто объявление уходит в общий топик в режиме «своим» (маяк).
@@ -35,6 +34,17 @@ pub const BEACON_INTERVAL_MS: i64 = 600_000; // 10 минут
 
 /// Как часто личный presence уходит «своим» по прямому каналу.
 pub const OWN_INTERVAL_MS: i64 = 60_000; // 1 минута
+
+/// Online is a short-lived observation, not the 24-hour address cache.
+/// Keep in sync with Android PresenceRecovery.TTL_MS and MAX_CLOCK_SKEW_MS.
+pub const LIVE_PRESENCE_TTL_MS: i64 = 200_000;
+pub const MAX_FUTURE_SKEW_MS: i64 = 60_000;
+
+pub fn is_live_observation(sent_at_ms: i64, now_ms: i64) -> bool {
+    now_ms > 0 && sent_at_ms > 0
+        && sent_at_ms <= now_ms.saturating_add(MAX_FUTURE_SKEW_MS)
+        && now_ms.saturating_sub(sent_at_ms) <= LIVE_PRESENCE_TTL_MS
+}
 
 /// Сколько «своих» помним (защита от неограниченного роста).
 pub const MAX_OWN: usize = 256;
@@ -161,8 +171,11 @@ pub struct PresenceScope {
     /// Отсортировано, без дублей: и поиск, и порядок обхода - по одному
     /// замку, гонки «двое добавили одного» нет.
     own: Mutex<Vec<String>>,
-    /// Указатель круга: с кого продолжать рассылку личного presence.
+    /// Independent cursors: lookup must not skip the same contacts in every
+    /// personal-presence round (especially with exactly 64 contacts).
     cursor: AtomicUsize,
+    lookup_cursor: AtomicUsize,
+    generation: AtomicU64,
     /// Когда последний раз уходил маяк в общий топик (мс, 0 = никогда).
     last_beacon_ms: AtomicI64,
     /// Когда последний раз уходил личный presence «своим» (мс, 0 = никогда).
@@ -174,6 +187,8 @@ impl PresenceScope {
         Self {
             own: Mutex::new(Vec::new()),
             cursor: AtomicUsize::new(0),
+            lookup_cursor: AtomicUsize::new(0),
+            generation: AtomicU64::new(0),
             last_beacon_ms: AtomicI64::new(0),
             last_own_ms: AtomicI64::new(0),
         }
@@ -182,24 +197,26 @@ impl PresenceScope {
     /// Заменить список «своих» (вызов приложения: контакты и участники групп).
     /// Возвращает, сколько принято. Себя из списка выбрасываем.
     pub fn set_own(&self, ids: Vec<String>, our_id: Option<&str>) -> usize {
-        let mut unique: Vec<String> = Vec::new();
-        for raw in ids {
-            let id = raw.trim().to_string();
-            if id.is_empty() || Some(id.as_str()) == our_id || !id.starts_with("pk_") {
-                continue;
-            }
-            if unique.len() >= MAX_OWN {
-                break;
-            }
-            if !unique.iter().any(|known| known == &id) {
-                unique.push(id);
-            }
-        }
+        self.set_own_with_change(ids, our_id).0
+    }
+
+    /// Stable ordering before the cap avoids churn when a set arrives in a
+    /// different order. Repeating the same audience must not rewind a cursor.
+    pub fn set_own_with_change(&self, ids: Vec<String>, our_id: Option<&str>) -> (usize, bool) {
+        let mut unique: Vec<String> = ids.into_iter().map(|id| id.trim().to_string())
+            .filter(|id| !id.is_empty() && Some(id.as_str()) != our_id && id.starts_with("pk_"))
+            .collect();
         unique.sort();
+        unique.dedup();
+        unique.truncate(MAX_OWN);
         let count = unique.len();
-        *self.own.lock().unwrap() = unique;
-        self.cursor.store(0, Ordering::Relaxed);
-        count
+        let mut own = self.own.lock().unwrap();
+        let changed = *own != unique;
+        if changed {
+            *own = unique;
+            self.generation.fetch_add(1, Ordering::Relaxed);
+        }
+        (count, changed)
     }
 
     /// Запомнить «своего» (узел, с которым у нас есть переписка).
@@ -217,10 +234,14 @@ impl PresenceScope {
             Ok(_) => false,
             Err(position) => {
                 own.insert(position, id.to_string());
+                self.generation.fetch_add(1, Ordering::Relaxed);
                 true
             }
         }
     }
+
+    /// Changes also include peers learned from a message, not only FFI updates.
+    pub fn generation(&self) -> u64 { self.generation.load(Ordering::Relaxed) }
 
     /// Сколько «своих» знаем.
     pub fn own_len(&self) -> usize {
@@ -247,18 +268,25 @@ impl PresenceScope {
     /// Очередная порция «своих» для личного presence (с вращением круга,
     /// чтобы за несколько кругов получить успели все).
     pub fn next_batch(&self, limit: usize) -> Vec<String> {
+        self.next_from(&self.cursor, limit)
+    }
+
+    pub fn next_lookup_batch(&self, limit: usize) -> Vec<String> {
+        self.next_from(&self.lookup_cursor, limit)
+    }
+
+    fn next_from(&self, cursor: &AtomicUsize, limit: usize) -> Vec<String> {
         let own = self.own.lock().unwrap();
         if own.is_empty() || limit == 0 {
             return Vec::new();
         }
         let take = limit.min(own.len());
-        let start = self.cursor.load(Ordering::Relaxed) % own.len();
+        let start = cursor.load(Ordering::Relaxed) % own.len();
         let mut out = Vec::with_capacity(take);
         for step in 0..take {
             out.push(own[(start + step) % own.len()].clone());
         }
-        self.cursor
-            .store((start + take) % own.len(), Ordering::Relaxed);
+        cursor.store((start + take) % own.len(), Ordering::Relaxed);
         out
     }
 
@@ -375,6 +403,44 @@ mod tests {
             scope.add_own(&format!("pk_{:04}", i), None);
         }
         assert!(scope.own_len() <= MAX_OWN);
+    }
+
+    #[test]
+    fn unchanged_audience_and_lookup_do_not_starve_personal_presence_tail() {
+        let scope = PresenceScope::new();
+        let ids: Vec<String> = (0..64).map(|i| format!("pk_{:03}", i)).collect();
+        assert_eq!(scope.set_own_with_change(ids.clone(), None), (64, true));
+        let generation = scope.generation();
+        assert_eq!(scope.next_batch(32), ids[0..32].to_vec());
+        // Lookup must advance a different cursor.
+        assert_eq!(scope.next_lookup_batch(32), ids[0..32].to_vec());
+        let reversed = ids.iter().rev().cloned().collect();
+        assert_eq!(scope.set_own_with_change(reversed, None), (64, false));
+        assert_eq!(scope.generation(), generation);
+        assert_eq!(scope.next_batch(32), ids[32..64].to_vec());
+        assert_eq!(scope.next_lookup_batch(32), ids[32..64].to_vec());
+        assert!(scope.add_own("pk_new", None));
+        assert!(scope.generation() > generation);
+        let generation = scope.generation();
+        assert!(!scope.add_own("pk_new", None));
+        assert_eq!(scope.generation(), generation);
+        assert_eq!(scope.set_own_with_change(Vec::new(), None), (0, true));
+        assert!(scope.next_batch(32).is_empty());
+    }
+
+    #[test]
+    fn audience_cap_is_deterministic_and_freshness_has_strict_boundaries() {
+        let scope = PresenceScope::new();
+        let ids: Vec<String> = (0..MAX_OWN + 30).map(|i| format!("pk_{:03}", i)).collect();
+        assert_eq!(scope.set_own_with_change(ids.clone(), None), (MAX_OWN, true));
+        assert_eq!(scope.set_own_with_change(ids.into_iter().rev().collect(), None), (MAX_OWN, false));
+        let now = 1_000_000;
+        assert!(is_live_observation(now - LIVE_PRESENCE_TTL_MS, now));
+        assert!(!is_live_observation(now - LIVE_PRESENCE_TTL_MS - 1, now));
+        assert!(is_live_observation(now + MAX_FUTURE_SKEW_MS, now));
+        assert!(!is_live_observation(now + MAX_FUTURE_SKEW_MS + 1, now));
+        assert!(!is_live_observation(0, now));
+        assert!(!is_live_observation(now, 0));
     }
 
     #[test]

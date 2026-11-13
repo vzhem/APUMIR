@@ -31,20 +31,88 @@ class DeliveryCadenceContractTest(unittest.TestCase):
     def test_event_bus_waits_on_a_condvar_instead_of_idle_polling(self):
         # Поток спит в Rust и просыпается от события; таймерного опроса нет.
         self.assertIn("EVENT_WAIT_MS = 5_000L", self.cadence)
-        self.assertIn("RustBridge.awaitEvents(DeliveryCadence.eventWaitMs())", self.service)
+        loops = read(SERVICE / "CoreEventLoops.kt")
+        self.assertIn("waitMs = DeliveryCadence::eventWaitMs", self.service)
+        self.assertIn("RustBridge.awaitMainEvent(timeout)", self.service)
+        self.assertIn("RustBridge.awaitFileEvent(timeout)", self.service)
+        self.assertIn("if (!await(lane, waitMs())) continue", loops)
+        self.assertIn("currentCoroutineContext().ensureActive()", loops)
+        self.assertNotIn("RustBridge.drainEvents()", self.service)
         self.assertNotIn("pollDelayMs", self.cadence)
         self.assertNotIn("delay(DeliveryCadence.pollDelayMs(busy))", self.service)
         self.assertNotIn("FOREGROUND_POLL_MS = 250L", self.cadence)
         bridge = read(ROOT / "android-app/app/src/main/java/com/vladimir/messenger/data/RustBridge.kt")
-        self.assertIn("fun awaitEvents(", bridge)
+        self.assertIn("fun awaitMainEvent(", bridge)
+        self.assertIn("fun awaitFileEvent(", bridge)
         udl = read(ROOT / "rust-core/src/lib.udl")
-        self.assertIn("u64 await_events(u64 timeout_ms);", udl)
+        for method in ("await_main_event", "await_file_event"):
+            self.assertIn(f"boolean {method}(u64 timeout_ms);", udl)
         events = read(ROOT / "rust-core/src/engine/events.rs")
         self.assertIn("Condvar", events)
-        self.assertIn("wait_for_events", events)
+        self.assertIn("wait_for_lane", events)
+        self.assertIn("self.ready.notify_all()", events)
 
-    def test_incoming_batch_marks_activity(self):
-        self.assertIn("if (events.isNotEmpty()) DeliveryCadence.touch()", self.service)
+    def test_each_incoming_event_marks_activity(self):
+        processing = self.service[self.service.index("process = { event ->"):]
+        self.assertLess(processing.index("DeliveryCadence.touch()"), processing.index("handleEvent(event)"))
+
+    def test_main_and_file_consumers_are_independent_and_fair(self):
+        loops = read(SERVICE / "CoreEventLoops.kt")
+        self.assertIn("launch { runLane(Lane.Main) }", loops)
+        self.assertIn("launch { runLane(Lane.File) }", loops)
+        self.assertIn("MAX_INTERACTIVE_BURST = 8", loops)
+        self.assertIn("RustBridge.pollMainEvent(prefer)", self.service)
+        self.assertIn("RustBridge.pollFileEvent()", self.service)
+        self.assertIn("isRunning = RustBridge::isRunningCached", self.service)
+        events = read(ROOT / "rust-core/src/engine/events.rs")
+        self.assertIn("CoreEvent::FileChunkReceived { .. }", events)
+        self.assertIn("is_interactive(event) == prefer_interactive", events)
+
+    def test_native_send_and_lifecycle_have_distinct_lock_modes(self):
+        handle = read(ROOT / "rust-core/src/lib.rs")
+        self.assertIn("inner: std::sync::RwLock<P2PCore>", handle)
+        self.assertIn("self.inner.write().unwrap().stop()", handle)
+        self.assertIn("self.send_gates.for_message(&message_id)", handle)
+        self.assertIn("let core = self.inner.read().unwrap();", handle)
+        self.assertIn("self.events.poll_lane(", handle)
+
+    def test_waiting_files_do_not_fill_interactive_direct_queue(self):
+        scheduler = read(ROOT / "rust-core/src/network/direct_priority.rs")
+        transport = read(ROOT / "rust-core/src/network/direct_transport.rs")
+        self.assertIn("MAX_INTERACTIVE_BURST: usize = 8", scheduler)
+        self.assertIn("interactive: interactive_tx, file: file_tx", scheduler)
+        self.assertIn("lane.tx.try_send(interactive, job)", transport)
+        self.assertIn("while let Some(job) = rx.recv().await", transport)
+
+    def test_failed_neighbor_offer_is_rearmed_on_a_bounded_fair_sweep(self):
+        core = read(ROOT / "rust-core/src/engine/core.rs")
+        custody = read(ROOT / "rust-core/src/network/custody_relay.rs")
+        self.assertIn("if !sent { offers.note_send_failed(&msg_id, &peer); }", core)
+        self.assertIn("const OWN_LOOKUP_TICKS: u64 = 12", core)
+        self.assertIn("task.offered_to.retain(|known| known != peer)", custody)
+        self.assertIn("tasks.pop_front()", custody)
+        self.assertIn("tasks.push_back(task)", custody)
+        self.assertIn("task.accepted < task.offered_to.len().min(MAX_CUSTODY_PEERS)", custody)
+        self.assertIn("network::custody_relay::tests", read(ROOT / ".github/workflows/build-release.yml"))
+
+    def test_mqtt_wake_does_not_cancel_taken_connack_or_accelerate_presence(self):
+        core = read(ROOT / "rust-core/src/engine/core.rs")
+        transport = read(ROOT / "rust-core/src/network/mqtt_transport.rs")
+        cadence = read(ROOT / "rust-core/src/engine/mqtt_cadence.rs")
+        self.assertIn("transport.poll_event_or(outbound_rx.recv()).await", core)
+        self.assertIn("super::mqtt_wait::wait(", transport)
+        self.assertLess(transport.index("super::mqtt_wait::wait("), transport.index('"primary wildcard subscribe"'))
+        self.assertIn("PRESENCE_INTERVAL: Duration = Duration::from_secs(60)", cadence)
+        self.assertIn("GOSSIP_INTERVAL: Duration = Duration::from_secs(300)", cadence)
+
+    def test_wake_leases_serialize_platform_and_registry_transitions(self):
+        wake = read(SERVICE / "CoreWorkWakeLock.kt")
+        leases = read(SERVICE / "WorkWakeLeases.kt")
+        self.assertIn("WorkWakeLeases(", wake)
+        self.assertIn("synchronized(monitor)", leases)
+        self.assertIn("if (stopped) return@synchronized", leases)
+        self.assertIn("if (holders == 0 || !platformIsHeld()) platformAcquire()", leases)
+        self.assertIn("if (holders == 0) releasePlatform()", leases)
 
     def test_app_reports_foreground_and_background(self):
         self.assertIn("DeliveryCadence.setForeground(true)", self.main)
@@ -56,10 +124,10 @@ class DeliveryCadenceContractTest(unittest.TestCase):
         self.assertNotIn("chatQueueCycle", self.service)
         self.assertIn("chatOutboxPump.start(serviceScope)", self.service)
         self.assertIn("OutboxCadence.nextDelayMs(", self.pump)
-        self.assertIn("messageDao.queuedOfflineCount()", self.pump)
+        self.assertIn("messageDao.countPendingOutgoing()", self.pump)
         dao = read(ROOT / "android-app/app/src/main/java/com/vladimir/messenger/data/local/dao/MessageDao.kt")
-        self.assertIn("suspend fun queuedOfflineCount(): Int", dao)
-        self.assertIn("WHERE isFromMe = 1 AND status = 'QUEUED_OFFLINE'\")", dao)
+        self.assertIn("suspend fun countPendingOutgoing(): Int", dao)
+        self.assertIn("AND status IN ('PENDING', 'QUEUED_OFFLINE')", dao)
 
     def test_idle_pumps_back_off_and_wake_lock_is_bounded(self):
         idle = read(SERVICE / "ServiceIdleCadence.kt")

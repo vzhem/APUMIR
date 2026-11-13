@@ -3,6 +3,9 @@ package com.vladimir.messenger.service
 import android.content.Context
 import android.net.wifi.WifiManager
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 /**
  * Multicast-замок Wi-Fi нужен для mDNS-обнаружения соседей в локальной сети,
@@ -16,8 +19,15 @@ class CoreMulticastLock(context: Context) {
     private val lock = wifiManager?.createMulticastLock("P2PMessenger::MdnsLock")?.apply {
         setReferenceCounted(false)
     }
+    private var closed = false
+
+    /** Track visibility immediately instead of waiting for the 30-second pump. */
+    fun start(scope: CoroutineScope): Job = scope.launch {
+        DeliveryCadence.foregroundChanges.collect { sync(it) }
+    }
 
     @Synchronized fun sync(onScreen: Boolean) {
+        if (closed) return
         val l = lock ?: return
         runCatching {
             if (onScreen && !l.isHeld) {
@@ -31,6 +41,9 @@ class CoreMulticastLock(context: Context) {
     }
 
     @Synchronized fun release() {
+        // Cancellation is asynchronous: an already-dispatched collector must
+        // not reacquire the lock after the service has been destroyed.
+        closed = true
         runCatching {
             if (lock?.isHeld == true) lock.release()
         }.onFailure { Log.w(TAG, "multicast lock release failed: ${it.message}") }

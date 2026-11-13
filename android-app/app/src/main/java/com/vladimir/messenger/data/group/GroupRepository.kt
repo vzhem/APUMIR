@@ -228,6 +228,7 @@ class GroupRepository(
     /** Android context for local text/name colour preferences; null in JVM tests. */
     private val appContext: android.content.Context? = null,
 ) {
+    private val notificationReads = com.vladimir.messenger.data.repository.IncomingGroupNotificationReads.forContext(groupDao, appContext)
 
     /** Раунд 137: что уже ретранслировали (и когда) - без повторного шторма. */
     private val deletionRelayedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
@@ -1720,33 +1721,7 @@ class GroupRepository(
 
     // ── р250: приём новых конвертов ─────────────────────────────────────────
 
-    /** Цитата, приехавшая раньше своего сообщения: ключ - id сообщения. */
-    private class PendingReply(val groupId: String, val packet: GroupWire.Packet.Reply)
-
-    private val pendingReplies = SwarmBuffer<PendingReply>(PENDING_REPLIES, PENDING_TTL_MS, clock)
-
-    private suspend fun handleReply(senderId: String, packet: GroupWire.Packet.Reply) {
-        val me = myId().orEmpty()
-        if (me.isBlank()) return
-        if (groupDao.getMember(packet.groupId, me) == null) return
-        val message = messageDao.getMessageById(packet.messageId)
-        // Сообщение ещё в пути (цитата пришла быстрее): подождём его в буфере,
-        // как куски поста ждут манифест.
-        if (message == null || message.chatId != packet.groupId) {
-            pendingReplies.put(packet.messageId, PendingReply(packet.groupId, packet))
-            return
-        }
-        applyReply(packet)
-    }
-
-    private suspend fun applyReply(packet: GroupWire.Packet.Reply) {
-        messageDao.applyReply(
-            messageId = packet.messageId,
-            replyToId = packet.replyToId,
-            replyAuthor = packet.replyAuthor,
-            replyText = GroupWire.replyPreview(packet.replyText),
-        )
-    }
+    private val groupReplies = roomGroupReplyIngress(groupDao, messageDao, ::myId, PENDING_REPLIES, PENDING_TTL_MS, clock)
 
     private suspend fun handlePoll(senderId: String, packet: GroupWire.Packet.Poll) =
         polls.handlePoll(senderId, packet)
@@ -2048,10 +2023,10 @@ class GroupRepository(
             }
         } else {
             for (topic in groupDao.getTopics(groupId)) {
-                groupDao.markTopicRead(topic.id)
+                groupDao.markTopicRead(groupId, topic.id)
             }
         }
-        groupDao.markGroupRead(groupId)
+        notificationReads.group(groupId)
         groupDao.updateGroupLastMessage(groupId, "", 0L)
 
         val envelope = GroupWire.buildMessageDelete(groupId, GroupWire.DELETE_ALL_MARKER, me)
@@ -3061,11 +3036,8 @@ class GroupRepository(
                 if (isDeferredCancelled(senderId, localId)) return
                 if (messageDao.messageExists(localId)) return
                 val now = clock()
-                // Досылка старого поста: отправитель пересылает чужой пост, автор
-                // и время указаны в конверте. Верим владельцу канала - и любому
-                // участнику, если у нас есть проверенный манифест этого поста и
-                // текст сходится с хэшем (рой). Кусок или пост, чей манифест ещё
-                // не доехал, ждёт в буфере, а не отбрасывается.
+                // Досылку чужого поста принимаем от владельца или по проверенному
+                // манифесту; при отсутствии манифеста ждём в буфере.
                 var relayed = packet.authorId.isNotBlank() && senderId == group.ownerId
                 var verifiedBy: PostManifest? = null
                 // Комментарий большого канала (этап 4) досылает и администратор
@@ -3128,6 +3100,9 @@ class GroupRepository(
                         senderId = authorId,
                         content = packet.text,
                         timestamp = sentAt,
+                        notificationPending = com.vladimir.messenger.data.notification.NotificationArrivalPolicy.groupMessage(
+                            isMine, isPart, relayed, swarmGroup, sentAt, now, FRESH_POST_MS,
+                        ),
                         status = if (isMine) "SENT" else "RECEIVED",
                         isFromMe = isMine,
                         channel = "GROUP",
@@ -3144,7 +3119,7 @@ class GroupRepository(
                 }
                 // р250: цитата ответа могла приехать раньше самого сообщения -
                 // забираем её из буфера (как куски поста ждут манифест).
-                pendingReplies.take { it.packet.messageId == localId }.forEach { applyReply(it.packet) }
+                groupReplies.parentInserted(packet.groupId, localId)
                 if (packet.senderNameColor.isNotBlank()) {
                     onPeerNameColor(authorId, packet.senderNameColor)
                 }
@@ -3264,10 +3239,10 @@ class GroupRepository(
                             }
                         } else {
                             for (topic in groupDao.getTopics(packet.groupId)) {
-                                groupDao.markTopicRead(topic.id)
+                                groupDao.markTopicRead(packet.groupId, topic.id)
                             }
                         }
-                        groupDao.markGroupRead(packet.groupId)
+                        notificationReads.group(packet.groupId)
                         groupDao.updateGroupLastMessage(packet.groupId, "", 0L)
                         relayMessageDelete(group.id, packet.messageId, deleter, senderId)
                         Log.i(TAG, "delete all messages applied group=${group.id} via=$senderId deleter=$deleter")
@@ -3805,7 +3780,7 @@ class GroupRepository(
             }
 
             // ── р250: ответы, опросы и медленный режим ──
-            is GroupWire.Packet.Reply -> handleReply(senderId, packet)
+            is GroupWire.Packet.Reply -> groupReplies.receive(senderId, packet)
 
             is GroupWire.Packet.Poll -> handlePoll(senderId, packet)
 
@@ -4109,14 +4084,7 @@ class GroupRepository(
         // проверки получался замкнутый круг: сброс непрочитанных писал в
         // таблицу, поток тем перезапускал ленту, лента снова звала сброс - и
         // так без конца, пока приложение не зависало.
-        var hadTopicUnread = false
-        if (!topicId.isNullOrBlank()) {
-            val topic = groupDao.getTopicById(topicId)
-            if (topic != null && topic.unreadCount > 0) {
-                groupDao.markTopicRead(topicId)
-                hadTopicUnread = true
-            }
-        }
+        val hadTopicUnread = if (!topicId.isNullOrBlank()) notificationReads.topic(groupId, topicId) ?: false else false
         val group = groupDao.getGroupById(groupId) ?: return
         val unread = groupDao.sumTopicUnread(groupId)
         val hadGroupUnread = group.unreadCount != unread
@@ -4868,7 +4836,7 @@ class GroupRepository(
 
     /** Снять счётчик непрочитанного - пункт меню в пузыре группы. */
     suspend fun markGroupRead(groupId: String) {
-        groupDao.markGroupRead(groupId)
+        notificationReads.group(groupId)
         // р228: снять непрочитанное и на партнёрском устройстве личности.
         com.vladimir.messenger.data.mirror.MirrorHub.publishReadSync(peerId = "", groupId = groupId)
     }

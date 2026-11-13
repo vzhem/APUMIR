@@ -64,6 +64,10 @@ interface FileTransferDao {
     @Query("SELECT * FROM file_transfers WHERE transferId = :transferId")
     suspend fun getTransfer(transferId: String): FileTransferEntity?
 
+    /** Message IDs are global: a transfer in any chat makes this ID ambiguous. */
+    @Query("SELECT EXISTS(SELECT 1 FROM file_transfers WHERE messageId = :messageId)")
+    suspend fun hasMessageTransfer(messageId: String): Boolean
+
     @Query("SELECT * FROM file_transfers WHERE transferId IN (:transferIds)")
     suspend fun getTransfersByIds(transferIds: List<String>): List<FileTransferEntity>
 

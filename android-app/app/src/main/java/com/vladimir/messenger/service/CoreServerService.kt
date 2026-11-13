@@ -32,6 +32,7 @@ import com.vladimir.messenger.data.repository.ChatRepository
 import com.vladimir.messenger.data.repository.MtProxyRepository
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.file.FileExchangeKeyStore
+import com.vladimir.messenger.data.push.PushControlIngress
 import com.vladimir.messenger.data.security.MessageSealer
 import com.vladimir.messenger.data.security.SealedWire
 import com.vladimir.messenger.data.referral.ReferralRankStore
@@ -68,7 +69,7 @@ class CoreServerService : Service() {
 
     /** Досылка офлайн-очереди своим ритмом: коротким шагом, пока есть что слать. */
     private val chatOutboxPump: ChatOutboxPump by lazy {
-        ChatOutboxPump(appDatabase.messageDao(), chatRepository, coreWorkWakeLock)
+        ChatOutboxPump(appDatabase.messageDao(), appDatabase.chatDao(), chatRepository, coreWorkWakeLock)
     }
     @Inject lateinit var contactRepository: ContactRepository
     @Inject lateinit var mtProxyRepository: MtProxyRepository
@@ -99,10 +100,11 @@ class CoreServerService : Service() {
     @Inject lateinit var peerRankBroadcaster: com.vladimir.messenger.data.rank.PeerRankBroadcaster
     @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
     @Inject lateinit var reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository
-    // р252: опросы личных чатов (ранг 3) - служебный конверт APUPOLL1.
     /** р252: опросы личных чатов - через посредника, чтобы не растить этот файл. */
     @Inject lateinit var directPollRepository: com.vladimir.messenger.data.directpoll.DirectPollRepository
     private val directPolls by lazy { DirectPollRouting.bind(this, directPollRepository) }
+    @Inject lateinit var replyPeerPins: com.vladimir.messenger.data.file.FileExchangePeerStore
+    private val directReplies by lazy { directReplyIngress(applicationContext, chatRepository, replyPeerPins) { mirror } }
     @Inject lateinit var repostRepository: com.vladimir.messenger.data.repost.RepostRepository
     // Отклики на истории: значки и комментарии зрителей (см. docs/STORY_REACTIONS_AND_COMMENTS.md).
     @Inject lateinit var storyFeedback: com.vladimir.messenger.data.story.StoryFeedbackRepository
@@ -126,20 +128,32 @@ class CoreServerService : Service() {
     private var eventPollingJob: Job? = null
     private var filePumpJob: Job? = null
     private var lastNotificationText: String = ""
-    private val knownPeers = mutableMapOf<String, Long>()  // peerId -> lastSeenMs
-    private val PEER_DEDUP_MS = 30000L  // 60 сек дедупликация
-
-    /**
-     * Heartbeat-присутствие: ядро шлёт peer_discovered ~каждые 30 с по MQTT
-     * (и ~каждые 15 с по mDNS в LAN), а peer_lost практически НЕ генерирует —
-     * самолётный режим у собеседника никакого события не даёт. Поэтому «в сети»
-     * = «живая метка свежее TTL»: который peers мы зажгли, тех сами и гасятся.
-     */
-    private val onlineMarked = java.util.Collections.synchronizedSet(mutableSetOf<String>())
-    // Ядро объявляет о себе раз в минуту (было раз в 30 секунд): «пропал» = три
-    // пропуска подряд = 200 секунд. Уборка реже: она будит процесс, спешить некуда.
-    private val PRESENCE_TTL_MS = 200_000L    // ~3 пропущенных MQTT-пульса
-    private val PRESENCE_SWEEP_MS = 60_000L
+    private val presence by lazy {
+        PresenceRecovery(
+            resetContacts = { contactRepository.setAllOffline() },
+            resetChats = { chatRepository.setAllContactsOffline() },
+            onReset = { fileTransferRouter.clearOnlinePeers() },
+            updateContact = { id, online, seen -> contactRepository.updatePresence(id, online, seen) },
+            updateChats = { peer, id, online ->
+                chatRepository.updateContactOnlineStatus(peer, online)
+                if (id != peer) chatRepository.updateContactOnlineStatus(id, online)
+            },
+            onOnline = { peer, seen ->
+                // Start immediately under PresenceRecovery's lock: the router's
+                // in-memory mark happens before a competing offline transition.
+                serviceScope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                    try { fileTransferRouter.markOnline(peer, seen) }
+                    catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (error: Exception) { Log.w(TAG, "custody presence failed", error) }
+                }
+            },
+            onOffline = { peer, expired ->
+                fileTransferRouter.markOffline(peer)
+                if (expired) com.vladimir.messenger.data.peer.PeerRatingStore.recordMiss(applicationContext, peer)
+            },
+            recordFailure = { phase, error -> Log.w(TAG, "Presence $phase failed", error) },
+        )
+    }
     private val INITIAL_FILE_PUMP_DELAY_MS = 5000L
     /** Boot-time readiness only: a failed key unlock cannot be diagnosed as a peer-key change. */
     @Volatile private var localCryptoReadyAtStartup = false
@@ -153,10 +167,6 @@ class CoreServerService : Service() {
     private val stickerCatalogSentAt = mutableMapOf<String, Long>()
     private val stickerAskHandledAt = mutableMapOf<String, Long>()
     private val stickerWantServedAt = mutableMapOf<String, Long>()
-
-    // Keep only ids in the rolling notification look-back window; Room's query is likewise
-    // bounded to two minutes and indexed by (isFromMe, timestamp).
-    private val notifiedMessageIds = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     /**
      * Служебные конверты каталога гифок: ask/have/want. Разбираются до
@@ -309,29 +319,8 @@ class CoreServerService : Service() {
      * конверт - добавьте его и здесь, и в основной цепочке.
      * Возвращает true, если текст служебный и в чат ему дороги нет.
      */
-    private suspend fun markMessageDelivered(messageId: String): Boolean {
-        deferredDelivery.noteTransportAck(messageId)
-        return chatRepository.markOutgoingMessageDelivered(messageId)
-    }
-
-    /**
-     * A successfully opened sealed message proves the sender's signed file/message
-     * binding. Learn it before sending the ACK: otherwise a receiver that missed
-     * HELLO can display the message but cannot send a sealed reply. A changed
-     * binding is reported, never overwritten automatically.
-     */
-    private suspend fun rememberOpenedMessageBinding(senderId: String, wire: String) {
-        when (fileTransferRouter.rememberOpenedMessageBinding(senderId, wire)) {
-            com.vladimir.messenger.data.file.FileTransferRouter.OpenedMessageBindingResult.KEY_CHANGED -> {
-                TransferDiagnostics.notePeerKeyChanged()
-                Log.w(TAG, "opened message binding differs from pinned peer binding")
-            }
-            com.vladimir.messenger.data.file.FileTransferRouter.OpenedMessageBindingResult.PINNED_NEW -> {
-                Log.i(TAG, "learned sender binding from opened message")
-            }
-            else -> Unit
-        }
-    }
+    private suspend fun markMessageDelivered(messageId: String, senderId: String? = null, forward: (() -> Unit)? = null): Boolean =
+        routeOutgoingDeliveryAck(messageId, senderId, appDatabase, chatRepository::markOutgoingMessageDelivered, deferredDelivery::noteTransportAck, RustBridge::confirmMessageDelivered, forward)
 
     /**
      * Уведомить отправителя, что его приглашение отклонено настройками
@@ -399,19 +388,13 @@ class CoreServerService : Service() {
         // путь приёма обязан разбирать его так же, как основной: иначе строка
         // «ack|…» вырастет в личный чат. Даже некорректный ACK с зарезервированным
         // префиксом съедаем, но статус меняем только для разобранного id.
-        if (com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(text)) {
-            com.vladimir.messenger.data.reply.DirectReplyWire.parse(text)?.let { packet ->
-                runCatching { chatRepository.applyDirectReply(packet) }
-                    .onFailure { Log.w(TAG, "direct reply apply failed: ${it.message}") }
-            }
-            return true
-        }
+        // Legacy CF payloads have no verified reply source; consume, never apply them as text.
+        if (com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(text)) return true
         if (DeliveryAckWire.isPacket(text)) {
             val ackedId = DeliveryAckWire.messageId(text)
             if (ackedId != null) {
-                // ACK-кадр нужен и партнёру той же личности, но не сохраняется.
-                mirror?.publishEnvelope(senderId, chatId, messageId, text)
-                runCatching { markMessageDelivered(ackedId) }
+                // A missing local row may exist on the partner; conflicts stay local.
+                runCatching { markMessageDelivered(ackedId, senderId) { mirror?.publishEnvelope(senderId, chatId, messageId, text) } }
                     .onSuccess { changed ->
                         Log.i(TAG, "📬 direct delivery ACK (relay path): msgId=$ackedId changed=$changed")
                     }
@@ -615,15 +598,13 @@ class CoreServerService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        OperationalDiagnostics.tracker.coreStarting()
-        CoreStatus.markStarting()
-        OperationalDiagnostics.phase(DiagnosticPhase.SERVICE_START)
+        ServiceLifecycleHooks.onCreated(this)
         Log.i(TAG, "CoreServerService created")
         TransferDiagnostics.record("core", "служба ядра запускается")
         // CPU бодрствует только на время работы (события/файлы/звонок), а не
         // постоянно. Multicast Wi-Fi держим лишь пока приложение на экране.
         multicastGate = CoreMulticastLock(applicationContext).also {
-            it.sync(DeliveryCadence.isForeground())
+            it.start(serviceScope)
         }
         serviceScope.launch {
             callManager.uiState.collect { state ->
@@ -651,17 +632,9 @@ class CoreServerService : Service() {
         // РЕГИСТРАЦИЯ В CLOUDFLARE WORKER REGISTRY
         // (независимо от наличия telegram_bot_token)
         // ================================================================
+        presence.start(serviceScope)
         serviceScope.launch {
             try {
-                // Холодный старт: peer_lost не доезжал, пока нас не было —
-                // гасим устаревшие «в сети», живых тут же включит peer_discovered.
-                try {
-                    contactRepository.setAllOffline()
-                    chatRepository.setAllContactsOffline()
-                } catch (e: Exception) {
-                    Log.w(TAG, "Presence reset failed: ${e.message}")
-                }
-                startPresenceReaper()
                 // Ждём пока RustBridge инициализируется
                 var attempts = 0
                 while (RustBridge.nodeId() == null && attempts < 30) {
@@ -741,7 +714,7 @@ class CoreServerService : Service() {
             // сервис молча не работал, и причина нигде не появлялась.
             OperationalDiagnostics.tracker.count(OperationalCounter.FOREGROUND_START_REFUSED)
             Log.w(TAG, "startForeground refused (sdk=" + Build.VERSION.SDK_INT + ")", e)
-            runCatching { EmergencyKeepAlive.onServiceRefused(applicationContext) }
+            runCatching { EmergencyKeepAlive.onServiceRefused(applicationContext, this@CoreServerService) }
             stopSelf()
             false
         }
@@ -757,7 +730,7 @@ class CoreServerService : Service() {
     override fun onTimeout(startId: Int, fgsType: Int) {
         OperationalDiagnostics.tracker.count(OperationalCounter.FOREGROUND_TIMEOUT)
         Log.w(TAG, "foreground timeout (type=" + fgsType + "); stopping and rescheduling")
-        runCatching { EmergencyKeepAlive.onServiceRefused(applicationContext) }
+        runCatching { EmergencyKeepAlive.onServiceRefused(applicationContext, this@CoreServerService) }
         stopSelf(startId)
     }
 
@@ -779,8 +752,20 @@ class CoreServerService : Service() {
             com.vladimir.messenger.data.security.DeviceIdentityMarker.isPresent(applicationContext)
         if (!identityReady) {
             Log.i(TAG, "CoreServerService deferred: local identity is not ready")
-            CoreStatus.report("Ожидание создания identity")
-            CoreStatus.markReady()
+            CoreStartupCoordinator.report(this@CoreServerService, "Ожидание создания identity")
+            CoreStartupCoordinator.markReady(this@CoreServerService)
+            stopServiceSafely()
+            return START_NOT_STICKY
+        }
+        val routing = com.vladimir.messenger.data.security.ExistingRoutingIdentity.resolve(
+            prefs.getString("node_id", null), prefs.getString("public_key", null),
+            prefs.getString("existing_public_key", null), prefs.getString("existing_private_key", null),
+        )
+        if (routing == null) {
+            Log.e(TAG, "Existing routing identity is missing or inconsistent; refusing to replace it")
+            TransferDiagnostics.recordWarning("core", "сохранённый адрес личности отсутствует или не совпадает; новый не создаётся")
+            CoreStartupCoordinator.report(this@CoreServerService, "Ядро в ограниченном режиме")
+            CoreStartupCoordinator.markReady(this@CoreServerService)
             stopServiceSafely()
             return START_NOT_STICKY
         }
@@ -790,7 +775,7 @@ class CoreServerService : Service() {
         // сутки в Doze. Теперь сервис живёт и держит одну неточную страховку
         // в час; настойчивая лестница 5→15→30→60 минут включается только
         // когда сервис поднять не удалось (EmergencyKeepAlive.onServiceRefused).
-        EmergencyKeepAlive.onServiceStarted(applicationContext)
+        EmergencyKeepAlive.onServiceStarted(applicationContext, this@CoreServerService)
 
         // The keep-alive alarm (and network restarts) can deliver another start intent to the
         // same Service instance. Foreground notification/alarm maintenance above is safe to repeat;
@@ -833,7 +818,6 @@ class CoreServerService : Service() {
                     runCatching { pumpMirrorFiles() }
                         .onFailure { Log.w(TAG, "file bytes pump failed: ${it.message}") }
                 }
-                multicastGate?.sync(DeliveryCadence.isForeground())
                 sincePump++
                 kotlinx.coroutines.delay(30_000L)
             }
@@ -917,20 +901,18 @@ class CoreServerService : Service() {
         if (displayName == "Anonymous" && prefs.getBoolean("identity_created", false)) {
             displayName = prefs.getString("display_name", "Anonymous") ?: "Anonymous"
         }
-        val existingPubKey = prefs.getString("existing_public_key", null)
-        val existingPrivKey = prefs.getString("existing_private_key", null)
+        val existingPubKey = routing.nodeId
+        val existingPrivKey = routing.legacyPrivateKey
 
-        Log.i(TAG, "Starting engine: displayName=$displayName existingKey=${existingPubKey?.take(16)}")
+        Log.i(TAG, "Starting engine: displayName=$displayName existingKey=${existingPubKey.take(16)} legacyPlaceholder=${routing.usedPlaceholder}")
 
         serviceScope.launch {
             // Раунд 263: честный статус для сплэша - этап подготовки ключей.
-            CoreStatus.report("Готовим ключи безопасности…")
+            CoreStartupCoordinator.report(this@CoreServerService, "Готовим ключи безопасности…")
             // R0.5/S3: legacy routing ID остаётся неизменным; реальный Ed25519
             // signing sidecar устанавливается до engine start и пока используется
             // только diagnostics/future signed features.
             val legacyRoutingId = existingPubKey
-                ?: prefs.getString("node_id", null)
-                .orEmpty()
             // The signed identity is captured ONCE when Rust starts. Give its Keystore unlock
             // priority over relay custody and address-book restoration on a cold KeyMint;
             // competing operations previously had the same 4s deadline and could leave the
@@ -1040,8 +1022,8 @@ class CoreServerService : Service() {
                 startAsMirrorShadow(legacyRoutingId)
                 // Раунд 263: зеркало живёт на событиях партнёра - для
                 // интерфейса это тоже «готово», заставка не нужна.
-                CoreStatus.report("Зеркальный режим: сеть ведёт партнёр")
-                CoreStatus.markReady()
+                CoreStartupCoordinator.report(this@CoreServerService, "Зеркальный режим: сеть ведёт партнёр")
+                CoreStartupCoordinator.markReady(this@CoreServerService)
                 return@launch
             }
 
@@ -1054,11 +1036,11 @@ class CoreServerService : Service() {
             bookDeferred.await()
 
             // Собственный SQLite-файл relay custody (app-private, WAL).
-            CoreStatus.report("Поднимаем ядро и сеть…")
+            CoreStartupCoordinator.report(this@CoreServerService, "Поднимаем ядро и сеть…")
             val relayDbPath = File(filesDir, "apu_relay.sqlite").absolutePath
-            val ok = RustBridge.initialize(displayName, existingPubKey, existingPrivKey, relayDbPath)
+            val ok = CoreStartupCoordinator.initialize(this@CoreServerService, displayName, existingPubKey, existingPrivKey, relayDbPath)
             if (ok) {
-                val nodeId = RustBridge.nodeId()
+                val nodeId = CoreStartupCoordinator.nodeId(this@CoreServerService)
                 Log.i(TAG, "Engine OK. NodeId=$nodeId")
                 if (signing != null) {
                     val matchesCoreRouting = nodeId != null && legacyRoutingId == nodeId
@@ -1088,21 +1070,18 @@ class CoreServerService : Service() {
                     }
                 }
                 // Раунд 263: ядро поднято - сплэш может отпустить человека.
-                CoreStatus.markReady()
+                CoreStartupCoordinator.markReady(this@CoreServerService, engineStarted = true)
 
-                // Азбука адресов (docs/ADDRESS_BOOK.md): засевать «свои»,
-                // чтобы в первую же минуту после старта личное presence
-                // стукнуло к сохранённым адресам, а онлайн-соседи ответили
-                // presence со СВЕЖИМ адресом — файл актуализируется.
-                serviceScope.launch {
-                    runCatching {
+                PresenceAudienceObserver.start(
+                    serviceScope, contactRepository.observeContacts(),
+                    refresh = {
+                        swarmPeerDirectory.invalidate()
                         val ids = swarmPeerDirectory.audienceIds()
-                        RustBridge.setPresenceAudience(ids)
-                        Log.i(TAG, "Presence audience seeded: ${ids.size} ids")
-                    }.onFailure {
-                        Log.w(TAG, "Presence audience seed failed: ${it.message}")
-                    }
-                }
+                        RustBridge.setPresenceAudienceOrThrow(ids)
+                        Log.i(TAG, "Presence audience refreshed: ${ids.size} ids")
+                    },
+                    recordFailure = { Log.w(TAG, "Presence audience refresh failed", it) },
+                )
 
                 // Раунд 121: свой каталог гифок - разослать и спросить чужие
                 // (тротлимб внутри; при старте уходит после подключения).
@@ -1187,7 +1166,7 @@ class CoreServerService : Service() {
             val cfUrl = prefs.getString("cloudflare_relay_url", ServiceHost.BASE) ?: ServiceHost.BASE
             cloudflareRelay = CloudflareRelay(cfUrl, nodeId ?: "", serviceScope)
             cloudflareRelay?.onMessageReceived = { senderId: String, payload: String ->
-                Log.i(TAG, "CF relay payload from $senderId: ${payload.take(50)}")
+                Log.i(TAG, "CF relay payload received from $senderId")
                 serviceScope.launch {
                     try {
                         // Тот же страж, что и у ядра: отправитель обязан быть
@@ -1200,7 +1179,7 @@ class CoreServerService : Service() {
                             is RelayEnvelope.Parsed.Ack -> {
                                 // G1 fix: ACK, доставленный через relay, → DELIVERED у отправителя.
                                 val messageId = parsed.messageId
-                                if (markMessageDelivered(messageId)) {
+                                if (markMessageDelivered(messageId, senderId)) {
                                     Log.i(TAG, "✅ CF ACK from $senderId → DELIVERED msgId=$messageId")
                                 } else {
                                     Log.d(TAG, "CF ACK ignored (msgId=$messageId not found / not mine / already delivered)")
@@ -1209,32 +1188,26 @@ class CoreServerService : Service() {
 
                             is RelayEnvelope.Parsed.Message -> {
                                 val messageId = parsed.messageId
+                                val cfContent = if (SealedWire.isSealed(parsed.content)) MessageSealer.open(applicationContext, parsed.content) else parsed.content
+                                if (PushControlIngress.isReserved(cfContent)) return@launch
+                                var acknowledge = false // Only a stored text or an explicitly handled service packet.
                                 // Дедупликация: сообщение уже в БД
                                 val existingMsg = chatRepository.getMessageById(messageId)
-                                if (existingMsg != null) {
+                                if (cfContent != null && com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(cfContent)) {
+                                    val knownChat = chatRepository.getChatByContactId(senderId)
+                                    val authenticated = SealedWire.isSealed(parsed.content) && MessageSealer.openedByExpectedSender(parsed.content, senderId)
+                                    acknowledge = directReplies.network(senderId, knownChat?.id ?: "", messageId, cfContent, authenticated, parsed.content) == com.vladimir.messenger.data.reply.DirectReplyResult.APPLIED
+                                } else if (existingMsg != null && cfContent != null) {
                                     Log.i(TAG, "CF duplicate skipped (already in DB): messageId=$messageId")
-                                    if (DeliveryAckWire.isPacket(existingMsg.content)) {
-                                        // Старый ACK мог быть уже записан до обновления.
-                                        // Он всё равно подтверждает исходящую строку, но
-                                        // ACK самому ACK отправлять нельзя.
-                                        DeliveryAckWire.messageId(existingMsg.content)?.let {
-                                            markMessageDelivered(it)
+                                    when (val action = classifyCfDuplicate(existingMsg.isFromMe, existingMsg.senderId, existingMsg.content, senderId, cfContent, SealedWire.isSealed(parsed.content)) { MessageSealer.openedByExpectedSender(parsed.content, senderId) }) {
+                                        is CfDuplicateAction.ApplyAck -> action.messageId?.let { markMessageDelivered(it, senderId) }
+                                        CfDuplicateAction.AcknowledgeText -> {
+                                            acknowledge = true // This is not a verified mesh cleanup receipt.
+                                            runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
                                         }
-                                    } else {
-                                        // р243: дубликат - это повтор от отправителя,
-                                        // который нашей галочки не увидел. Молчание
-                                        // здесь и было причиной «висит одна галочка»:
-                                        // подтверждение отправляем ЗАНОВО.
-                                        runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                                        CfDuplicateAction.Ignore -> Unit
                                     }
                                 } else {
-                                    // ШИФРОВАНИЕ: это второй, независимый путь приёма. Без
-                                    // расшифровки здесь в чат попал бы конверт как текст.
-                                    val cfContent = if (SealedWire.isSealed(parsed.content)) {
-                                        MessageSealer.open(applicationContext, parsed.content)
-                                    } else {
-                                        parsed.content
-                                    }
                                     if (cfContent == null) {
                                         val knownHere = MessageSealer
                                             .canSeal(applicationContext, senderId)
@@ -1263,7 +1236,7 @@ class CoreServerService : Service() {
                                             .opened(applicationContext, senderId)
                                         if (SealedWire.isSealed(parsed.content)) {
                                             try {
-                                                rememberOpenedMessageBinding(senderId, parsed.content)
+                                                rememberOpenedMessageBinding(fileTransferRouter, senderId, parsed.content)
                                             } catch (error: Exception) {
                                                 Log.w(TAG, "CF opened message binding learn failed: ${error.message}")
                                             }
@@ -1274,11 +1247,13 @@ class CoreServerService : Service() {
                                         // конверта не создаётся.
                                         val knownChat = chatRepository.getChatByContactId(senderId)
                                         val isDeliveryAck = DeliveryAckWire.isPacket(cfContent)
+                                        if (isDeliveryAck && SealedWire.isSealed(parsed.content) && !MessageSealer.openedByExpectedSender(parsed.content, senderId)) return@launch
                                         if (routeIncomingEnvelope(senderId, knownChat?.id ?: "", messageId, cfContent, SealedWire.isSealed(parsed.content) && MessageSealer.openedByExpectedSender(parsed.content, senderId))) {
                                             Log.i(TAG, "CF service envelope handled msgId=$messageId")
                                             // Never generate an ACK-of-ACK. RelayEnvelope's own
                                             // custody receipt below remains a separate protocol.
                                             if (!isDeliveryAck) {
+                                                acknowledge = true
                                                 try {
                                                     RustBridge.sendDeliveryAck(messageId, senderId)
                                                 } catch (e: Exception) {
@@ -1289,7 +1264,7 @@ class CoreServerService : Service() {
                                             val contact = contactRepository.getContactById(senderId)
                                             val contactName = contact?.displayName ?: senderId.take(16)
                                             val chat = chatRepository.getOrCreateChat(senderId, contactName)
-                                            chatRepository.saveIncomingMessage(
+                                            val saved = chatRepository.saveIncomingMessage(
                                                 chatId = chat.id,
                                                 senderId = senderId,
                                                 messageId = messageId,
@@ -1297,6 +1272,7 @@ class CoreServerService : Service() {
                                                 timestamp = parsed.timestamp,
                                                 channel = MessageChannel.CF,
                                             )
+                                            acknowledge = storedIncomingText(messageId, senderId, chat.id, saved, appDatabase.messageDao()::getMessageById)
                                             Log.i(TAG, "CF message handled for chat ${chat.id} msgId=$messageId")
                                             if (chatRepository.isInviteBlocked(senderId, cfContent)) {
                                                 runCatching { sendInviteReject(senderId, cfContent) }
@@ -1317,9 +1293,8 @@ class CoreServerService : Service() {
                                         }
                                     }
                                 }
-                                // G1 fix: отправить ACK обратно отправителю через relay
-                                // (отправитель узнаёт о доставке, даже если был офлайн в момент приёма).
-                                try {
+                                // A failed decrypt, rejected text, or ACK-of-ACK is not delivery.
+                                if (acknowledge) try {
                                     val ack = RelayEnvelope.buildAck(messageId, RustBridge.nodeId() ?: "")
                                     cloudflareRelay?.sendMessage(senderId, ack)
                                     Log.i(TAG, "📤 CF ACK sent to $senderId for msgId=$messageId")
@@ -1329,6 +1304,7 @@ class CoreServerService : Service() {
                             }
 
                             is RelayEnvelope.Parsed.Other -> {
+                                if (PushControlIngress.isReserved(if (SealedWire.isSealed(parsed.raw)) MessageSealer.open(applicationContext, parsed.raw) else parsed.raw)) return@launch
                                 // Legacy plain-text payload (не envelope) — сохраняем как раньше.
                                 // Раунд 140: но только не служебный конверт - он
                                 // разбирается стражем, в чат ему дороги нет.
@@ -1348,7 +1324,7 @@ class CoreServerService : Service() {
                                         timestamp = System.currentTimeMillis(),
                                         channel = MessageChannel.CF,
                                     )
-                                    Log.i(TAG, "CF plain-text saved to chat ${chat.id}: ${parsed.raw.take(30)}")
+                                    Log.i(TAG, "CF plain-text saved to chat ${chat.id}")
                                     if (chatRepository.isInviteBlocked(senderId, parsed.raw)) {
                                         runCatching { sendInviteReject(senderId, parsed.raw) }
                                     }
@@ -1357,6 +1333,8 @@ class CoreServerService : Service() {
                                 }
                             }
                         }
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
                     } catch (e: Exception) {
                         Log.e(TAG, "CF message handling failed", e)
                     }
@@ -1381,7 +1359,7 @@ class CoreServerService : Service() {
                         .putString("public_key", nodeId)
                         .putString("node_id", nodeId)
                         .putString("existing_public_key", nodeId)
-                        .putString("existing_private_key", nodeId)
+                        .putString("existing_private_key", existingPrivKey)
                         .apply()
                 }
 
@@ -1393,15 +1371,15 @@ class CoreServerService : Service() {
                 )
 
                 updateNotification("Сеть APU работает")
-                startEventPolling()
+                startEventPolling(nodeId ?: legacyRoutingId)
             } else {
                 updateNotification("Не удалось подключиться")
                 TransferDiagnostics.count(Counters.CORE_FAILURES)
                 TransferDiagnostics.recordFailure("core", "ядро не поднялось — ограниченный режим")
                 // Раунд 263: движок не поднялся - не держим человека на
                 // заставке: честный ограниченный режим, сплэш отпускаем.
-                CoreStatus.report("Ядро в ограниченном режиме")
-                CoreStatus.markReady()
+                CoreStartupCoordinator.report(this@CoreServerService, "Ядро в ограниченном режиме")
+                CoreStartupCoordinator.markReady(this@CoreServerService)
                 stopServiceSafely()
             }
         }
@@ -1422,6 +1400,7 @@ class CoreServerService : Service() {
         // конверты не применялись бы (проверка «я участник»).
         runCatching { RustBridge.setShadowNodeId(nodeId) }
         updateNotification("APU: сеть ведёт другое устройство (зеркало)")
+        startIncomingNotifications(nodeId)
         startMirrorChannel(nodeId = nodeId, engineUp = false)
     }
 
@@ -1457,39 +1436,8 @@ class CoreServerService : Service() {
             row: com.vladimir.messenger.data.mirror.MirrorRow,
             notify: Boolean,
         ) {
-            val (chatId, name) = chatRepository.applyMirrorIncoming(row)
-            // Пустой chatId = сообщение не сохранено (в т.ч. запрещённое
-            // приглашение): уведомления быть не должно.
-            if (chatId.isBlank()) return
-            if (notify) {
-                // SOS и на зеркальном устройстве - тревога, а не обычное
-                // уведомление: паузы звука её не касаются.
-                if (com.vladimir.messenger.util.SosMessage.isSos(row.content)) {
-                    runCatching {
-                        notificationHelper.showSosNotification(
-                            chatId, row.senderId, null,
-                            messageId = row.id,
-                        )
-                    }
-                    return
-                }
-                // р249: у чата на паузе не показываем сообщение в шторке.
-                if (runCatching { chatRepository.isChatMuted(chatId) }.getOrDefault(false)) {
-                    Log.i(TAG, "notification suppressed: чат без звука (зеркало)")
-                    return
-                }
-                runCatching {
-                    notificationHelper.showMessageNotification(
-                        chatId,
-                        row.senderId,
-                        com.vladimir.messenger.util.ChatPreviews.human(row.content) ?: "Сообщение",
-                        true,
-                        null,
-                        quiet = com.vladimir.messenger.util.QuietMessage.isQuiet(row.content),
-                        messageId = row.id,
-                    )
-                }
-            }
+            // Live rows use the same one-shot queue; catch-up rows are history.
+            chatRepository.applyMirrorIncoming(row, notify)
         }
 
         override suspend fun applySent(row: com.vladimir.messenger.data.mirror.MirrorRow) {
@@ -1500,9 +1448,9 @@ class CoreServerService : Service() {
             senderId: String,
             chatId: String,
             messageId: String,
-            text: String,
+            text: String, replySourceAuthenticated: Boolean,
         ) {
-            applyMirrorEnvelope(senderId, chatId, messageId, text)
+            applyMirrorEnvelope(senderId, chatId, messageId, text, replySourceAuthenticated)
         }
 
         override suspend fun onActionFromPartner(
@@ -1522,8 +1470,8 @@ class CoreServerService : Service() {
             mirrorApplyRead(peerId, groupId, topicId)
         }
 
-        override suspend fun onFileMeta(meta: org.json.JSONObject): Boolean =
-            runCatching { fileTransferRouter.applyMirrorFileMeta(meta) }
+        override suspend fun onFileMeta(meta: org.json.JSONObject, notify: Boolean): Boolean =
+            runCatching { fileTransferRouter.applyMirrorFileMeta(meta, notify) }
                 .onFailure { Log.w(TAG, "Mirror file meta failed: ${it.message}") }
                 .getOrDefault(false)
 
@@ -1665,33 +1613,7 @@ class CoreServerService : Service() {
             com.vladimir.messenger.data.mirror.MirrorAccountSnapshot.applyRows(applicationContext, appDatabase, rows)
 
         override suspend fun onOutgoingFromPartner(row: com.vladimir.messenger.data.mirror.MirrorRow) {
-            // id чатов на устройствах разные - ищем чат по узлу получателя.
-            val chat = chatRepository.getChatByContactId(row.recipientId)
-                ?: chatRepository.getOrCreateChat(
-                    row.recipientId,
-                    NodeIds.autoName(row.recipientId),
-                )
-            if (row.manualRetry) {
-                chatRepository.retryOutgoingFromMirror(
-                    row = row,
-                    localChatId = chat.id,
-                )
-            } else {
-                chatRepository.sendMessage(
-                    chatId = chat.id,
-                    recipientId = row.recipientId,
-                    content = row.content,
-                    fixedMessageId = row.id,
-                    fromMirror = true,
-                    reply = row.replyToId.takeIf { it.isNotBlank() }?.let {
-                        com.vladimir.messenger.data.reply.DirectReplyWire.Target(
-                            messageId = it,
-                            author = row.replyAuthor,
-                            text = row.replyText,
-                        )
-                    },
-                )
-            }
+            com.vladimir.messenger.data.repository.dispatchMirrorOutgoing(applicationContext, chatRepository, row)
         }
 
         override fun onPromote() {
@@ -1824,7 +1746,7 @@ class CoreServerService : Service() {
         senderId: String,
         chatId: String,
         messageId: String,
-        text: String,
+        text: String, replySourceAuthenticated: Boolean,
     ): Boolean {
         if (deferredDelivery.routeIncoming(senderId, chatId, messageId, text, authenticated = true, fromMirror = true)) return true
         // р244: подтверждение доставки пришло с партнёрского устройства -
@@ -1832,7 +1754,7 @@ class CoreServerService : Service() {
         if (DeliveryAckWire.isPacket(text)) {
             val ackedId = DeliveryAckWire.messageId(text)
             if (ackedId != null) {
-                runCatching { markMessageDelivered(ackedId) }
+                runCatching { markMessageDelivered(ackedId, senderId) }
                     .onSuccess { changed ->
                         Log.i(TAG, "📬 delivery ACK via mirror: msgId=$ackedId changed=$changed")
                     }
@@ -1860,9 +1782,7 @@ class CoreServerService : Service() {
             return true
         }
         if (com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(text)) {
-            com.vladimir.messenger.data.reply.DirectReplyWire.parse(text)?.let { packet ->
-                chatRepository.applyDirectReply(packet)
-            }
+            directReplies.mirror(senderId, messageId, text, replySourceAuthenticated)
             return true
         }
         // Групповой конверт: у группы один и тот же id на всех устройствах,
@@ -1929,8 +1849,7 @@ class CoreServerService : Service() {
     private suspend fun mirrorApplyRead(peerId: String, groupId: String, topicId: String) {
         runCatching {
             if (groupId.isNotBlank()) {
-                if (topicId.isNotBlank()) groupDao.markTopicRead(topicId)
-                groupDao.markGroupRead(groupId)
+                com.vladimir.messenger.data.repository.IncomingGroupNotificationReads.forContext(groupDao, applicationContext).mirror(groupId, topicId)
                 Log.i(TAG, "Mirror read: непрочитанное группы снято по партнёру")
                 return@runCatching
             }
@@ -2114,8 +2033,7 @@ class CoreServerService : Service() {
     }
 
     override fun onDestroy() {
-        OperationalDiagnostics.tracker.count(OperationalCounter.SERVICE_DESTROYED)
-        OperationalDiagnostics.phase(DiagnosticPhase.SERVICE_STOP)
+        ServiceLifecycleHooks.onDestroying(this)
         // Снимаем foreground-статус первым делом, чтобы система не считала
         // сервис зависшим, пока мы закрываем реле и Rust-ядро.
         try {
@@ -2135,36 +2053,37 @@ class CoreServerService : Service() {
         eventPollingJob?.cancel()
         filePumpJob?.cancel()
         networkMonitor?.stop()
-        RustBridge.shutdownAsync()
+        RustBridge.shutdownServiceAsync(this)
         multicastGate?.release()
         callWorkWakeLock.stop()
         coreWorkWakeLock.releaseAll()
         // «Убили» — быстрый подъём; осознанный перезапуск (reconnect) сюда не относится.
-        ServiceLifecycleHooks.onDestroyed(applicationContext, planned = intentionalRestart)
+        ServiceLifecycleHooks.onDestroyed(applicationContext, this@CoreServerService, planned = intentionalRestart)
         super.onDestroy()
     }
 
-    /** Человек смахнул приложение из задач: подъём через две минуты, как в Telegram. */
+    /** Смахивание из задач: запланировать локальную попытку восстановления. */
     override fun onTaskRemoved(rootIntent: Intent?) {
-        ServiceLifecycleHooks.onTaskRemoved(applicationContext)
+        ServiceLifecycleHooks.onTaskRemoved(applicationContext, this@CoreServerService)
         super.onTaskRemoved(rootIntent)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    /**
-     * р249: уведомления этой переписки выключены - личный чат это или группа.
-     *
-     * Уведомление не создаётся вообще: пауза скрывает сообщение из шторки.
-     * Срок живёт в базе, поэтому пауза снимается сама, без таймера.
-     */
-    private suspend fun isMutedForNotifications(chatId: String): Boolean {
-        if (chatId.isBlank()) return false
-        if (runCatching { chatRepository.isChatMuted(chatId) }.getOrDefault(false)) return true
-        return runCatching { groupRepository.isGroupMuted(chatId) }.getOrDefault(false)
+    private fun startIncomingNotifications(recipientId: String) {
+        serviceScope.launch {
+            while (isActive) {
+                try {
+                    IncomingMessageNotifications(applicationContext, appDatabase.messageDao(), notificationHelper)
+                        .observe(recipientId)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (error: Exception) { Log.w(TAG, "Notification observer failed", error) }
+                delay(30_000L)
+            }
+        }
     }
 
-    private fun startEventPolling() {
+    private fun startEventPolling(recipientId: String) {
         
         serviceScope.launch {
             while (isActive) {
@@ -2175,124 +2094,33 @@ class CoreServerService : Service() {
             }
         }
 
-        // Observer for incoming messages → show notifications
-        serviceScope.launch {
-            Log.i(TAG, "Starting message observer for notifications")
-            chatRepository.observeRecentIncomingMessages()
-                .collect { messages ->
-                    Log.d(TAG, "Message observer received ${messages.size} recent incoming messages")
-                    // A rolling two-minute window catches delayed messages after process restart
-                    // without accumulating every message seen since this foreground service began.
-                    val cutoff = System.currentTimeMillis() - 120_000L
-                    notifiedMessageIds.entries.forEach { (id, timestamp) ->
-                        if (timestamp < cutoff) notifiedMessageIds.remove(id, timestamp)
-                    }
-                    val recentIncoming = messages.filter {
-                        !it.isFromMe &&
-                            !com.vladimir.messenger.data.schedule.DeferredInboxStore.owns(applicationContext, it.id) &&
-                            it.timestamp >= cutoff &&
-                            notifiedMessageIds.putIfAbsent(it.id, it.timestamp) == null &&
-                            !com.vladimir.messenger.util.InlineImage.isPart(it.content) &&
-                            // Раунд 156: конверты роя (стикеры/миниатюры) -
-                            // служебные, не звоним (владелец).
-                            !com.vladimir.messenger.util.ChatPreviews.isServiceEnvelope(it.content)
-                    }
-                    for (msg in recentIncoming) {
-                        try {
-                            // SOS из группы: тревога не знает пауз звука -
-                            // активно оповещаем отдельным громким путём,
-                            // даже если группа у получателя без звука.
-                            if (com.vladimir.messenger.util.SosMessage.isSos(msg.content)) {
-                                runCatching {
-                                    notificationHelper.showSosNotification(
-                                        msg.chatId, msg.senderId,
-                                        msg.topicId?.takeIf { it.isNotBlank() },
-                                        messageId = msg.id,
-                                    )
-                                }.onFailure { Log.w(TAG, "SOS notification failed: ${it.message}") }
-                                continue
-                            }
-                            // р249: «без звука» - ни уведомления, ни звука.
-                            // Проверяем и личный чат, и группу: у сообщения
-                            // один chatId, а чем он окажется - решаем по базе
-                            // (два дешёвых запроса по первичному ключу).
-                            if (isMutedForNotifications(msg.chatId)) {
-                                Log.i(TAG, "notification suppressed: без звука ${msg.chatId.take(12)}")
-                                continue
-                            }
-                            // Тема/пост, где написано сообщение: тап открывает
-                            // именно его. Вызов позиционный: именованные
-                            // аргументы + значение по умолчанию ловили
-                            // фантомную «Argument type mismatch» в K2.
-                            val topicId = msg.topicId?.takeIf { it.isNotBlank() }
-                            // Раунд 131: ссылка на гифку - в уведомлении
-                            // аккуратное «🖼 Гифка», а не служебная строка.
-                            val text = if (
-                                com.vladimir.messenger.data.gif.GifLibrary.isGifRef(msg.content)
-                            ) {
-                                "🖼 Гифка"
-                            } else {
-                                // Раунд 156: стикер-конверты и прочие служебные
-                                // строки - человеческими подписями.
-                                com.vladimir.messenger.util.ChatPreviews
-                                    .human(
-                                        com.vladimir.messenger.util.InlineImage
-                                            .stripImage(msg.content).ifBlank { "Фото" }
-                                    )
-                                    ?.take(200) ?: "Фото"
-                            }
-                            notificationHelper.showMessageNotification(
-                                msg.chatId, msg.senderId, text, true, topicId,
-                                quiet = com.vladimir.messenger.util.QuietMessage.isQuiet(msg.content),
-                                messageId = msg.id,
-                            )
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Failed to show notification: ${e.message}")
-                        }
-                    }
-                }
-        }
+        startIncomingNotifications(recipientId)
 
-        eventPollingJob = serviceScope.launch {
-            Log.i(TAG, "Event wait started (condvar, no idle polling)")
-            var lastStatusRefreshAtMs = 0L
-            while (isActive) {
-                if (!RustBridge.isRunning()) {
-                    delay(1_000L)
-                    continue
+        eventPollingJob = CoreEventLoops(
+            isRunning = RustBridge::isRunningCached,
+            await = { lane, timeout -> when (lane) {
+                CoreEventLoops.Lane.Main -> RustBridge.awaitMainEvent(timeout)
+                CoreEventLoops.Lane.File -> RustBridge.awaitFileEvent(timeout)
+            } },
+            poll = { lane, prefer -> when (lane) {
+                CoreEventLoops.Lane.Main -> RustBridge.pollMainEvent(prefer)
+                CoreEventLoops.Lane.File -> RustBridge.pollFileEvent()
+            } },
+            isInteractive = { event: CoreEventFfi -> event.eventType == "message_received" || event.eventType == "delivery_ack" },
+            process = { event -> coreWorkWakeLock.withLock {
+                RuntimeDiagnostics.measure(DiagnosticOperation.CORE_EVENTS) {
+                    DeliveryCadence.touch()
+                    handleEvent(event)
                 }
-                // Спим на условной переменной Rust: событие будит сразу,
-                // таймаут лишь изредка обновляет статус. CPU в простое не крутится.
-                RustBridge.awaitEvents(DeliveryCadence.eventWaitMs())
-                val lease = coreWorkWakeLock.acquire()
-                var hadError = false
-                try {
-                    RuntimeDiagnostics.measure(DiagnosticOperation.CORE_EVENTS) {
-                        val events = RustBridge.drainEvents()
-                        if (events.isNotEmpty()) DeliveryCadence.touch()
-                        events.forEach { event -> handleEvent(event) }
-                    }
-                } catch (ex: Exception) {
-                    Log.e(TAG, "Event polling error", ex)
-                    hadError = true
-                } finally {
-                    lease.close()
-                }
-                val statusNowMs = android.os.SystemClock.elapsedRealtime()
-                if (statusNowMs - lastStatusRefreshAtMs >= POLL_INTERVAL_MS) {
-                    lastStatusRefreshAtMs = statusNowMs
-                    runCatching { DeliveryAssurance.markAlive(applicationContext) }
-                    try {
-                        val status = RustBridge.networkStatus()
-                        val peers = RustBridge.connectedPeers()
-                        updateNotification(notificationText(status, peers))
-                    } catch (ex: Exception) {
-                        Log.e(TAG, "Status polling error", ex)
-                    }
-                }
-                if (hadError) delay(1_000L)
-            }
-        }
+            } },
+            refreshStatus = {
+                runCatching { DeliveryAssurance.markAlive(applicationContext, this@CoreServerService) }
+                updateNotification(notificationText(RustBridge.networkStatus(), RustBridge.connectedPeers()))
+            },
+            recordFailure = { where, error -> Log.e(TAG, "$where failed", error) },
+            waitMs = DeliveryCadence::eventWaitMs,
+            statusIntervalMs = POLL_INTERVAL_MS,
+        ).start(serviceScope)
 
         // F3: periodic safety-net pump — resumes PREPARED/TRANSFERRING transfers after restart
         // and keeps multi-day offline retries alive. Live ACKs open the next bounded window
@@ -2415,11 +2243,12 @@ class CoreServerService : Service() {
             "message_received" -> {
                 val originalTs = event.timestamp
                 val ts = originalTs ?: System.currentTimeMillis()
-                Log.i(TAG, "📨 MESSAGE_RECEIVED: sender=${event.senderId} msgId=${event.messageId} originalTs=$originalTs ts=$ts text=${event.text?.take(30)}")
+                Log.i(TAG, "📨 MESSAGE_RECEIVED: sender=${event.senderId} msgId=${event.messageId} originalTs=$originalTs ts=$ts")
                 val senderId = event.senderId ?: return
                 val chatId = event.chatId ?: return
                 val messageId = event.messageId ?: return
                 val rawText = event.text ?: return
+                if (PushControlIngress.isReserved(rawText)) return
                 val timestamp = ts
 
                 // Отправитель обязан быть узлом (pk_…): ядро не проверяет первое поле, и
@@ -2459,10 +2288,9 @@ class CoreServerService : Service() {
                 if (!SealedWire.isSealed(rawText) && DeliveryAckWire.isPacket(rawText)) {
                     val ackedId = DeliveryAckWire.messageId(rawText)
                     if (ackedId != null) {
-                        mirror?.publishEnvelope(senderId, chatId, messageId, rawText)
                         serviceScope.launch {
                             try {
-                                val changed = markMessageDelivered(ackedId)
+                                val changed = markMessageDelivered(ackedId, senderId) { mirror?.publishEnvelope(senderId, chatId, messageId, rawText) }
                                 Log.i(TAG, "📬 raw delivery ACK: msgId=$ackedId changed=$changed")
                             } catch (error: Exception) {
                                 Log.w(TAG, "raw delivery ACK apply failed: ${error.message}")
@@ -2479,13 +2307,16 @@ class CoreServerService : Service() {
                 // владелец, скрин 30.09 16:40. Своя строка уже есть как отправленная.
                 // р243: адрес из кэша зеркала (обновляется в цикле) - вызов в
                 // ядро на каждом входящем тормозил разбор очереди.
+                val sealed = SealedWire.isSealed(rawText)
+                val preopened = if (sealed) MessageSealer.open(applicationContext, rawText) else rawText
+                if (PushControlIngress.isReserved(preopened)) return
                 val myNodeId = com.vladimir.messenger.data.mirror.MirrorHub.nodeIdCached()
                 if (myNodeId.isNotBlank() && senderId == myNodeId) {
                     Log.w(TAG, "self-addressed packet ignored msgId=$messageId text=" + rawText.take(24))
                     // р242: считаем такие пакеты для диагностики - по счётчику
                     // видно, что «собеседник» это собственный узел.
                     com.vladimir.messenger.data.mirror.MirrorHub.noteSelfPacket()
-                    runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                    if (canAcknowledgeSelfEcho(sealed, preopened)) runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
                     return
                 }
 
@@ -2497,9 +2328,8 @@ class CoreServerService : Service() {
                 // выглядит и настоящая поломка, поэтому пишем WARN с приметами:
                 // раунд 80 стоил дня поисков именно потому, что сообщение
                 // исчезало бесследно.
-                val sealed = SealedWire.isSealed(rawText)
                 val text = if (sealed) {
-                    val opened = MessageSealer.open(applicationContext, rawText)
+                    val opened = preopened
                     if (opened == null) {
                         val known = MessageSealer.canSeal(applicationContext, senderId)
                         // Владелец 2026-10-07: после обмена QR в сети летят СТАРЫЕ копии
@@ -2541,8 +2371,8 @@ class CoreServerService : Service() {
                     // открывается» больше не нужна и не должна висеть сутками.
                     com.vladimir.messenger.data.security.KeyDesyncNotice
                         .opened(applicationContext, senderId)
-                    try {
-                        rememberOpenedMessageBinding(senderId, rawText)
+                    if (!com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(opened)) try {
+                        rememberOpenedMessageBinding(fileTransferRouter, senderId, rawText)
                     } catch (error: Exception) {
                         Log.w(TAG, "opened message binding learn failed: ${error.message}")
                     }
@@ -2569,11 +2399,7 @@ class CoreServerService : Service() {
                 // В v140 оно стало идти обычным P2P-пакетом `ack|id`; клиенты
                 // до v140 не распознавали его, поэтому свежая версия фильтрует
                 if (com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(text)) {
-                    com.vladimir.messenger.data.reply.DirectReplyWire.parse(text)?.let { packet ->
-                        runCatching { chatRepository.applyDirectReply(packet) }
-                            .onFailure { Log.w(TAG, "direct reply apply failed: ${it.message}") }
-                    }
-                    runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                    directReplies.network(senderId, chatId, messageId, text, sealed && MessageSealer.openedByExpectedSender(rawText, senderId), rawText)
                     return
                 }
 
@@ -2585,15 +2411,12 @@ class CoreServerService : Service() {
                 // Raw ACKs are handled before the self-node filter above; keep this guard
                 // for legacy sealed ACKs, whose prefix shows only after MessageSealer.open().
                 if (DeliveryAckWire.isPacket(text)) {
-                    val ackedId = DeliveryAckWire.messageId(text)
+                    val ackedId = DeliveryAckWire.messageId(text)?.takeIf { !sealed || MessageSealer.openedByExpectedSender(rawText, senderId) }
                     if (ackedId != null) {
-                        // р244: сначала партнёрскому устройству той же личности -
-                        // иначе на нём галочка останется одна, хотя сообщение ушло
-                        // именно с него.
-                        mirror?.publishEnvelope(senderId, chatId, messageId, text)
+                        // The partner can still have the row when this device does not.
                         serviceScope.launch {
                             runCatching {
-                                markMessageDelivered(ackedId)
+                                markMessageDelivered(ackedId, senderId) { mirror?.publishEnvelope(senderId, chatId, messageId, text) }
                             }.onSuccess { changed ->
                                 Log.i(TAG, "📬 direct delivery ACK: msgId=$ackedId changed=$changed")
                             }
@@ -2941,8 +2764,7 @@ class CoreServerService : Service() {
                     
                     // Отправить ACK отправителю
                     try {
-                        RustBridge.sendDeliveryAck(messageId, senderId)
-                        Log.i(TAG, "📤 Delivery ACK sent for msgId=$messageId")
+                        if (acknowledgeStoredIncomingText(messageId, senderId, chat.id, incomingSaved, appDatabase.messageDao()::getMessageById, { sealed && MessageSealer.openedByExpectedSender(rawText, senderId) }) { verified -> RustBridge.sendDeliveryAck(messageId, senderId, roomCommitted = verified) }) { Log.i(TAG, "📤 Delivery ACK queued for msgId=$messageId") } else Log.w(TAG, "Incoming text not stored; ACK withheld for msgId=$messageId")
                     } catch (e: Exception) {
                         Log.w(TAG, "⚠ ACK send failed: ${e.message}")
                     }
@@ -2961,60 +2783,38 @@ class CoreServerService : Service() {
                 val peerId = event.peerId ?: return
                 if (!peerId.startsWith("pk_")) return  // Skip mDNS duplicates
                 val peerName = event.displayName?.takeIf { it.isNotBlank() } ?: "Anonymous"
-                val now = System.currentTimeMillis()
-                // Рейтинг узлов: отмечаем, что он был на месте. Из таких
-                // наблюдений и складывается «кому слать в первую очередь».
-                runCatching {
-                    com.vladimir.messenger.data.peer.PeerRatingStore.recordSighting(
-                        context = applicationContext,
-                        peerId = peerId,
-                        address = event.status,
-                        nowMs = now,
-                    )
-                }
-                val lastSeen = knownPeers[peerId] ?: 0L
-                knownPeers[peerId] = now  // свежесть ДО дедупа: пульс = жизнь
-                val lightTouch = now - lastSeen < PEER_DEDUP_MS
-                // Хранение у третьего телефона (этап 7 роя): маршрутизатор
-                // файлов ведёт свой список «кто в сети» - по нему выбирается
-                // хранитель и отдаётся хранимое появившемуся получателю.
-                serviceScope.launch {
-                    // Раунд 180 (аудит-2): регистр «кто онлайн» для файлов -
-                    // только на «тяжёлом» пульсе (раз в 30 с), а не на каждый
-                    // пульс: при живой сети это были десятки лишних записей
-                    // в минуту без какой-нибудь пользы.
-                    if (!lightTouch) {
-                        runCatching { fileTransferRouter.markOnline(peerId) }
-                            .onFailure { Log.w(TAG, "custody presence failed: ${it.message}") }
-                    }
-                    // Файл группы, который я жду, а его сид только что появился:
-                    // спросить сразу, не дожидаясь очередного круга (этап 9).
-                    if (!lightTouch) {
-                        runCatching { groupFiles.onPeerOnline(peerId) }
-                            .onFailure { Log.w(TAG, "group file presence failed: ${it.message}") }
-                        // Обновление, которое я жду, может раздавать именно
-                        // этот узел: спросить сразу, не дожидаясь круга.
-                        runCatching { apkSeeder.onPeerOnline(peerId) }
-                            .onFailure { Log.w(TAG, "apk seeder presence failed: ${it.message}") }
-                    }
-                }
-
-                // Обновляем только СУЩЕСТВУЮЩИЕ контакты (НЕ создаём новые автоматически)
                 try {
                     val existing = contactRepository.getContactByFingerprint(peerId)
-                    if (existing != null) {
-                        // «В сети» — при КАЖДОМ живом пульсе (переходы дёшевы).
-                        // Точный момент последнего пульса запоминаем при первом
-                        // появлении и затем не чаще тяжёлого круга (30 с):
-                        // контактам есть что показать после ухода абонента, а
-                        // база не получает запись на каждый MQTT-пульс.
-                        val becameOnline = onlineMarked.add(peerId)
-                        if (becameOnline || !lightTouch) {
-                            contactRepository.updatePresence(peerId, true, now)
+                    val observation = presence.observe(peerId, existing?.id, event.timestamp) ?: return
+                    val lightTouch = observation.lightTouch
+                    // Рейтинг отражает исходное время принятого наблюдения, а не время доставки.
+                    runCatching {
+                        com.vladimir.messenger.data.peer.PeerRatingStore.recordSighting(
+                            context = applicationContext,
+                            peerId = peerId,
+                            address = event.status,
+                            nowMs = observation.seenAtMs,
+                        )
+                    }
+                    // Хранение у третьего телефона (этап 7 роя): маршрутизатор
+                    // файлов ведёт свой список «кто в сети» - по нему выбирается
+                    // хранитель и отдаётся хранимое появившемуся получателю.
+                    serviceScope.launch {
+                        // Файл группы, который я жду, а его сид только что появился:
+                        // спросить сразу, не дожидаясь очередного круга (этап 9).
+                        if (!lightTouch) {
+                            runCatching { groupFiles.onPeerOnline(peerId) }
+                                .onFailure { Log.w(TAG, "group file presence failed: ${it.message}") }
+                            // Обновление, которое я жду, может раздавать именно
+                            // этот узел: спросить сразу, не дожидаясь круга.
+                            runCatching { apkSeeder.onPeerOnline(peerId) }
+                                .onFailure { Log.w(TAG, "apk seeder presence failed: ${it.message}") }
                         }
-                        if (becameOnline) {
-                            // И в чаты: шапка лички и точка в списке читают таблицу chats
-                            try { chatRepository.updateContactOnlineStatus(peerId, true) } catch (e: Exception) { Log.w(TAG, "presence online failed for ${peerId.takeLast(8)}: ${e.message}") }
+                    }
+
+                    // Обновляем только СУЩЕСТВУЮЩИЕ контакты (НЕ создаём новые автоматически)
+                    if (existing != null) {
+                        if (observation.becameOnline) {
                             // Новенький в сети: точечно синхронизируем сердечки (с антиспамом в HeartSyncPolicy).
                             serviceScope.launch {
                                 try {
@@ -3100,24 +2900,17 @@ class CoreServerService : Service() {
                             }
                         }
                     } else if (contactRepository.isRealName(peerName)) {
-                        // Переустановка приложения выдаёт узлу НОВЫЙ адрес, а
-                        // человек остаётся прежним. Раньше такой узел просто
-                        // игнорировался: старая запись висела с мёртвым адресом,
-                        // имя не обновлялось, сообщения уходили в пустоту - и
-                        // это выглядело как «имя не приходит» и «связь в одну
-                        // сторону». Presence несёт настоящее имя, поэтому
-                        // переселяем прежнюю запись на новый адрес вместе с
-                        // перепиской. Заглушки («Contact ab12») не трогаем:
-                        // по ним человека не опознать.
+                        // Имя только находит кандидатов: findStaleTwins требует
+                        // подтверждения одной и той же физической личности.
                         val twins = runCatching {
                             contactRepository.findStaleTwins(peerName, peerId)
                         }.getOrDefault(emptyList())
                         if (twins.isNotEmpty()) {
                             runCatching {
-                                // addContact вернёт ошибку «уже есть», если
-                                // запись успели создать параллельно - это не
-                                // помеха переносу, поэтому результат не проверяем.
-                                if (contactRepository.addContact(peerName, peerId, automatic = true).exceptionOrNull()?.message == ContactRepository.RESET_DEFERRED) return@runCatching
+                                val error = contactRepository.addContact(peerName, peerId, automatic = true).exceptionOrNull()
+                                if (error?.message == ContactRepository.RESET_DEFERRED) return@runCatching
+                                // Only a real concurrent insert may excuse an add failure.
+                                if (error != null && contactRepository.getContactByFingerprint(peerId) == null) throw error
                                 chatRepository.getOrCreateChat(peerId, peerName)
                                 for (old in twins) {
                                     chatRepository.absorbChatOf(old, peerId)
@@ -3134,6 +2927,8 @@ class CoreServerService : Service() {
                         if (!lightTouch) Log.i(TAG, "ℹ Peer не в контактах: $peerName ($peerId) — нужен invite link")
                         if (lightTouch) return
                     }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
                 } catch (e: Exception) {
                     Log.e(TAG, "Update contact failed", e)
                 }
@@ -3143,14 +2938,9 @@ class CoreServerService : Service() {
             "peer_lost" -> {
                 val peerId = event.peerId ?: return
                 Log.i(TAG, "Peer lost: $peerId")
-                onlineMarked.remove(peerId)
-                // Берём время последнего живого пульса до очистки памяти, а
-                // не момент, когда транспорт заметил разрыв: так «был(а)»
-                // остаётся временем, когда контакт действительно видели.
-                val lastSeenAtMs = knownPeers.remove(peerId) ?: System.currentTimeMillis()
-                fileTransferRouter.markOffline(peerId)
-                try { contactRepository.updatePresence(peerId, false, lastSeenAtMs) } catch (e: Exception) { Log.w(TAG, "presence offline failed: ${e.message}") }
-                try { chatRepository.updateContactOnlineStatus(peerId, false) } catch (e: Exception) { Log.w(TAG, "chat online flag failed: ${e.message}") }
+                try { presence.lost(peerId) }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (e: Exception) { Log.w(TAG, "Presence lost failed", e) }
             }
 
             "network_status_changed" -> {
@@ -3193,14 +2983,14 @@ class CoreServerService : Service() {
                 Log.i(TAG, "✅ DELIVERY_ACK received: msgId=$messageId from ${event.senderId}")
                 serviceScope.launch {
                     try {
-                        markMessageDelivered(messageId)
+                        markMessageDelivered(messageId, event.senderId)
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to mark DELIVERED", e)
                     }
                 }
             }
             
-            else -> Log.d(TAG, "🔍 Event: type=${event.eventType} sender=${event.senderId} peer=${event.peerId} msg=${event.messageId} text=${event.text?.take(30)}")
+            else -> Log.d(TAG, "🔍 Event: type=${event.eventType} sender=${event.senderId} peer=${event.peerId} msg=${event.messageId}")
         }
     }
 
@@ -3225,37 +3015,6 @@ class CoreServerService : Service() {
     }
 
     /**
-     * Караул присутствия: метка онлайна без свежих пульсов дольше TTL → «не в сети».
-     * Самолётный режим у Жени = пульсы пропали, события peer_lost ядро не даёт.
-     */
-    private fun startPresenceReaper() {
-        serviceScope.launch {
-            while (true) {
-                kotlinx.coroutines.delay(PRESENCE_SWEEP_MS)
-                val now = System.currentTimeMillis()
-                val staleIds = synchronized(onlineMarked) {
-                    onlineMarked.filter { pid ->
-                        now - (knownPeers[pid] ?: 0L) > PRESENCE_TTL_MS
-                    }
-                }
-                for (pid in staleIds) {
-                    onlineMarked.remove(pid)
-                    val lastSeenAtMs = knownPeers.remove(pid) ?: now
-                    fileTransferRouter.markOffline(pid)
-                    // Пропущенный круг - минус к доступности в рейтинге.
-                    runCatching {
-                        com.vladimir.messenger.data.peer.PeerRatingStore
-                            .recordMiss(applicationContext, pid)
-                    }
-                    Log.i(TAG, "⚫ OFFLINE (TTL): $pid")
-                    try { contactRepository.updatePresence(pid, false, lastSeenAtMs) } catch (e: Exception) { Log.w(TAG, "presence TTL-offline failed: ${e.message}") }
-                    try { chatRepository.updateContactOnlineStatus(pid, false) } catch (e: Exception) { Log.w(TAG, "chat TTL-offline flag failed: ${e.message}") }
-                }
-            }
-        }
-    }
-
-    /**
      * Русский текст постоянного уведомления.
      *
      * Ядро отдаёт статус словами offline/connecting/connected/relayed, а число
@@ -3276,7 +3035,7 @@ class CoreServerService : Service() {
     /** «1 собеседник», «2 собеседника», «5 собеседников» — в `PeersWord.kt`. */
     private fun peersWord(peers: Long): String = com.vladimir.messenger.service.peersWord(peers)
 
-    private fun updateNotification(status: String) {
+    @Synchronized private fun updateNotification(status: String) {
         if (status == lastNotificationText) return
         lastNotificationText = status
         val notification = buildNotification(status)

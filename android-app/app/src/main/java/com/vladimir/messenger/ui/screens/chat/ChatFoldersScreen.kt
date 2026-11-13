@@ -1,5 +1,9 @@
 package com.vladimir.messenger.ui.screens.chat
 
+import com.vladimir.messenger.ui.components.ApuBackButton
+import com.vladimir.messenger.ui.components.swipeBack
+import androidx.activity.compose.BackHandler
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -20,7 +24,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DragHandle
@@ -52,6 +55,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -86,47 +90,67 @@ fun ChatFoldersScreen(
 ) {
     val folders by viewModel.folders.collectAsStateWithLifecycle()
     val options by viewModel.options.collectAsStateWithLifecycle()
+    ChatFoldersContent(
+        folders = folders,
+        options = options,
+        onBackClick = onBackClick,
+        onAddRecommended = viewModel::addRecommended,
+        onCreate = viewModel::create,
+        onUpdate = viewModel::update,
+        onDelete = viewModel::delete,
+        onMove = viewModel::move,
+    )
+}
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun ChatFoldersContent(
+    folders: List<ChatFolder>,
+    options: List<FolderChatOption>,
+    onBackClick: () -> Unit,
+    onAddRecommended: (ChatFolder.Rule, String) -> Unit,
+    onCreate: (String, Set<String>) -> Unit,
+    onUpdate: (ChatFolder, String, Set<String>) -> Unit,
+    onDelete: (String) -> Unit,
+    onMove: (Int, Int) -> Unit,
+) {
     val newFolderName = stringResource(R.string.folder_new)
     val personalFolderName = stringResource(R.string.folder_personal)
     var creating by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<ChatFolder?>(null) }
     var confirmDelete by remember { mutableStateOf<ChatFolder?>(null) }
+    val editorOpen = creating || editing != null
+    val closeEditor = { creating = false; editing = null }
+    BackHandler(enabled = editorOpen) { closeEditor() }
 
-    if (creating || editing != null) {
+    if (editorOpen) {
         FolderEditor(
             folder = editing,
             options = options,
-            onBack = {
-                creating = false
-                editing = null
-            },
+            onBack = closeEditor,
             onSave = { name, keys ->
                 val target = editing
-                if (target != null) viewModel.update(target, name, keys) else viewModel.create(name, keys)
-                creating = false
-                editing = null
+                if (target != null) onUpdate(target, name, keys) else onCreate(name, keys)
+                closeEditor()
             },
         )
         return
     }
 
     Scaffold(
+        modifier = Modifier.swipeBack(onBack = onBackClick),
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.folder_title), fontWeight = FontWeight.SemiBold) },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
-                    }
-                },
+                navigationIcon = { ApuBackButton(onClick = onBackClick) },
             )
         },
     ) { padding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
+                .padding(padding)
+                .testTag("folder-list"),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
@@ -165,14 +189,14 @@ fun ChatFoldersScreen(
                         title = stringResource(R.string.folder_new),
                         description = stringResource(R.string.folder_new_desc),
                         added = folders.any { it.rule == ChatFolder.Rule.UNREAD },
-                        onAdd = { viewModel.addRecommended(ChatFolder.Rule.UNREAD, newFolderName) },
+                        onAdd = { onAddRecommended(ChatFolder.Rule.UNREAD, newFolderName) },
                     )
                     HorizontalDivider(color = Color(0xFFEDF0F4))
                     RecommendedRow(
                         title = stringResource(R.string.folder_personal),
                         description = stringResource(R.string.folder_personal_desc),
                         added = folders.any { it.rule == ChatFolder.Rule.PERSONAL },
-                        onAdd = { viewModel.addRecommended(ChatFolder.Rule.PERSONAL, personalFolderName) },
+                        onAdd = { onAddRecommended(ChatFolder.Rule.PERSONAL, personalFolderName) },
                     )
                 }
             }
@@ -204,7 +228,7 @@ fun ChatFoldersScreen(
                         folders = folders,
                         onEdit = { editing = it },
                         onDelete = { confirmDelete = it },
-                        onMove = viewModel::move,
+                        onMove = onMove,
                     )
                     HorizontalDivider(color = Color(0xFFEDF0F4))
                     Row(
@@ -242,7 +266,7 @@ fun ChatFoldersScreen(
                     label = stringResource(R.string.action_delete),
                     danger = true,
                     onClick = {
-                        viewModel.delete(folder.id)
+                        onDelete(folder.id)
                         confirmDelete = null
                     },
                 )
@@ -400,7 +424,7 @@ private fun FolderRows(
                 Box {
                     var menuOpen by remember { mutableStateOf(false) }
                     IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = null, tint = FolderSubInk)
+                        Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.chat_more), tint = FolderSubInk)
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
@@ -455,6 +479,7 @@ private fun FolderEditor(
     val isAuto = folder != null && folder.rule != ChatFolder.Rule.CUSTOM
 
     Scaffold(
+        modifier = Modifier.swipeBack(onBack = onBack),
         topBar = {
             TopAppBar(
                 title = {
@@ -463,11 +488,7 @@ private fun FolderEditor(
                         fontWeight = FontWeight.SemiBold,
                     )
                 },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
-                    }
-                },
+                navigationIcon = { ApuBackButton(onClick = onBack) },
             )
         },
         bottomBar = {

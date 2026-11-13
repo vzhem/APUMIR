@@ -17,18 +17,40 @@ object CoreStatus {
     val stage: StateFlow<String> = _stage.asStateFlow()
 
     private val _ready = MutableStateFlow(false)
-    /** true, когда ядро поднято (или честный ограниченный режим). */
+    /** UI may continue even when the engine did not start (limited or mirror mode). */
     val ready: StateFlow<Boolean> = _ready.asStateFlow()
+
+    private val _engineStarted = MutableStateFlow(false)
+    /** The current service completed a successful engine start; not a live native health check. */
+    internal val engineStarted: StateFlow<Boolean> = _engineStarted.asStateFlow()
 
     fun report(text: String) {
         _stage.value = text
+        when (text) {
+            "Готовим ключи безопасности…" -> com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics.progress.preparingKeys()
+            "Поднимаем ядро и сеть…" -> com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics.progress.coreRequested()
+        }
     }
 
-    fun markStarting() { _ready.value = false }
+    internal fun markStarting() {
+        com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics.progress.start()
+        _stage.value = "Поднимаем ядро…"
+        _engineStarted.value = false
+        _ready.value = false
+    }
 
-    fun markReady() {
-        com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.tracker.coreReady()
-        com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.phase(com.vladimir.messenger.data.diagnostics.DiagnosticPhase.CORE_READY)
+    internal fun markReady(engineStarted: Boolean) {
+        com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics.progress.finished()
+        _engineStarted.value = engineStarted
+        if (engineStarted) {
+            com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.tracker.coreReady()
+            com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.phase(com.vladimir.messenger.data.diagnostics.DiagnosticPhase.CORE_READY)
+        }
         _ready.value = true
+    }
+
+    internal fun markStopped() {
+        _engineStarted.value = false
+        com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics.progress.stopped()
     }
 }

@@ -218,7 +218,7 @@ class DeviceIdentityCoordinator @Inject constructor(
         if (nick.isBlank()) return
         val sameNickContacts = contactDao.getContactsByUsername(nick)
         for (other in sameNickContacts) {
-            if (other.id == packet.ownerId) continue
+            if (other.id == packet.ownerId || other.id == liveContact.id) continue
             if (DeviceProfileBinding.areSameVerifiedDevice(context, other.id, packet.ownerId)) {
                 mergeReplacedContact(
                     oldOwnerId = other.id,
@@ -250,13 +250,20 @@ class DeviceIdentityCoordinator @Inject constructor(
         }
         if (!seenReplacements.add(dedupKey)) return
 
-        mergeReplacedContact(
-            oldOwnerId = packet.oldOwnerId,
-            newOwnerId = packet.newOwnerId,
-            nickname = packet.nickname,
-            fallbackDisplayName = packet.displayName,
-            timestampMs = packet.timestampMs,
-        )
+        try {
+            mergeReplacedContact(
+                oldOwnerId = packet.oldOwnerId,
+                newOwnerId = packet.newOwnerId,
+                nickname = packet.nickname,
+                fallbackDisplayName = packet.displayName,
+                timestampMs = packet.timestampMs,
+            )
+        } catch (error: Exception) {
+            // Do not permanently suppress a verified replacement after an IO failure.
+            seenReplacements.remove(dedupKey)
+            Log.w(TAG, "verified replacement deferred", error)
+            throw error
+        }
 
         // Пересылаем подтверждённую замену общим знакомым на 1–2 шага.
         val forwarded = packet.nextHop()
@@ -318,11 +325,14 @@ class DeviceIdentityCoordinator @Inject constructor(
             val effectiveNick = nickname.ifBlank { oldContact?.username.orEmpty() }
             val existingNew = contactRepository.getContactByFingerprint(newOwnerId)
             if (existingNew == null) {
-                contactRepository.addContact(
+                val error = contactRepository.addContact(
                     displayName = preservedName,
                     fingerprint = newOwnerId,
                     username = effectiveNick,
-                )
+                ).exceptionOrNull()
+                // A simultaneous insert is safe; a failed insert without a
+                // destination must never lead to deleting the old history.
+                if (error != null && contactRepository.getContactByFingerprint(newOwnerId) == null) throw error
             } else if (effectiveNick.isNotBlank() && existingNew.username.isBlank()) {
                 contactRepository.updateUsername(newOwnerId, effectiveNick)
             }

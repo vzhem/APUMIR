@@ -84,6 +84,7 @@ data class OperationalSnapshot(
         }
         timings.forEach { (key, value) -> appendLine("latency=${key.name.lowercase()} · n=${value.count} · p50_upper_ms=${value.p50UpperMs ?: -1} · p95_upper_ms=${value.p95UpperMs ?: -1} · max_ms=${value.maxMs}") }
         appendLine("p50/p95 — верхние границы фиксированных корзин; -1 = нет данных или открытая корзина >1ч.")
+        appendLine("core_ready_uptime: от создания службы до отметки запуска ядра; resume_ready_uptime: от появления экрана до отметки запуска или ранее подтверждённого кэша. Сон исключён; восстановление сети и доставка не проверяются.")
         routeResults.forEach { (route, counts) -> appendLine("file_route=${route.name.lowercase()} · attempts=${counts.first} · failed=${counts.second}") }
         appendLine("message_pending_tracked=$pendingMessages · oldest_pending_uptime_ms=${oldestPendingUptimeMs ?: -1}")
         appendLine("foreground_uptime_ms=$foregroundUptimeMs · background_uptime_ms=$backgroundUptimeMs (сон исключён)")

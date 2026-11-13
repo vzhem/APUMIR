@@ -85,6 +85,9 @@ internal fun OfficialUpdateDownloadItem(
         ApuSettingsDivider()
         val detail = when {
             visible.isFailed -> stringResource(R.string.st_official_download_failed)
+            visible.status == "starting" -> stringResource(R.string.st_official_starting)
+            visible.status == "retrying" -> stringResource(R.string.st_official_trying_fallback)
+            visible.status == "verifying" -> stringResource(R.string.st_official_verifying)
             visible.status == "paused" -> stringResource(R.string.st_official_paused)
             visible.totalBytes > 0L -> stringResource(
                 R.string.st_official_progress_tpl,
@@ -94,10 +97,16 @@ internal fun OfficialUpdateDownloadItem(
             )
             else -> stringResource(R.string.st_official_progress_unknown_tpl, StoragePolicy.format(visible.downloadedBytes))
         }
+        val source = when (visible.source) {
+            "site" -> stringResource(R.string.st_official_source_site)
+            "relay" -> stringResource(R.string.st_official_source_relay)
+            "github" -> stringResource(R.string.st_official_source_github)
+            else -> null
+        }
         ApuSettingsItem(
             icon = Icons.Default.Download,
             title = stringResource(R.string.st_official_progress_title, visible.version.removePrefix("v")),
-            subtitle = detail,
+            subtitle = if (source == null) detail else stringResource(R.string.st_official_source_detail_tpl, source, detail),
         )
         if (visible.isActive) {
             ApuSettingsItem(

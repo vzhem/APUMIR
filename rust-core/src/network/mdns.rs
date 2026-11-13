@@ -32,7 +32,6 @@
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::Arc;
 use std::time::Duration;
 
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
@@ -113,13 +112,34 @@ pub struct DiscoveredNode {
 // MDNS SERVICE
 // ═══════════════════════════════════════════════════════════════════
 
+/// A browse round contains only nodes resolved during that round. A prior
+/// service's cached entry cannot be replayed forever if its removal arrived
+/// while nobody was listening. The mDNS daemon can still return its own
+/// DNS-TTL cache, so this is not cryptographic proof of reachability.
+#[derive(Default)]
+struct DiscoveryRound {
+    nodes: HashMap<String, DiscoveredNode>,
+}
+
+impl DiscoveryRound {
+    fn resolved(&mut self, node: DiscoveredNode) {
+        self.nodes.insert(node.full_name.clone(), node);
+    }
+
+    fn removed(&mut self, full_name: &str) {
+        self.nodes.remove(full_name);
+    }
+
+    fn finish(self) -> Vec<DiscoveredNode> {
+        self.nodes.into_values().collect()
+    }
+}
+
 /// Сервис для публикации себя в mDNS и обнаружения других.
 pub struct MdnsService {
     daemon: ServiceDaemon,
     /// Полное имя нашего сервиса (для последующего unregister)
     my_service_name: Mutex<Option<String>>,
-    /// Кэш обнаруженных узлов
-    discovered: Arc<Mutex<HashMap<String, DiscoveredNode>>>,
 }
 
 impl MdnsService {
@@ -130,7 +150,6 @@ impl MdnsService {
         Ok(MdnsService {
             daemon,
             my_service_name: Mutex::new(None),
-            discovered: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -224,7 +243,7 @@ impl MdnsService {
             .map_err(|e| MdnsError::Discovery(e.to_string()))?;
 
         let my_name = self.my_service_name.lock().await.clone();
-        let discovered = Arc::clone(&self.discovered);
+        let mut discovered = DiscoveryRound::default();
 
         // Обрабатываем события в течение timeout
         let deadline = tokio::time::Instant::now() + timeout;
@@ -315,17 +334,16 @@ impl MdnsService {
                         alt_addresses,
                     };
 
-                    discovered.lock().await.insert(full_name, node);
+                    discovered.resolved(node);
                 }
                 ServiceEvent::ServiceRemoved(_type, full_name) => {
-                    discovered.lock().await.remove(&full_name);
+                    discovered.removed(&full_name);
                 }
                 _ => {} // Игнорируем остальные события
             }
         }
 
-        let result: Vec<DiscoveredNode> = discovered.lock().await.values().cloned().collect();
-        Ok(result)
+        Ok(discovered.finish())
     }
 
     /// Прекратить публикацию себя.
@@ -477,6 +495,20 @@ mod tests {
             device_id_hex: device.map(str::to_string),
             alt_addresses: Vec::new(),
         }
+    }
+
+    #[test]
+    fn browse_round_never_replays_an_old_node_without_a_resolution() {
+        let mut first = DiscoveryRound::default();
+        first.resolved(node("A", None));
+        assert_eq!(first.finish().len(), 1);
+        // An mDNS removal may have arrived between calls, with no listener.
+        // Without a new ServiceResolved in this round the old node is absent.
+        assert!(DiscoveryRound::default().finish().is_empty());
+        let mut next = DiscoveryRound::default();
+        next.resolved(node("A", None));
+        next.removed("A");
+        assert!(next.finish().is_empty());
     }
 
     /// Второй стек объявления: оба адреса сохраняются, лучший — первым.

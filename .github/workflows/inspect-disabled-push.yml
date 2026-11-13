@@ -1,0 +1,94 @@
+name: Inspect existing disabled push Worker (read only)
+
+# A one-time inspection of the Worker created for b266925, never a deployment.
+# The marker starts only offline tests; the credentialed GET job separately
+# requires the owner's GitHub environment review for the exact new SHA.
+on:
+  push:
+    branches: ['arena/1266946d-apumir']
+    paths:
+      - '.github/workflows/inspect-disabled-push.yml'
+      - 'scripts/ci/inspect-disabled-push.py'
+      - 'scripts/ci/test-inspect-disabled-push.py'
+      - 'scripts/ci/push-infra-preflight.py'
+      - 'scripts/ci/test-push-infra-preflight.py'
+      - 'scripts/ci/push-disabled-deploy.py'
+      - 'scripts/ci/test-push-disabled-deploy.py'
+      - 'scripts/ci/check-firebase-client-config.py'
+      - 'tools/worker/push/**'
+      - 'docs/APP_DELIVERY_TRACKER.md'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: inspect-disabled-push
+  cancel-in-progress: false
+
+jobs:
+  offline-tests:
+    if: github.repository == 'vzhem/APUMIR' && github.ref == 'refs/heads/arena/1266946d-apumir' && contains(github.event.head_commit.message, '[inspect-disabled-push]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out this exact commit without retaining Git credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Test read-only inspection and protection checks without credentials
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/test-inspect-disabled-push.py
+          python3 scripts/ci/test-push-infra-preflight.py
+          python3 scripts/ci/test-push-disabled-deploy.py
+
+  protection-check:
+    needs: offline-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out this exact commit without retaining Git credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Confirm owner-review and exact branch protection
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APU_GITHUB_STEP_DEBUG: ${{ secrets.ACTIONS_STEP_DEBUG || vars.ACTIONS_STEP_DEBUG }}
+          APU_GITHUB_RUNNER_DEBUG: ${{ secrets.ACTIONS_RUNNER_DEBUG || vars.ACTIONS_RUNNER_DEBUG }}
+        run: |
+          python3 scripts/ci/push-infra-preflight.py --check-protection
+          python3 scripts/ci/push-disabled-deploy.py --check-head
+
+  inspect-read-only:
+    needs: protection-check
+    environment: apu-push-staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out this exact commit without retaining Git credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Recheck protection after owner approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APU_GITHUB_STEP_DEBUG: ${{ secrets.ACTIONS_STEP_DEBUG || vars.ACTIONS_STEP_DEBUG }}
+          APU_GITHUB_RUNNER_DEBUG: ${{ secrets.ACTIONS_RUNNER_DEBUG || vars.ACTIONS_RUNNER_DEBUG }}
+        run: |
+          python3 scripts/ci/push-infra-preflight.py --check-protection
+          python3 scripts/ci/push-disabled-deploy.py --check-head
+      # No deploy token, FCM secret, npm, or Worker code executes in this job.
+      # The final script makes only fixed API GETs and one unauthenticated
+      # public GET; it never prints account IDs, hosts or provider responses.
+      - name: Inspect existing Worker and disabled public health using GET only
+        env:
+          APU_GITHUB_STEP_DEBUG: ${{ secrets.ACTIONS_STEP_DEBUG || vars.ACTIONS_STEP_DEBUG }}
+          APU_GITHUB_RUNNER_DEBUG: ${{ secrets.ACTIONS_RUNNER_DEBUG || vars.ACTIONS_RUNNER_DEBUG }}
+          APU_PUSH_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.APU_PUSH_CLOUDFLARE_ACCOUNT_ID }}
+          APU_PUSH_CLOUDFLARE_TOKEN: ${{ secrets.APU_PUSH_CLOUDFLARE_TOKEN }}
+        run: python3 scripts/ci/inspect-disabled-push.py

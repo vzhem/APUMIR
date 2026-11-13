@@ -1,0 +1,260 @@
+// EXPERIMENTAL: isolated, disabled-by-default wake and ciphertext mailbox.
+// Neither is wired to the application or deployed. Read REMOTE_PUSH_DESIGN.md
+// before enabling; provider or storage acceptance is not message delivery.
+import { fcmConfigured, FcmV1 } from "./fcm.mjs";
+import { rateIdentity, routeFor, shardFor, validRegistration, validWake, verifyRegistration } from "./protocol.mjs";
+import { MAX_MAILBOX_BODY_BYTES, mailboxPutId, validMailboxAccess, validMailboxPut, verifyMailboxAccess } from "./mailbox-protocol.mjs";
+import { CiphertextMailbox } from "./mailbox.mjs";
+import { WakeQueue } from "./wake-queue.mjs";
+
+const MAX_BODY_BYTES = 8192;
+const MAILBOX_PATHS = ["/v1/mailbox/put", "/v1/mailbox/pull", "/v1/mailbox/ack"];
+const PATHS = ["/v1/registration", "/v1/wake", ...MAILBOX_PATHS];
+const REGISTER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const TOMBSTONE_MS = 15 * 60 * 1000; // > maximum signed timestamp validity, even with clock skew
+const ALARM_INTERVAL_MS = 12 * 60 * 60 * 1000;
+const MAX_DEVICES_PER_ROUTE = 4;
+const MAX_ROWS_PER_OWNER = 2048;
+const MAX_ROWS_PER_SHARD = 25_000;
+const MAX_RATE_ROWS = 20_000;
+
+const json = (data, status = 200) => new Response(JSON.stringify(data), {
+  status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+});
+const accepted = () => json({ accepted: true }, 202);
+
+function serviceEnabled(env) {
+  return env.PUSH_ENABLED === "true" && fcmConfigured(env) &&
+    typeof env.PUSH_RATE_KEY === "string" && env.PUSH_RATE_KEY.length >= 32;
+}
+
+function configured(env) {
+  return serviceEnabled(env) && env.PUSH_SHARDS;
+}
+
+function validRequest(path, body, nowMs) {
+  const nowSeconds = Math.floor(nowMs / 1000);
+  if (path === "/v1/wake") return validWake(body);
+  if (path === "/v1/registration") return validRegistration(body, nowSeconds);
+  if (path === "/v1/mailbox/put") return validMailboxPut(body, nowMs);
+  if (path === "/v1/mailbox/pull") return validMailboxAccess(body, "pull", nowSeconds);
+  if (path === "/v1/mailbox/ack") return validMailboxAccess(body, "ack", nowSeconds);
+  return false;
+}
+
+function mailboxResponse(result) {
+  if (result.status === 204) return new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
+  if (result.status === 200 || result.status === 201) {
+    const { status, ...body } = result;
+    return json(body, status);
+  }
+  const error = ({ 400: "bad request", 403: "unauthorised", 404: "route unavailable", 409: "conflict", 429: "rate limited", 503: "mailbox unavailable" })[result.status] || "mailbox unavailable";
+  return json({ error }, result.status);
+}
+
+/** Read incrementally; Content-Length is not trusted, and the cap is on bytes. */
+async function readJson(request, maxBytes = MAX_BODY_BYTES) {
+  const type = request.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+  if (type !== "application/json") throw new Error("content type");
+  const length = request.headers.get("content-length");
+  if (length && (!/^\d+$/.test(length) || Number(length) > maxBytes)) throw new Error("body too large");
+  if (!request.body) throw new Error("missing body");
+  const reader = request.body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > maxBytes) { await reader.cancel(); throw new Error("body too large"); }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+}
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.protocol !== "https:") return json({ error: "https required" }, 400);
+    const path = url.pathname;
+    if (path === "/health" && request.method === "GET") {
+      return json({ ok: !!configured(env), service: "apu-push-wake", experimental: true }, configured(env) ? 200 : 503);
+    }
+    if (!configured(env)) return json({ error: "push unavailable" }, 503);
+    if (request.method !== "POST" || !PATHS.includes(path)) return json({ error: "not found" }, 404);
+    if (MAILBOX_PATHS.includes(path) && env.MAILBOX_ENABLED !== "true") return json({ error: "mailbox unavailable" }, 503);
+    let body;
+    try { body = await readJson(request, path === "/v1/mailbox/put" ? MAX_MAILBOX_BODY_BYTES : MAX_BODY_BYTES); }
+    catch (_) { return json({ error: "bad request" }, 400); }
+    const now = Date.now();
+    if (!validRequest(path, body, now)) return json({ error: "bad request" }, 400);
+    if (path === "/v1/mailbox/put" && await mailboxPutId(body.expiresAt, body.envelope) !== body.id) {
+      return json({ error: "bad request" }, 400);
+    }
+    // Cloudflare supplies this header; a missing value uses a shared fail-safe
+    // bucket. It is HMACed before it leaves this worker and is never persisted.
+    const identity = await rateIdentity(env.PUSH_RATE_KEY, request.headers.get("cf-connecting-ip"));
+    const shard = await shardFor(body.owner);
+    const id = env.PUSH_SHARDS.idFromName("apu-push-shard-v1:" + shard);
+    const internal = new Request("https://push-internal.invalid" + path, {
+      method: "POST", headers: { "content-type": "application/json", "x-apu-rate-id": identity },
+      body: JSON.stringify(body),
+    });
+    try {
+      return await env.PUSH_SHARDS.get(id).fetch(internal);
+    } catch (_) {
+      // Do not log request bodies, capabilities, tokens or upstream responses.
+      console.error("Push shard request failed");
+      return json({ error: "push unavailable" }, 503);
+    }
+  },
+};
+
+/** Fixed number of SQLite-backed Durable Objects, sharded by receiver key. */
+export class PushShard {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+    this.sql = state.storage.sql;
+    this.provider = new FcmV1(env);
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS registrations (
+      route TEXT NOT NULL, owner TEXT NOT NULL, device TEXT NOT NULL,
+      token TEXT, sequence INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+      PRIMARY KEY (route, device)
+    )`);
+    this.sql.exec("CREATE INDEX IF NOT EXISTS push_owner ON registrations(owner)");
+    this.sql.exec("CREATE INDEX IF NOT EXISTS push_expiry ON registrations(expires_at)");
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS rate_limits (
+      bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, expires_at INTEGER NOT NULL
+    )`);
+    this.sql.exec("CREATE INDEX IF NOT EXISTS push_rate_expiry ON rate_limits(expires_at)");
+    this.wakes = new WakeQueue(this);
+    this.mailbox = new CiphertextMailbox(this);
+  }
+
+  rows(query, ...args) { return this.sql.exec(query, ...args).toArray(); }
+  count(query, ...args) { return Number(this.rows(query, ...args)[0]?.n || 0); }
+  mailboxEnabled() { return serviceEnabled(this.env) && this.env.MAILBOX_ENABLED === "true"; }
+
+  // One synchronous transaction prevents overlapping requests from bypassing
+  // quotas or replay protection. Bounded expiry work avoids unbounded scans.
+  cleanup(now) {
+    this.sql.exec("DELETE FROM registrations WHERE rowid IN (SELECT rowid FROM registrations WHERE expires_at <= ? LIMIT 128)", now);
+    this.sql.exec("DELETE FROM rate_limits WHERE rowid IN (SELECT rowid FROM rate_limits WHERE expires_at <= ? LIMIT 128)", now);
+    this.wakes.cleanup(now);
+    this.mailbox.cleanup(now);
+  }
+
+  consume(bucket, limit, duration, now) {
+    const row = this.rows("SELECT count, expires_at FROM rate_limits WHERE bucket = ?", bucket)[0];
+    if (!row || Number(row.expires_at) <= now) {
+      if (!row && this.count("SELECT count(*) AS n FROM rate_limits") >= MAX_RATE_ROWS) return false;
+      this.sql.exec("INSERT OR REPLACE INTO rate_limits(bucket, count, expires_at) VALUES (?, 1, ?)", bucket, now + duration);
+      return true;
+    }
+    if (Number(row.count) >= limit) return false;
+    this.sql.exec("UPDATE rate_limits SET count = count + 1 WHERE bucket = ?", bucket);
+    return true;
+  }
+
+  async ensureAlarm() {
+    await this.wakes.locked(async () => {
+      if ((await this.state.storage.getAlarm()) === null) await this.state.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
+    });
+  }
+
+  async alarm() {
+    const now = Date.now();
+    if (!serviceEnabled(this.env)) {
+      // The kill switch also applies to previously queued alarms. Keep bounded
+      // expiry housekeeping, but do not send or spin on an already-due wake.
+      this.state.storage.transactionSync(() => this.cleanup(now));
+      await this.wakes.reschedule({ suspended: true });
+      return;
+    }
+    // Install a crash-recovery alarm before touching pending rows. Each
+    // provider attempt releases its lease transactionally when it finishes.
+    await this.wakes.mutate(now, (current) => {
+      this.cleanup(current);
+      this.wakes.cleanupDueOrphans(current);
+    });
+    await this.wakes.runDue(Date.now());
+    await this.wakes.reschedule();
+  }
+
+  async fetch(request) {
+    if (!serviceEnabled(this.env)) return json({ error: "push unavailable" }, 503);
+    const path = new URL(request.url).pathname;
+    if (request.method !== "POST" || !PATHS.includes(path)) return json({ error: "not found" }, 404);
+    if (MAILBOX_PATHS.includes(path) && this.env.MAILBOX_ENABLED !== "true") return json({ error: "mailbox unavailable" }, 503);
+    let body;
+    try { body = await readJson(request, path === "/v1/mailbox/put" ? MAX_MAILBOX_BODY_BYTES : MAX_BODY_BYTES); }
+    catch (_) { return json({ error: "bad request" }, 400); }
+    const now = Date.now();
+    if (!validRequest(path, body, now)) return json({ error: "bad request" }, 400);
+    const rateId = request.headers.get("x-apu-rate-id") || "";
+    if (!/^[0-9a-f]{64}$/.test(rateId)) return json({ error: "bad request" }, 400);
+    const allowed = this.state.storage.transactionSync(() => {
+      this.cleanup(now);
+      return this.consume("global", 1200, 60_000, now) &&
+        this.consume("ip:" + rateId, 240, 60 * 60_000, now);
+    });
+    await this.ensureAlarm();
+    if (!allowed) return json({ error: "rate limited" }, 429);
+    const route = await routeFor(body.owner, body.capability);
+    if (path === "/v1/registration") return this.register(body, route);
+    if (path === "/v1/wake") return this.wake(body.owner, route, now);
+    if (path === "/v1/mailbox/put") return mailboxResponse(await this.mailbox.put(body, route, now));
+    const action = path === "/v1/mailbox/pull" ? "pull" : "ack";
+    if (!(await verifyMailboxAccess(body, action))) return json({ error: "unauthorised" }, 403);
+    // Verification was asynchronous: re-check the switch, timestamp and the
+    // live registration immediately before the synchronous storage operation.
+    const current = Date.now();
+    if (!serviceEnabled(this.env) || this.env.MAILBOX_ENABLED !== "true") return json({ error: "mailbox unavailable" }, 503);
+    if (!validMailboxAccess(body, action, Math.floor(current / 1000))) return json({ error: "bad request" }, 400);
+    return mailboxResponse(action === "pull" ? this.mailbox.pull(body, route, current) : this.mailbox.ack(body, route, current));
+  }
+
+  async register(body, route) {
+    if (!(await verifyRegistration(body))) return json({ error: "unauthorised" }, 403);
+    const status = this.state.storage.transactionSync(() => {
+      // Signature verification and alarm/storage scheduling are asynchronous.
+      // A once-fresh signed operation must not revive a registration after its
+      // revoke tombstone expires while the request is waiting. Check the clock
+      // and kill switch at the actual write, not at the start of the request.
+      const now = Date.now();
+      if (!serviceEnabled(this.env)) return 503;
+      if (!validRegistration(body, Math.floor(now / 1000))) return 400;
+      const previous = this.rows("SELECT owner, sequence FROM registrations WHERE route = ? AND device = ?", route, body.device)[0];
+      if (previous && (previous.owner !== body.owner || Number(previous.sequence) >= body.sequence)) return 409;
+      // Replayed signed operations must not exhaust a legitimate owner's quota.
+      if (!this.consume("reg-owner:" + body.owner, 4096, 24 * 60 * 60_000, now)) return 429;
+      if (!previous) {
+        if (this.count("SELECT count(*) AS n FROM registrations WHERE route = ?", route) >= MAX_DEVICES_PER_ROUTE ||
+            this.count("SELECT count(*) AS n FROM registrations WHERE owner = ?", body.owner) >= MAX_ROWS_PER_OWNER ||
+            this.count("SELECT count(*) AS n FROM registrations") >= MAX_ROWS_PER_SHARD) return 429;
+      }
+      const expires = now + (body.action === "register" ? REGISTER_TTL_MS : TOMBSTONE_MS);
+      const token = body.action === "register" ? body.token : null;
+      this.sql.exec(`INSERT OR REPLACE INTO registrations(route, owner, device, token, sequence, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?)`, route, body.owner, body.device, token, body.sequence, expires);
+      if (body.action === "revoke") this.wakes.discard(route, body.device);
+      return 204;
+    });
+    if (status === 204) return new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
+    const error = ({ 400: "bad request", 409: "stale operation", 429: "rate limited", 503: "push unavailable" })[status] || "push unavailable";
+    return json({ error }, status);
+  }
+
+  async wake(owner, route, now) {
+    await this.wakes.enqueue(owner, route, now);
+    // Same response whether the route exists, is rate limited, or FCM failed.
+    // A signal acceptance is not evidence that a message reached a device.
+    return accepted();
+  }
+}

@@ -1,0 +1,47 @@
+name: Verify release assets and site
+
+# Nothing here publishes or modifies a release. GitHub hides drafts from a
+# read-only token, so only the explicitly requested draft job gets write access.
+on:
+  push:
+    branches:
+      - 'arena/**'
+    paths:
+      - '.github/workflows/verify-published-release.yml'
+      - '.github/workflows/verify-release-impl.yml'
+      - 'scripts/release/verify-published-release.sh'
+      - 'scripts/release/test-verify-published-release.py'
+      - 'docs/APP_DELIVERY_TRACKER.md'
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: 'Verify a draft or a published stable release'
+        required: true
+        type: choice
+        default: public
+        options:
+          - draft
+          - public
+      tag:
+        description: 'Release tag (empty: nearest tag on this branch)'
+        required: false
+        type: string
+
+jobs:
+  draft:
+    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-publication-draft]')) || (github.event_name == 'workflow_dispatch' && inputs.stage == 'draft')
+    permissions:
+      contents: write
+    uses: ./.github/workflows/verify-release-impl.yml
+    with:
+      stage: draft
+      tag: ${{ inputs.tag }}
+
+  public:
+    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-publication-public]')) || (github.event_name == 'workflow_dispatch' && inputs.stage == 'public')
+    permissions:
+      contents: read
+    uses: ./.github/workflows/verify-release-impl.yml
+    with:
+      stage: public
+      tag: ${{ inputs.tag }}

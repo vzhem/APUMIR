@@ -1,0 +1,86 @@
+name: Compare Firebase project settings (protected, offline)
+
+# This diagnostic never deploys, authenticates the service-account key, or
+# contacts Cloudflare/Google. Only the project comparison result is emitted.
+# It is deliberately separate from the Cloudflare-reading preflight.
+on:
+  push:
+    branches:
+      - 'arena/1266946d-apumir'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push must cancel any pending approval for an older commit.
+concurrency:
+  group: firebase-project-comparison-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-tests:
+    if: github.repository == 'vzhem/APUMIR' && github.ref == 'refs/heads/arena/1266946d-apumir'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out this exact commit without retaining Git credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Test project comparison with fabricated configurations
+        run: python3 scripts/ci/test-compare-push-firebase-projects.py
+
+  protection-check:
+    needs: offline-tests
+    if: >-
+      github.repository == 'vzhem/APUMIR' &&
+      github.ref == 'refs/heads/arena/1266946d-apumir' &&
+      (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[push-project-comparison]'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out this exact commit without retaining Git credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Confirm the GitHub environment is already protected
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APU_GITHUB_STEP_DEBUG: ${{ secrets.ACTIONS_STEP_DEBUG || vars.ACTIONS_STEP_DEBUG }}
+          APU_GITHUB_RUNNER_DEBUG: ${{ secrets.ACTIONS_RUNNER_DEBUG || vars.ACTIONS_RUNNER_DEBUG }}
+        run: python3 scripts/ci/push-infra-preflight.py --check-protection
+
+  compare-projects:
+    needs: protection-check
+    if: github.repository == 'vzhem/APUMIR' && github.ref == 'refs/heads/arena/1266946d-apumir'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: apu-push-staging
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out this exact commit without retaining Git credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Recheck environment protection before reading configurations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APU_GITHUB_STEP_DEBUG: ${{ secrets.ACTIONS_STEP_DEBUG || vars.ACTIONS_STEP_DEBUG }}
+          APU_GITHUB_RUNNER_DEBUG: ${{ secrets.ACTIONS_RUNNER_DEBUG || vars.ACTIONS_RUNNER_DEBUG }}
+        run: python3 scripts/ci/push-infra-preflight.py --check-protection
+      - name: Compare project identifiers without printing their values
+        env:
+          APU_FIREBASE_ANDROID_CONFIG: ${{ secrets.APU_FIREBASE_ANDROID_CONFIG }}
+          APU_PUSH_REFERENCE_ANDROID_CONFIG: ${{ secrets.APU_PUSH_REFERENCE_ANDROID_CONFIG }}
+          APU_PUSH_FCM_SERVICE_ACCOUNT: ${{ secrets.APU_PUSH_FCM_SERVICE_ACCOUNT }}
+          APU_GITHUB_STEP_DEBUG: ${{ secrets.ACTIONS_STEP_DEBUG || vars.ACTIONS_STEP_DEBUG }}
+          APU_GITHUB_RUNNER_DEBUG: ${{ secrets.ACTIONS_RUNNER_DEBUG || vars.ACTIONS_RUNNER_DEBUG }}
+        run: python3 scripts/ci/compare-push-firebase-projects.py

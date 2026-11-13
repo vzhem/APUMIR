@@ -4,7 +4,6 @@ import android.content.Context
 import android.util.Base64
 import android.util.Log
 import com.vladimir.messenger.data.file.FileExchangeKeyStore
-import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Cipher
@@ -121,7 +120,7 @@ object MessageSealer {
 
             // Манифест привязывает ключ к этому конкретному шифротексту:
             // подменить тело не выйдет, ядро сверит манифест при вскрытии.
-            val manifest = manifest(ciphertext)
+            val manifest = SealedWire.manifest(ciphertext)
             val keyEnvelope = FileExchangeKeyStore.withExistingSecret(app) { secret ->
                 createFileKeyEnvelope(myBinding, recipientBinding, secret, manifest, messageKey)
             }
@@ -142,7 +141,7 @@ object MessageSealer {
         val myBinding = FileExchangeKeyStore.publicBinding(app) ?: return null
 
         return runCatching {
-            val manifest = manifest(parts.ciphertext)
+            val manifest = SealedWire.manifest(parts.ciphertext)
             val messageKey = FileExchangeKeyStore.withExistingSecret(app) { secret ->
                 openFileKeyEnvelope(parts.keyEnvelope, myBinding, secret, manifest)
             }
@@ -168,27 +167,6 @@ object MessageSealer {
         val senderBinding = SealedWire.senderBinding(wire) ?: return@runCatching false
         uniffi.p2p_core.fileExchangeBindingNodeId(senderBinding) == expectedSender
     }.getOrDefault(false)
-
-    /**
-     * Манифест обеих сторон обязан совпадать байт в байт, иначе ядро не отдаст
-     * ключ и сообщение молча не откроется.
-     *
-     * Поэтому в манифесте ТОЛЬКО отпечаток шифротекста и никаких имён узлов.
-     * Раунд 80: узел может называться и 32-, и 64-символьным видом одного и
-     * того же ключа (`is_legacy_routing_node_id` допускает оба), а на разных
-     * путях доставки приходит разный вид. Из-за этого сообщения через
-     * ретранслятор не открывались, хотя по Wi-Fi всё работало.
-     *
-     * Безопасность от этого не страдает: подлинность обеих сторон уже
-     * проверяется подписанными привязками внутри самого конверта, а привязка
-     * ключа к телу сообщения сохраняется отпечатком.
-     */
-    private fun manifest(ciphertext: ByteArray): ByteArray {
-        val digest = MessageDigest.getInstance("SHA-256").digest(ciphertext)
-        return ("apu-msg-v1|" + digest.toHex()).toByteArray(Charsets.UTF_8)
-    }
-
-    private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
     fun forget(context: Context, peerId: String) {
         bindings.remove(peerId)

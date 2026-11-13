@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.ui.components.ApuBackButton
+
 import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.ui.components.ApuSettingsCard
@@ -34,7 +36,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Redeem
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -115,11 +116,7 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                     scrolledContainerColor = Color.Transparent,
                 ),
                 title = { ApuSettingsHeader(stringResource(R.string.rank_benefits_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                    }
-                },
+                navigationIcon = { ApuBackButton(onClick = onBackClick) },
             )
         }
     ) { padding ->

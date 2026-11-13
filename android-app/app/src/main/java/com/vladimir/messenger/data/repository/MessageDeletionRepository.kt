@@ -220,9 +220,11 @@ class MessageDeletionRepository @Inject constructor(
             val ackedId = parts[2]
             if (ackedId.isBlank()) return true
             withContext(Dispatchers.IO) {
-                val matching = outbox.all().any { it.kind == DeletionOutbox.KIND_DIRECT && it.targetId == ackedId && it.peerId == senderId }
-                if (matching) OperationalDiagnostics.tracker.count(OperationalCounter.DELETE_ACK_MATCHED)
-                outbox.removeByTarget(DeletionOutbox.KIND_DIRECT, ackedId)
+                // Peer/target scoping prevents removing another conversation's
+                // request, but the legacy ingress still needs authentication.
+                if (outbox.acknowledgeDirect(senderId, ackedId)) {
+                    OperationalDiagnostics.tracker.count(OperationalCounter.DELETE_ACK_MATCHED)
+                }
             }
             return true
         }

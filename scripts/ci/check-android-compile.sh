@@ -50,7 +50,13 @@ cd android-app || exit 1
     --tests '*ShortLinksTest*' --tests '*DiagnosticsReportTest*' --tests '*RelayStorageDiagnosticsTest*' --tests '*RuntimeHealthTest*' --tests '*OperationalHealthTest*' --tests '*StoryDeliveryQueueTest*' --tests '*StoryVideoDraftTest*' --tests '*StoryVideoWireTest*' --tests '*StoryPublishTest*' --tests '*StoryOutboxTest*' --tests '*StoryStoreMergeTest*' --tests '*StoryCropTest*' --tests '*ProfileMirrorBirthdayTest*' --tests '*ProfileMirrorVideoAvatarTest*' --tests '*VideoAvatarPolicyTest*' \
     --tests '*StoryFeedbackWireTest*' --tests '*StoryFeedbackLedgerTest*' --tests '*StoryFeedbackOutboxTest*' \
     --tests '*GroupFileSeederTest*' --tests '*FileTransferWireTest*' --tests '*FileTransferReceiverTest*' --tests '*FileTransferSenderTest*' --tests '*FileTransferChunkStoreTest*' --tests '*TemporaryFileSweepTest*' --tests '*EphemeralControlTest*' \
-    --tests '*SendTimePolicyTest*' --tests '*DeferredWireTest*' --tests '*DeferredDeliveryPolicyTest*' --tests '*FlashlightAlertPolicyTest*' --tests '*Ipv6NetworkProxyTest*'
+    --tests '*SendTimePolicyTest*' --tests '*DeferredWireTest*' --tests '*DeferredDeliveryPolicyTest*' --tests '*FlashlightAlertPolicyTest*' --tests '*Ipv6NetworkProxyTest*' \
+    --tests '*PushWakePeriodicRecoveryTest*' --tests '*PushWakeRunLoopTest*' --tests '*PushWakeDrainTest*' --tests '*PushWakeRecoveryScanTest*' \
+    --tests '*PushHttpClientTest*' --tests '*PushWakeCryptoTest*' --tests '*PushMailboxHttpClientTest*' --tests '*PushMailboxAccessSignerTest*' --tests '*PushMailboxHttpsTransportTest*' --tests '*PushHttpLoopbackTlsTest*' \
+    --tests '*PushEpochEnvelopeTest*' --tests '*PushMailboxMessageCodecTest*' --tests '*PushMailboxTextPolicyTest*' --tests '*PushMailboxMessageOpenerTest*' --tests '*PushMailboxMessageSealerTest*' --tests '*PushMailboxDrainTest*' --tests '*PushMailboxPutBuilderTest*' \
+    --tests '*MirrorPendingOutgoingTest*' --tests '*MirrorPendingScheduleIntegrationTest*' --tests '*MirrorPendingFlusherTest*' \
+    --tests '*MirrorOutgoingFrameTest*' --tests '*MirrorOutgoingDispatcherTest*' --tests '*ReplyAwareOutboxSenderTest*' --tests '*DeletionOutboxTest*' \
+    --tests '*IncomingNotificationProcessorTest*' --tests '*IncomingNotificationSweepTest*' --tests '*NotificationRecoveryScheduleGateTest*' --tests '*NotificationRecoveryOperationObserverTest*'
 TESTS_STATUS=$?
 
 # ---- почему тесты упали: словами в лог, а не «красный шаг без причины» -------
@@ -66,6 +72,12 @@ if [ -d "$RESULTS" ]; then
     grep -h -A 10 "<failure" "$RESULTS"/*.xml | head -100
 else
     echo "---- test results (testDebugUnitTest): отчётов нет ----"
+fi
+# A filtered Gradle task can succeed even if one requested class disappears.
+# Check every required mailbox, mirror and reply-retry case, including skips.
+if [ "$TESTS_STATUS" -eq 0 ]; then
+    python3 "$REPO_ROOT/scripts/ci/test-push-mailbox-jvm-results.py" || exit 1
+    python3 "$REPO_ROOT/scripts/ci/check-push-mailbox-jvm-results.py" "$RESULTS" || exit 1
 fi
 # Compile the Android renderer/device tests too. This does NOT run them:
 # geometry, RTL, large-font and touch behaviour still need a device/emulator.

@@ -812,12 +812,12 @@ class MirrorChannel(
     interface Bridge {
         suspend fun maxMessageTimestamp(): Long
         suspend fun rowsSince(since: Long, limit: Int): List<MirrorRow>
-        suspend fun pendingOutgoing(limit: Int): List<MirrorRow>
+        suspend fun pendingOutgoing(limit: Int): MirrorPendingBatch
         suspend fun applyIncoming(row: MirrorRow, notify: Boolean)
         suspend fun applySent(row: MirrorRow)
         suspend fun onOutgoingFromPartner(row: MirrorRow)
         /** р227: применить служебный конверт, пришедший от партнёра. */
-        suspend fun applyEnvelope(senderId: String, chatId: String, messageId: String, text: String)
+        suspend fun applyEnvelope(senderId: String, chatId: String, messageId: String, text: String, replySourceAuthenticated: Boolean)
         /**
          * р228: действие, сделанное на партнёрском устройстве - применить у
          * себя (без сети).
@@ -834,7 +834,7 @@ class MirrorChannel(
          * р230: принятый файл завершился - показать его и на партнёрском
          * устройстве (строка передачи + карточка в чате).
          */
-        suspend fun onFileMeta(meta: JSONObject): Boolean
+        suspend fun onFileMeta(meta: JSONObject, notify: Boolean): Boolean
         /** р230: кусок файла от партнёра - сложить в приёмник at its durable offset. */
         suspend fun onFileChunk(
             transferId: String,
@@ -955,7 +955,7 @@ class MirrorChannel(
         .pingInterval(30, java.util.concurrent.TimeUnit.SECONDS)
         .build()
     private var backoffMs = 2_000L
-    private var closedByUs = false
+    @Volatile private var closedByUs = false
     private var loopJob: Job? = null
 
     // Партнёр (другое устройство той же личности)
@@ -1038,8 +1038,10 @@ class MirrorChannel(
     /** р231: когда в последний раз просили движок (передача роли). */
     @Volatile private var lastClaimAt = 0L
 
-    /** р249: когда в последний раз досылали накопленные исходящие тени. */
-    @Volatile private var lastPendingFlushAt = 0L
+    private val pendingFlusher = MirrorPendingFlusher(scope,
+        available = { mirrorPendingAvailable(canClaimEngine(), closedByUs, wsOpen, ::pairingTransportAvailable) },
+        load = bridge::pendingOutgoing, offer = ::publishPendingOutgoing,
+        recordFailure = { Log.w(TAG, "Pending mirror flush failed: ${it.javaClass.simpleName}") })
 
     /** Application context for the durable hub journal; never exposes an Activity context. */
     internal fun applicationContext(): Context = context.applicationContext
@@ -1700,8 +1702,12 @@ class MirrorChannel(
     /** Исходящая строка тени -> активному (тот отправит через свою сессию). */
     fun publishOutgoing(row: MirrorRow): Boolean {
         if (engineUp) return false
-        return sendEvent("out", row.toJson())
+        pendingFlusher.noteNewWork()
+        return publishPendingOutgoing(row)
     }
+
+    private fun publishPendingOutgoing(row: MirrorRow): Boolean =
+        !engineUp && sendEvent("out", row.toJson())
 
     /**
      * Действие партнёру: localOnly не передаётся собеседнику.
@@ -2076,18 +2082,18 @@ class MirrorChannel(
      * применило. Шлёт только активный: у тени сети нет. Кадр маленький,
      * потолок открытого текста - [MAX_ENVELOPE_CHARS].
      */
-    fun publishEnvelope(senderId: String, chatId: String, messageId: String, text: String) {
-        if (!engineUp) return
-        if (senderId.isBlank() || text.isEmpty() || text.length > MAX_ENVELOPE_CHARS) return
+    fun publishEnvelope(senderId: String, chatId: String, messageId: String, text: String, replySourceAuthenticated: Boolean = false) {
+        if (!engineUp || senderId.isBlank() || text.isEmpty() || text.length > MAX_ENVELOPE_CHARS) return
         if (!MirrorEnvelopes.isSafe(text)) return
+        val fields = MirrorReplyPayload.forSend(text, replySourceAuthenticated) ?: return
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val body = JSONObject()
                 .put("s", senderId)
                 .put("c", chatId)
                 .put("m", messageId)
-                .put("t", text)
+                .put("t", fields.legacyText).put("r", fields.replyText).put("ra", fields.verifiedSource)
             val sealed = sealPayload(body) ?: return@launch
-            sendJson(JSONObject().put("t", "ev").put("k", "env").put("d", sealed))
+            sendJson(JSONObject().put("t", "ev").put("k", fields.kind).put("d", sealed))
         }
     }
 
@@ -2756,6 +2762,7 @@ class MirrorChannel(
             maybeProbeLegacy(now)
             maybeSwitchRoom(now)
             maybeRoomHandshake(now)
+            pendingFlusher.request()
             delay(2_500L)
         }
     }
@@ -2763,9 +2770,8 @@ class MirrorChannel(
     private fun onPartnerFrame(obj: JSONObject) {
         val dev = obj.optString("dev")
         if (dev.isBlank() || dev == deviceTag) return
-        // р249: партнёра только что не было видно - запоминаем, чтобы тень
-        // дослала накопленные исходящие (см. flushPendingOutgoing).
-        val partnerAppeared = !partnerFresh()
+        // Сократить паузу и при появлении, и при переходе живого партнёра в активные.
+        val wakePending = mirrorPendingPartnerWake(partnerFresh(), partnerEng, obj.optInt("eng") == 1)
         partnerDev = dev
         partnerEng = obj.optInt("eng") == 1
         // р249: печать полки партнёра и сам факт встречи (по нему решаем, есть
@@ -2783,9 +2789,8 @@ class MirrorChannel(
         if (!initialSyncRequested) {
             maybeCatchup(force = becameFreshMax)
         }
-        // р249: партнёр объявился - у тени могли копиться исходящие, которым
-        // некому было уйти (писали при отсутствующем активном).
-        if (partnerAppeared) flushPendingOutgoing()
+        // Shorten idle backoff; the cooldown and in-flight gate still apply.
+        if (wakePending) pendingFlusher.wake()
         // р246: отпечаток профиля партнёра отличается от нашего - запросить
         // полный снимок и слиться (онлайн-поиск расхождений профиля).
         ProfileMirror.notePartnerDigest(obj.optString("pd", ""))
@@ -2963,7 +2968,7 @@ class MirrorChannel(
             "out" -> {
                 // Только активный отправляет: тень шлёт через партнёра.
                 if (!engineUp) return
-                val row = openPayload(wire)?.let { MirrorRow.fromJson(it) } ?: return
+                val row = MirrorOutgoingFrame.open(context, nodeId, wire, ::openPayload)?.let { MirrorRow.fromJson(it) } ?: return
                 scope.launch { bridge.onOutgoingFromPartner(row) }
             }
             "batch" -> handleEventBatch(wire)
@@ -3117,7 +3122,7 @@ class MirrorChannel(
                     }
                     for (i in 0 until rows.length()) {
                         val meta = rows.optJSONObject(i) ?: continue
-                        val applied = MirrorHub.duringApply { bridge.onFileMeta(meta) }
+                        val applied = MirrorHub.duringApply { bridge.onFileMeta(meta, notify = false) }
                         if (applied) {
                             val id = meta.optString("id")
                             if (id.isNotBlank()) {
@@ -3154,7 +3159,7 @@ class MirrorChannel(
                 // и здесь и попросить байты.
                 val meta = openPayload(wire) ?: return
                 scope.launch {
-                    val applied = MirrorHub.duringApply { bridge.onFileMeta(meta) }
+                    val applied = MirrorHub.duringApply { bridge.onFileMeta(meta, notify = true) }
                     if (applied) {
                         requestFileBytes(
                             transferId = meta.optString("id"),
@@ -3405,19 +3410,18 @@ class MirrorChannel(
                     }
                 }
             }
-            "env" -> {
-                // р227: служебный конверт от партнёра - применяем тем же
-                // разбором, что и на активном устройстве (сети у тени нет).
+            "env", "reply2" -> {
+                // A relabelled reply2 has an empty legacy text field.
                 val body = openPayload(wire) ?: return
-                val senderId = body.optString("s")
-                if (senderId.isBlank()) return
+                val envelopeText = MirrorReplyPayload.forReceive(kind, body.optString("t"), body.optString("r")) ?: return
+                val senderId = body.optString("s").takeIf { it.isNotBlank() } ?: return
                 scope.launch {
                     MirrorHub.duringApply {
                         bridge.applyEnvelope(
                             senderId,
                             body.optString("c"),
                             body.optString("m"),
-                            body.optString("t"),
+                            envelopeText, kind == "reply2" && MirrorReplyTrust.afterOpen(context, nodeId, wire, body.optBoolean("ra", false)),
                         )
                     }
                 }
@@ -3595,34 +3599,8 @@ class MirrorChannel(
             retryPendingInitialFileRequests()
             retryPendingProfileRequests()
         }
-        // Тень: невостребованные исходящие (ушли, пока партнёра не было).
-        flushPendingOutgoing()
-    }
-
-    /**
-     * р249: дослать исходящие, которые тень накопила без партнёра.
-     *
-     * Раньше это делалось только в момент открытия соединения: если WS уже
-     * был жив, а активный появился позже (или перезапустился), строки так и
-     * висели `PENDING` до следующего переподключения - владелец видел
-     * «висит одна галочка» без всякой причины. Теперь догон зовётся и отсюда,
-     * и из появления партнёра; повторы режет пауза (иначе одна и та же строка
-     * ушла бы собеседнику дважды: она остаётся PENDING до подтверждения).
-     */
-    private fun flushPendingOutgoing() {
-        if (engineUp) return
-        if (!partnerEng) return
-        if (wsRef.get() == null) return
-        val now = System.currentTimeMillis()
-        if (now - lastPendingFlushAt < PENDING_FLUSH_COOLDOWN_MS) return
-        lastPendingFlushAt = now
-        scope.launch {
-            runCatching {
-                bridge.pendingOutgoing(PENDING_FLUSH_ROWS).forEach { row ->
-                    publishOutgoing(row)
-                }
-            }.onFailure { Log.w(TAG, "pending flush failed: ${it.message}") }
-        }
+        // The periodic gate also retries if the partner appears later.
+        pendingFlusher.wake()
     }
 
     private fun handleTransportJson(obj: JSONObject) {
@@ -3760,12 +3738,6 @@ class MirrorChannel(
 
         /** р236: черновик длиннее этого в кадр зеркала не кладём (кадр - 512 КиБ). */
         private const val DRAFT_MAX_CHARS = 8_000
-
-        /** р249: сколько накопленных строк тень досылает за один заход. */
-        private const val PENDING_FLUSH_ROWS = 50
-
-        /** р249: как часто повторять досылку накопленных исходящих. */
-        private const val PENDING_FLUSH_COOLDOWN_MS = 20_000L
 
         /** р249: сколько сидим в общей комнате, разыскивая потерянного партнёра. */
         private const val PROBE_MS = 90_000L

@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.ui.components.ApuBackButton
+
 // =============================================================================
 // SETTINGSSCREEN.KT — Экран настроек
 // =============================================================================
@@ -67,7 +69,6 @@ import com.vladimir.messenger.util.AppShare
 import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
@@ -184,10 +185,8 @@ fun SettingsScreen(
     var showNameDialog by remember { mutableStateOf(false) }
     // Открытый раздел настроек: null - корневой список разделов.
     var settingsSection by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
-    // Системная «Назад» внутри раздела возвращает к списку разделов.
-    BackHandler(enabled = settingsSection != null && !showProfile) {
-        settingsSection = null
-    }
+    // Кнопка, системный возврат и смахивание закрывают сначала раздел.
+    val goBack = settingsBackAction(settingsSection != null && !showProfile, { settingsSection = null }, onBackClick)
     // Вкладок больше нет: профиль - отдельный пункт в списке настроек и
     // отдельная кнопка в нижней панели. Вкладка сверху дублировала их и
     // мешала: список настроек начинался не с начала.
@@ -197,7 +196,7 @@ fun SettingsScreen(
         modifier = Modifier
             .fillMaxSize()
             // Смахивание вправо работает как «Назад».
-            .swipeBack(onBack = { if (settingsSection != null && !showProfile) settingsSection = null else onBackClick() }),
+            .swipeBack(onBack = goBack),
     ) {
         ProfileScreenBackground(active = showProfile)
         Scaffold(
@@ -218,11 +217,7 @@ fun SettingsScreen(
                                     ?: stringResource(R.string.settings_header_settings)
                             )
                         },
-                        navigationIcon = {
-                            IconButton(onClick = { if (settingsSection != null && !showProfile) settingsSection = null else onBackClick() }) {
-                                Icon(Icons.Default.ArrowBack, stringResource(R.string.action_back))
-                            }
-                        },
+                        navigationIcon = { ApuBackButton(onClick = goBack) },
                     )
                 }
             },

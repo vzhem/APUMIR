@@ -3,7 +3,6 @@ package com.vladimir.messenger.data.diagnostics
 import android.app.Activity
 import android.app.ActivityManager
 import android.app.Application
-import android.app.ApplicationExitInfo
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
@@ -60,7 +59,9 @@ object RuntimeDiagnostics {
             if (started.isEmpty()) { stop(); return }
             if (scheduled != null) return
             OperationalDiagnostics.tracker.visible(true)
-            if (com.vladimir.messenger.service.CoreStatus.ready.value) OperationalDiagnostics.tracker.coreReady()
+            if (com.vladimir.messenger.service.CoreStatus.engineStarted.value && com.vladimir.messenger.data.RustBridge.isRunningCached()) {
+                OperationalDiagnostics.tracker.coreReady()
+            }
             OperationalDiagnostics.phase(DiagnosticPhase.FOREGROUND)
             val epoch = generation.incrementAndGet()
             scheduled = timer.scheduleWithFixedDelay({
@@ -119,14 +120,7 @@ object RuntimeDiagnostics {
         val exits = if (Build.VERSION.SDK_INT >= 30) runCatching {
             val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             manager.getHistoricalProcessExitReasons(context.packageName, 0, 3).map { info ->
-                val reason = when (info.reason) {
-                    ApplicationExitInfo.REASON_ANR -> ProcessExitReason.ANR
-                    ApplicationExitInfo.REASON_CRASH -> ProcessExitReason.CRASH
-                    ApplicationExitInfo.REASON_CRASH_NATIVE -> ProcessExitReason.NATIVE_CRASH
-                    ApplicationExitInfo.REASON_LOW_MEMORY -> ProcessExitReason.LOW_MEMORY
-                    ApplicationExitInfo.REASON_USER_REQUESTED -> ProcessExitReason.USER_REQUESTED
-                    else -> ProcessExitReason.OTHER
-                }
+                val reason = ProcessExitReason.fromAndroidReason(info.reason)
                 PreviousProcessExit(reason, (System.currentTimeMillis() - info.timestamp).coerceAtLeast(0), info.importance)
             }
         }.getOrNull() else null

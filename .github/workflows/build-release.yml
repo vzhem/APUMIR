@@ -17,12 +17,12 @@ permissions:
 
 # Один тег иногда порождает ДВА запуска (GitHub дважды доставляет событие
 # push тега - так было с v11.70.2). Группа concurrency ставит второй запуск
-# в очередь; когда первый опубликует релиз, второй увидит его в job `check`
-# и не станет собирать заново. cancel-in-progress выключен нарочно: обрывать
-# первый запуск на середине сборки нельзя.
+# тега в очередь: обрывать первую релизную сборку на середине нельзя. Для
+# ветки новый коммит отменяет устаревшую диагностическую сборку, чтобы она
+# не задерживала проверку текущего состояния; ветка не публикует релиз.
 concurrency:
   group: build-release-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 jobs:
   check:
@@ -56,6 +56,17 @@ jobs:
         with:
           # The lineage gate below must be able to walk back to the last stable tag.
           fetch-depth: 0
+
+      # Only the public Android client config is placed in the build workspace.
+      # It is structurally validated first; a service-account key is rejected.
+      # SDK auto-init stays disabled until the wake protocol is ready.
+      - name: Prepare Firebase Android client configuration
+        env:
+          APU_FIREBASE_ANDROID_CONFIG: ${{ secrets.APU_FIREBASE_ANDROID_CONFIG }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/install-firebase-client-config.py
+          echo "ORG_GRADLE_PROJECT_apuFirebaseClient=true" >> "$GITHUB_ENV"
 
       # Prevent a tag from rebuilding a branch that silently forked before the
       # latest public release (the v330-from-v206 failure mode). Compare with
@@ -101,9 +112,15 @@ jobs:
         run: |
           python3 scripts/ci/check-online-helper.py
           python3 scripts/ci/check-diagnostics-report.py
+          python3 scripts/ci/check-core-startup.py
           python3 scripts/ci/check-initial-sync-contract.py
           python3 scripts/ci/check-launcher-icon.py
           python3 scripts/ci/check-delivery-cadence.py
+          python3 scripts/ci/check-emergency-keepalive.py
+          python3 scripts/ci/check-notification-arrival.py
+          python3 scripts/ci/check-local-notification-sql.py
+          python3 scripts/ci/check-presence-recovery.py
+          python3 scripts/ci/check-ipv6-proxy-settings.py
           python3 scripts/ci/check-ui-return-contracts.py
           python3 scripts/ci/check-update-storage.py
           python3 scripts/ci/check-profile-background.py
@@ -149,7 +166,7 @@ jobs:
         working-directory: ./rust-core
         run: |
           set -o pipefail
-          for suite in helper_policy helper_quality helper_delivery peer_assistance peer_exchange direct_transport mqtt_fanout; do
+          for suite in helper_policy helper_quality helper_delivery peer_assistance peer_exchange direct_transport mqtt_fanout mqtt_topology mqtt_transport presence_scope presence_observation presence_dispatch swarm_first; do
             LOG="$RUNNER_TEMP/helper-$suite.log"
             if ! RUST_LOG=warn CARGO_TERM_COLOR=never cargo test --release --features mqtt-dual-broker --lib "network::$suite::tests" > "$LOG" 2>&1; then
               tail -150 "$LOG"
@@ -165,6 +182,60 @@ jobs:
               exit 1
             fi
             tail -25 "$LOG"
+            grep -Eq '^test result: ok\. [1-9][0-9]* passed' "$LOG" || { echo "::error::No tests ran for $suite"; exit 1; }
+            grep '^test result:' "$LOG" >> "$GITHUB_STEP_SUMMARY"
+          done
+          # Presence crossing real engine/FFI and mDNS round boundaries.
+          for test in \
+            network::mqtt_transport::local_tests \
+            network::mqtt_transport::mqtt_connection::tests \
+            network::mqtt_transport::mqtt_reconnect::tests \
+            engine::core::foreground_recovery::tests \
+            engine::core::broker_settings::tests \
+            crypto::push_capability::tests \
+            crypto::push_registration::tests \
+            crypto::mailbox_access::tests \
+            push_ffi::tests \
+            network::mdns::tests::browse_round_never_replays_an_old_node_without_a_resolution \
+            engine::core::tests::direct_personal_presence_emits_each_fresh_observation_but_not_stale_or_future \
+            engine::core::tests::invite_is_only_an_address_hint_not_online_presence \
+            engine::core::tests::tcp_delivery_emits_a_real_millisecond_timestamp \
+            tests::presence_ffi_keeps_original_observation_timestamp \
+            resilience::address_book::tests; do
+            LOG="$RUNNER_TEMP/presence-${test//::/-}.log"
+            if ! RUST_LOG=warn CARGO_TERM_COLOR=never cargo test --release --features mqtt-dual-broker --lib "$test" > "$LOG" 2>&1; then
+              tail -150 "$LOG"
+              python3 - "$LOG" <<'PY'
+          from pathlib import Path
+          import sys
+          text = "\n".join(Path(sys.argv[1]).read_text(errors="replace").splitlines()[-100:])
+          text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          for i in range(0, len(text), 3000):
+              print(f"::error title=Presence recovery tests part {i // 3000 + 1}::{text[i:i + 3000]}")
+          PY
+              exit 1
+            fi
+            tail -25 "$LOG"
+            grep -Eq '^test result: ok\. [1-9][0-9]* passed' "$LOG" || { echo "::error::No tests ran for $test"; exit 1; }
+            grep '^test result:' "$LOG" >> "$GITHUB_STEP_SUMMARY"
+          done
+          # The single-broker build has a distinct ConnAck path. Compile and
+          # exercise it too; neither a compile error nor a zero-test run passes.
+          for test in network::mqtt_transport::mqtt_connection::tests network::mqtt_transport::mqtt_reconnect::tests engine::core::foreground_recovery::tests engine::core::broker_settings::tests; do
+            LOG="$RUNNER_TEMP/single-${test//::/-}.log"
+            if ! RUST_LOG=warn CARGO_TERM_COLOR=never cargo test --release --lib "$test" > "$LOG" 2>&1; then
+              tail -150 "$LOG"
+              python3 - "$LOG" <<'PY'
+          from pathlib import Path
+          import sys
+          text = "\n".join(Path(sys.argv[1]).read_text(errors="replace").splitlines()[-100:])
+          text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          for i in range(0, len(text), 3000):
+              print(f"::error title=Single broker tests part {i // 3000 + 1}::{text[i:i + 3000]}")
+          PY
+              exit 1
+            fi
+            grep -Eq '^test result: ok\. [1-9][0-9]* passed' "$LOG" || { echo "::error::No tests ran for $test"; exit 1; }
             grep '^test result:' "$LOG" >> "$GITHUB_STEP_SUMMARY"
           done
           # STUN fallback is pure/deterministic; don't depend on public DNS or live servers.
@@ -178,10 +249,16 @@ jobs:
             grep '^test result:' "$LOG" >> "$GITHUB_STEP_SUMMARY"
           done
 
-      - name: Test event bus condvar wait (no idle polling)
+      - name: Test event priority, send serialization and engine lifecycle
         working-directory: ./rust-core
         run: |
-          RUST_LOG=warn CARGO_TERM_COLOR=never cargo test --release --features mqtt-dual-broker --lib engine::events::tests
+          set -o pipefail
+          for suite in engine::events::tests engine::send_gates::tests engine::mqtt_cadence::tests engine::mesh_delivery::tests engine::mesh_cleanup::tests engine::core::tests::legacy_redelivery_uses_the_same_ciphertext_and_never_extends_expiry network::custody_relay::tests network::relay_queue::tests network::wire::tests storage::relay_store::tests network::mqtt_overflow::tests network::mqtt_wait::tests network::direct_priority::tests handle_tests; do
+            LOG="$RUNNER_TEMP/priority-${suite//::/-}.log"
+            RUST_LOG=warn CARGO_TERM_COLOR=never cargo test --release --features mqtt-dual-broker --lib "$suite" 2>&1 | tee "$LOG"
+            grep -Eq '^test result: ok\. [1-9][0-9]* passed' "$LOG" || { echo "::error::No tests ran for $suite"; exit 1; }
+            grep '^test result:' "$LOG" >> "$GITHUB_STEP_SUMMARY"
+          done
 
       - name: Install cargo-ndk
         run: cargo install --locked cargo-ndk
@@ -320,6 +397,11 @@ jobs:
                   for name, count in broken:
                       out.write(f"- `{name}`: {count} failing\n")
           PY
+          if [ "$status" -eq 0 ]; then
+            python3 ../scripts/ci/check-push-mailbox-jvm-results.py app/build/test-results/testReleaseUnitTest
+            guard_status=$?
+            if [ "$guard_status" -ne 0 ]; then status="$guard_status"; fi
+          fi
           exit "$status"
 
       - name: Upload unit test report
@@ -603,3 +685,7 @@ jobs:
             android-app/app/src/main/jniLibs/armeabi-v7a/libp2p_core.so
           git commit -m "ci: uniffi bindings + core rebuilt for ${GITHUB_REF#refs/tags/}"
           git push origin HEAD:main || echo "::warning::push to main failed - take the bindings from the core-bindings artifact of this run"
+
+      - name: Remove temporary Firebase client configuration
+        if: always()
+        run: rm -f android-app/app/google-services.json

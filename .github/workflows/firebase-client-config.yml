@@ -1,0 +1,30 @@
+name: Firebase Android configuration preflight
+
+# This reads only the client configuration, never server-side FCM credentials.
+# Do not run this job from pull_request or pull_request_target: untrusted PRs
+# must not receive repository secrets. It does not build, deploy or enable push.
+on:
+  push:
+    branches:
+      - 'arena/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firebase-client-config-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  client-config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test validator with fabricated data
+        run: python3 scripts/ci/test-firebase-client-config.py
+      - name: Check Android client configuration without printing it
+        env:
+          APU_FIREBASE_ANDROID_CONFIG: ${{ secrets.APU_FIREBASE_ANDROID_CONFIG }}
+        run: python3 scripts/ci/check-firebase-client-config.py

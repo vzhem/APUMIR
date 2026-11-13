@@ -42,7 +42,7 @@ interface ContactDao {
      */
     @Query(
         "UPDATE contacts SET isOnline = :isOnline, " +
-            "lastSeenAtMs = CASE WHEN :seenAtMs > 0 THEN :seenAtMs ELSE lastSeenAtMs END " +
+            "lastSeenAtMs = CASE WHEN :seenAtMs > COALESCE(lastSeenAtMs, 0) THEN :seenAtMs ELSE lastSeenAtMs END " +
             "WHERE id = :contactId"
     )
     suspend fun updatePresence(contactId: String, isOnline: Boolean, seenAtMs: Long)

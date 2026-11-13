@@ -9,15 +9,14 @@ package com.vladimir.messenger.data.repository
 // двойником, из-за чего в списке чатов было по два одинаковых собеседника,
 // а сообщения уходили на мёртвый адрес.
 //
-// Постоянная примета человека - его @имя: он выбирает его один раз, оно
-// разлетается роевой рассылкой и переустановку переживает. Поэтому именно
-// @имя связывает старую запись с новой.
+// Совпадение @имени — только способ найти кандидатов, не подтверждение
+// личности. Автоматическая склейка допустима лишь при подтверждённой связи
+// записей с одним устройством и наличии адресата для переноса истории.
 //
 // Правила намеренно осторожные:
 //  - настоящее имя подменяет только заглушку, имя от владельца не трогаем;
-//  - двойники схлопываются лишь при совпадении @имени, догадок по похожести
-//    нет;
-//  - переписка не удаляется, а переносится на живую запись.
+//  - совпадение имени без проверки устройства не объединяет контакты;
+//  - переписка переносится до удаления старой записи.
 // =============================================================================
 
 import android.util.Log
@@ -81,21 +80,18 @@ object NicknameIdentity {
             }
         }
 
-        // Двойники: те же @имя, но узел прежней установки. Переписку переносим
-        // на живой узел, мёртвую запись убираем.
-        val stale = contactRepository.findStaleTwins(clean, ownerId)
-        for (oldId in stale) {
-            if (contact != null) {
-                chatRepository.absorbChatOf(oldId, ownerId)
+        // Without an existing destination contact, a nickname alone cannot
+        // justify deleting the old contact or its history.
+        if (contact != null) {
+            val stale = contactRepository.findStaleTwins(clean, ownerId).filter { it != contact.id }
+            if (stale.isNotEmpty()) {
+                chatRepository.getOrCreateChat(ownerId, contact.displayName)
+                for (oldId in stale) {
+                    chatRepository.absorbChatOf(oldId, ownerId)
+                    contactRepository.deleteContact(oldId)
+                    Log.i(TAG, "подтверждённый двойник $oldId склеен с $ownerId")
+                }
             }
-            contactRepository.deleteContact(oldId)
-            Log.i(TAG, "двойник $oldId склеен с $ownerId по @$clean")
-        }
-
-        // Дубли чатов с одним и тем же узлом - следствие того, что чат
-        // создаётся сразу в нескольких местах. Трогаем базу, только если этот
-        // человек нам вообще знаком: для чужих имён из роя работы нет.
-        if (contact != null || stale.isNotEmpty()) {
             chatRepository.mergeDuplicateChats(ownerId)
         }
     }

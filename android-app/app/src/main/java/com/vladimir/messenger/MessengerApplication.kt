@@ -5,6 +5,8 @@ import android.util.Log
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.launch
 import com.vladimir.messenger.data.security.DeviceIdentityMarker
+import com.vladimir.messenger.data.diagnostics.ApplicationStartupDiagnostics
+import com.vladimir.messenger.data.diagnostics.ApplicationStartupProgress
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.referral.ReferralRankStore
 import com.vladimir.messenger.worker.ProxyCollectorWorker
@@ -74,7 +76,9 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
 
 
     override fun onCreate() {
+        ApplicationStartupDiagnostics.progress.start()
         super.onCreate()
+        ApplicationStartupDiagnostics.progress.advance(ApplicationStartupProgress.Phase.PREPARING)
         // Политика пути доставки и kill-switch IPv6 — ДО старта службы: ядро
         // применяет запомненное в момент привязки сокетов, а не после первого
         // колбэка сети. Иначе выключенный IPv6 успевал подняться на `[::]`
@@ -101,6 +105,7 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
             "app",
             "процесс приложения запущен",
         )
+        ApplicationStartupDiagnostics.progress.advance(ApplicationStartupProgress.Phase.RESTORING)
         // Резервная копия, подготовленная к восстановлению, ложится на место
         // здесь - до Room, сервисов и воркеров, пока базу никто не открыл.
         if (com.vladimir.messenger.data.backup.ProfileBackup.applyStagedIfAny(applicationContext)) {
@@ -108,6 +113,7 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
         }
         // Must run before Room/services/workers can observe restored stale state.
         DeviceIdentityMarker.discardIfRestored(applicationContext)
+        ApplicationStartupDiagnostics.progress.advance(ApplicationStartupProgress.Phase.IDENTITY_HISTORY)
         // Backfill the same-device identity ledger for profiles created before
         // this feature.  The raw id remains in ordinary prefs only while the
         // current profile is active; the history marker is a Keystore alias.
@@ -119,6 +125,7 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
                     .remember(applicationContext, currentNode)
             }
         }.onFailure { Log.w("MessengerApp", "identity history backfill skipped", it) }
+        ApplicationStartupDiagnostics.progress.advance(ApplicationStartupProgress.Phase.OBSOLETE_CLEANUP)
         // On an app update, remove every obsolete identity proven to have been
         // created by this installation before the core can receive old gossip.
         // The Keystore owner marker makes this idempotent and survives logout.
@@ -134,6 +141,7 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
                 )
             }
         }.onFailure { Log.w("MessengerApp", "same-device identity cleanup skipped", it) }
+        ApplicationStartupDiagnostics.progress.advance(ApplicationStartupProgress.Phase.AFTER_CLEANUP)
         com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.install(this)
         com.vladimir.messenger.data.diagnostics.RuntimeDiagnostics.install(this)
         // След последнего падения: рано, чтобы поймать падение любого экрана.
@@ -142,8 +150,13 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
         com.vladimir.messenger.data.draft.DraftStore.attach(applicationContext)
         createNotificationChannels()
         com.vladimir.messenger.service.UpdateNotifier(applicationContext).ensureChannel()
+        // Recover a user-requested APK if DownloadManager finished while our process was gone.
+        com.vladimir.messenger.worker.OfficialUpdateMonitor.restore(applicationContext)
         scheduleUpdateChecks()
         scheduleBoundedRelayWake()
+        // Local Room notification work must not depend on the core service being allowed to start.
+        runCatching { com.vladimir.messenger.worker.IncomingNotificationRecoveryWorker.schedule(applicationContext) }
+            .onFailure { Log.w("MessengerApp", "Local notification recovery scheduling deferred", it) }
         scheduleServiceWatchdog()
         scheduleGroupInfoResync()
         runCatching { com.vladimir.messenger.data.maintenance.AutomaticMaintenance.schedule(this) }
@@ -207,6 +220,7 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
         } catch (e: Exception) {
             Log.e("MessengerApp", "Failed to apply proxy collector entitlement", e)
         }
+        ApplicationStartupDiagnostics.progress.finish()
     }
 
     override fun onTrimMemory(level: Int) {

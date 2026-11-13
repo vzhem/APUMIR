@@ -42,7 +42,7 @@ class ServiceWatchdogWorker(
             }
             val status = DeliveryAssurance.status(app)
             val now = System.currentTimeMillis()
-            if (!DeliveryWakePolicy.shouldWakeNow(status.conditions, status.lastAliveMs, now)) {
+            if (!DeliveryWakePolicy.shouldWakeNow(status.conditions, DeliveryAssurance.currentProcessLastAliveMs(), now)) {
                 // Служба жива (или уведомления выключены): тик отработал вхолостую.
                 return@withContext Result.success()
             }

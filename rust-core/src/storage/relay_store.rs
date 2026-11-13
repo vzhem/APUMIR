@@ -35,7 +35,7 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex, atomic::{AtomicU64, Ordering}};
 
-use rusqlite::{params, Connection, Result as SqlResult, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult, Transaction};
 use serde::{Deserialize, Serialize};
 
 use crate::network::relay_queue::{RelayMessage, RelayValidationError};
@@ -774,6 +774,41 @@ impl RelayStore {
     ) -> Result<bool, RelayStoreError> {
         let mut conn = self.conn.lock().unwrap();
         let tx: Transaction<'_> = conn.transaction()?;
+        let removed = tx.execute(SQL_REMOVE_ENC, params![msg_id])?;
+        if removed > 0 { tx.execute(SQL_TOMBSTONE_ADD, params![msg_id, now_ms])?; }
+        tx.commit()?;
+        Ok(removed > 0)
+    }
+
+    /// Delete only a verified locally originated record after the app has
+    /// committed delivery. The origin is inside the AEAD envelope, so the
+    /// ownership check and deletion share a transaction; an absent RAM entry
+    /// is not evidence of ownership. On decrypt/key/validation failure the
+    /// record stays in place until normal recovery or expiry.
+    pub fn remove_encrypted_own(
+        &self,
+        keys: &dyn RelayAtRestKeySource,
+        msg_id: &str,
+        local_node: &str,
+        now_ms: i64,
+    ) -> Result<bool, RelayStoreError> {
+        if msg_id.is_empty() || local_node.is_empty() { return Ok(false); }
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let row: Option<(String, i64, Vec<u8>)> = tx.query_row(
+            "SELECT recipient, expires_at_ms, envelope FROM relay_records_enc WHERE msg_id = ?1",
+            params![msg_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).optional()?;
+        let Some((stored_recipient, expires_at_ms, envelope)) = row else { return Ok(false); };
+        let record = match decrypt_and_assemble(keys, msg_id, &stored_recipient, expires_at_ms, &envelope, now_ms) {
+            Ok(record) => record,
+            Err(reason) => {
+                tracing::warn!("MESH receipt: encrypted ownership check deferred: {}", reason);
+                return Ok(false);
+            }
+        };
+        if record.origin_sender != local_node { return Ok(false); }
         let removed = tx.execute(SQL_REMOVE_ENC, params![msg_id])?;
         if removed > 0 { tx.execute(SQL_TOMBSTONE_ADD, params![msg_id, now_ms])?; }
         tx.commit()?;
@@ -1580,6 +1615,35 @@ mod tests {
         // Повторно: записи нет, tombstone остаётся.
         assert!(!s.remove_encrypted_and_tombstone("m1", now + 2).unwrap());
         assert!(s.has_tombstone("m1").unwrap());
+    }
+
+    #[test]
+    fn committed_cleanup_checks_encrypted_origin_atomically() {
+        let s = store();
+        let now = 1_000_000;
+        let mut ours = relay("ours", "pk_b", now);
+        ours.origin_sender = "pk_local".into();
+        let foreign = relay("foreign", "pk_b", now);
+        s.store_encrypted(&keys(), &ours, now).unwrap();
+        s.store_encrypted(&keys(), &foreign, now).unwrap();
+
+        // Neither an absent RAM entry nor a missing record proves ownership.
+        assert!(!s.remove_encrypted_own(&keys(), "ours", "pk_other", now + 1).unwrap());
+        assert!(!s.remove_encrypted_own(&keys(), "foreign", "pk_local", now + 1).unwrap());
+        assert!(!s.remove_encrypted_own(&keys(), "missing", "pk_local", now + 1).unwrap());
+        assert_eq!(s.tombstone_count().unwrap(), 0);
+        assert!(s.contains_encrypted("ours").unwrap());
+        assert!(s.contains_encrypted("foreign").unwrap());
+
+        // Without the at-rest key, ownership is unknown and data is retained.
+        assert!(!s.remove_encrypted_own(&StaticKeySource::single(2, 0x33), "ours", "pk_local", now + 1).unwrap());
+        assert!(s.contains_encrypted("ours").unwrap());
+        assert!(!s.has_tombstone("ours").unwrap());
+
+        assert!(s.remove_encrypted_own(&keys(), "ours", "pk_local", now + 2).unwrap());
+        assert!(s.has_tombstone("ours").unwrap());
+        assert!(s.contains_encrypted("foreign").unwrap());
+        assert_eq!(s.count_encrypted().unwrap(), 1);
     }
 
     /// Истёкший карантин чистится тем же абсолютным дедлайном.

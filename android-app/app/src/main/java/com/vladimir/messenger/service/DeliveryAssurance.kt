@@ -37,6 +37,10 @@ object DeliveryAssurance {
     /** Меченое «служба жива» пишем не чаще раза в пять минут: это диск. */
     private const val HEARTBEAT_EVERY_MS = 5 * 60_000L
 
+    // Service, alarm and WorkManager are in the same app process. A new
+    // process starts with no heartbeat, even if prefs retain an old timestamp.
+    private val heartbeat = ProcessHeartbeat(HEARTBEAT_EVERY_MS)
+
     /** Пункт, который человек может разрешить. */
     enum class Item { NOTIFICATIONS, BATTERY, EXACT_ALARMS, BACKGROUND }
 
@@ -72,8 +76,8 @@ object DeliveryAssurance {
                 if (enabled && !exactAlarmsAllowed) add(Item.EXACT_ALARMS)
             }
 
-        /** Всё ли готово, чтобы письмо будило телефон без задержки в час. */
-        val onTime: Boolean
+        /** Only checked settings, not a promise about delivery or wake timing. */
+        val settingsReady: Boolean
             get() = enabled && notificationsAllowed && batteryUnrestricted && exactAlarmsAllowed
     }
 
@@ -131,18 +135,26 @@ object DeliveryAssurance {
         }.getOrDefault(false)
     }
 
-    /**
-     * Отметить, что служба жива. Пишется не чаще раза в
-     * [HEARTBEAT_EVERY_MS]: сторож читает метку, а не сам факт вызова.
-     */
-    fun markAlive(context: Context, nowMs: Long = System.currentTimeMillis()) {
-        val prefs = prefs(context)
-        val last = prefs.getLong(KEY_LAST_ALIVE_MS, 0L)
-        if (last > 0L && nowMs - last in 0 until HEARTBEAT_EVERY_MS) return
-        prefs.edit().putLong(KEY_LAST_ALIVE_MS, nowMs).apply()
+    /** Register at onCreate so a refusal before onStartCommand still has an owner. */
+    internal fun serviceCreated(owner: Any) = heartbeat.created(owner)
+
+    /** A real service start forces a new local heartbeat and updates UI history. */
+    internal fun serviceStarted(context: Context, owner: Any, nowMs: Long = System.currentTimeMillis()): Boolean =
+        heartbeat.started(owner, nowMs) { prefs(context).edit().putLong(KEY_LAST_ALIVE_MS, it).apply() }
+
+    /** Only the current service's pulse may extend its heartbeat. */
+    fun markAlive(context: Context, owner: Any, nowMs: Long = System.currentTimeMillis()) {
+        heartbeat.pulse(owner, nowMs) { prefs(context).edit().putLong(KEY_LAST_ALIVE_MS, it).apply() }
     }
 
     fun lastAliveMs(context: Context): Long = prefs(context).getLong(KEY_LAST_ALIVE_MS, 0L)
+
+    /** Unlike the UI timestamp, this value cannot survive a process restart. */
+    fun currentProcessLastAliveMs(): Long = heartbeat.lastForWake()
+
+    internal fun isServiceOwner(owner: Any): Boolean = heartbeat.owns(owner)
+    internal fun serviceRefused(owner: Any): Boolean = heartbeat.refused(owner)
+    internal fun serviceStopped(owner: Any): Boolean = heartbeat.stopped(owner)
 
     /** Записать попытку пробуждения: число видно в настройках и диагностике. */
     fun noteWake(context: Context, nowMs: Long = System.currentTimeMillis()) {

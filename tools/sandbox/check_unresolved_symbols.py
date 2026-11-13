@@ -56,7 +56,7 @@ AUTO_IMPORTED = {
     'Array', 'IntArray', 'LongArray', 'ShortArray', 'ByteArray', 'FloatArray',
     'DoubleArray', 'BooleanArray', 'CharArray', 'UInt', 'ULong', 'UShort', 'UByte',
     'Pair', 'Triple', 'Result', 'Lazy', 'Sequence', 'Iterator', 'Iterable',
-    'List', 'MutableList', 'ArrayList', 'Set', 'MutableSet', 'HashSet',
+    'List', 'MutableList', 'ArrayList', 'AbstractList', 'Set', 'MutableSet', 'HashSet',
     'LinkedHashSet', 'Map', 'MutableMap', 'HashMap', 'LinkedHashMap',
     'Collection', 'MutableCollection', 'StringBuilder', 'Regex', 'MatchResult',
     'Error', 'Exception', 'Throwable', 'RuntimeException', 'IllegalStateException',
@@ -455,6 +455,7 @@ fun f() {
     val c = MISSING_CONST + 1
     val ic = Icons.AutoMirrored.Filled.MissingIcon
     val t = "${Text} and Unknown"
+    val list = object : AbstractList<String>() { override val size = 0 }
     /* Text Unknown block */
     // Text Unknown line
     val raw = """
@@ -474,6 +475,7 @@ fun f() {
     assert 'Unknown' in got, got
     assert got['Unknown'] == 7, got
     assert 'Y' not in got and 'Text' not in got and 'T' not in got and 'Z' not in got, got
+    assert 'AbstractList' not in got, got
     # р251: голая константа и иконка без импорта ловятся; строка c - 9, ic - 10.
     assert got.get('MISSING_CONST') == 9, got
     assert got.get('MissingIcon') == 10, got

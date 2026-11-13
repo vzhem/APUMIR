@@ -10,6 +10,15 @@ plugins {
     alias(libs.plugins.hilt.android)
 }
 
+// A clean local build remains possible without a client configuration. CI sets
+// this property only after validating the protected google-services.json. This
+// configures the SDK but does not enable token registration or remote push.
+val firebaseClientConfigured = providers.gradleProperty("apuFirebaseClient").orNull == "true"
+if (firebaseClientConfigured) {
+    require(file("google-services.json").isFile) { "Firebase client config is required for this build" }
+    pluginManager.apply("com.google.gms.google-services")
+}
+
 fun versionCodeFromName(versionName: String): Int? {
     val match = Regex("^v([0-9]+)\\.([0-9]+)(?:\\.([0-9]+))?$").matchEntire(versionName)
         ?: return null
@@ -112,6 +121,7 @@ android {
         targetSdk = libs.versions.targetSdk.get().toInt()
         versionCode = releaseVersionCode
         versionName = releaseVersionName
+        buildConfigField("boolean", "APU_FIREBASE_CLIENT_CONFIGURED", firebaseClientConfigured.toString())
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -225,6 +235,9 @@ kapt {
 }
 
 dependencies {
+    // The SDK cannot auto-register: manifest auto-init is disabled until the
+    // verified registration, wake admission, and server are all ready.
+    implementation(libs.firebase.messaging)
     implementation(libs.androidx.core.ktx)
 
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -259,6 +272,8 @@ dependencies {
 
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.core)
+    // Explicit rather than relying on Coil's transitive HTTP client version.
+    implementation(libs.okhttp)
 
     implementation(libs.hilt.android)
     implementation(libs.androidx.hilt.navigation.compose)
@@ -299,6 +314,8 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation("androidx.test:rules:1.6.1")
+    androidTestImplementation("androidx.work:work-testing:2.10.0")
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
 

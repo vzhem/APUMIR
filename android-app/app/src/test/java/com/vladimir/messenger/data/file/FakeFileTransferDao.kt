@@ -36,6 +36,9 @@ class FakeFileTransferDao : FileTransferDao {
 
     override suspend fun getTransfer(transferId: String): FileTransferEntity? = transfers[transferId]
 
+    override suspend fun hasMessageTransfer(messageId: String): Boolean =
+        transfers.values.any { it.messageId == messageId }
+
     override suspend fun getTransfersByIds(transferIds: List<String>): List<FileTransferEntity> =
         transferIds.mapNotNull(transfers::get)
 

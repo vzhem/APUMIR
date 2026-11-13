@@ -16,6 +16,8 @@ pub mod protocol;
 pub mod storage;
 pub mod sync;
 pub mod resilience;
+mod push_ffi;
+pub use push_ffi::{derive_push_wake_material, sign_push_mailbox_access, sign_push_wake_registration};
 
 use engine::core::{EngineConfig, P2PCore};
 use engine::events::CoreEvent;
@@ -100,7 +102,10 @@ pub enum MessageStatusFfi {
 // ============================================================
 
 pub struct P2PCoreHandle {
-    inner: std::sync::Mutex<P2PCore>,
+    // Shared operations may wait on network IO concurrently. Lifecycle, network-policy
+    // and mutable configuration remain exclusive so no send outlives a stop/restart.
+    inner: std::sync::RwLock<P2PCore>,
+    send_gates: crate::engine::send_gates::MessageSendGates,
     /// Общая шина событий: ожидание на ней не держит замок `inner`.
     events: std::sync::Arc<crate::engine::events::EventBus>,
 }
@@ -109,7 +114,8 @@ impl P2PCoreHandle {
     fn from_core(core: P2PCore) -> Self {
         let events = core.events_handle();
         Self {
-            inner: std::sync::Mutex::new(core),
+            inner: std::sync::RwLock::new(core),
+            send_gates: Default::default(),
             events,
         }
     }
@@ -128,20 +134,20 @@ impl P2PCoreHandle {
     }
 
     pub fn start(&self) -> bool {
-        self.inner.lock().unwrap().start()
+        self.inner.write().unwrap().start()
     }
 
     pub fn stop(&self) {
-        self.inner.lock().unwrap().stop()
+        self.inner.write().unwrap().stop()
     }
 
     pub fn is_running(&self) -> bool {
-        self.inner.lock().unwrap().is_running()
+        self.inner.read().unwrap().is_running()
     }
 
     /// Параллельный QUIC-поток: прямая отправка БЕЗ relay queue.
     pub fn send_direct_payload(&self, recipient_id: String, payload: String) -> bool {
-        self.inner.lock().unwrap().send_direct_payload(recipient_id, payload)
+        self.inner.read().unwrap().send_direct_payload(recipient_id, payload)
     }
 
     /// P3: one pairing packet to one device of the account (by device key id).
@@ -155,7 +161,7 @@ impl P2PCoreHandle {
             return false;
         };
         self.inner
-            .lock()
+            .read()
             .unwrap()
             .send_pairing_payload(recipient_node_id, bytes_to_hex(&id), payload)
     }
@@ -163,13 +169,13 @@ impl P2PCoreHandle {
     /// P3: publish a short-code pairing rendezvous offer. The core validates the code and
     /// publishes the payload on a retained, time-bounded-by-the-application topic.
     pub fn publish_pairing_code(&self, code: String, payload: String) -> bool {
-        self.inner.lock().unwrap().publish_pairing_code(code, payload)
+        self.inner.read().unwrap().publish_pairing_code(code, payload)
     }
 
     /// P3: keep a bounded WSS listener alive while SwarmFirst has paused the normal MQTT
     /// session, so entering a code still finds the retained offer.
     pub fn listen_pairing_code(&self, code: String) -> bool {
-        self.inner.lock().unwrap().listen_pairing_code(code)
+        self.inner.read().unwrap().listen_pairing_code(code)
     }
 
     /// K3: бинарный кусок файла по прямому QUIC-каналу (APUF-кадр).
@@ -188,7 +194,7 @@ impl P2PCoreHandle {
             return false;
         }
         self.inner
-            .lock()
+            .read()
             .unwrap()
             .send_file_chunk(
                 recipient_id,
@@ -202,7 +208,7 @@ impl P2PCoreHandle {
 
     /// Online transit only. Does not change disk custody or own send/receive admission.
     pub fn configure_online_helper(&self, enabled: bool, max_routes: u32, max_bytes_per_minute: u32, max_relays_per_minute: u32) -> bool {
-        self.inner.lock().unwrap().configure_online_helper(enabled, max_routes, max_bytes_per_minute, max_relays_per_minute)
+        self.inner.read().unwrap().configure_online_helper(enabled, max_routes, max_bytes_per_minute, max_relays_per_minute)
     }
 
     /// K5-1: разрешить ядру держать чужие сообщения для тех, кто не в сети.
@@ -211,7 +217,7 @@ impl P2PCoreHandle {
     /// «своих» (контакты, участники групп) и отдаёт их, когда получатель
     /// появится в сети, даже если брокер недоступен.
     pub fn set_custody_enabled(&self, enabled: bool) -> bool {
-        self.inner.lock().unwrap().set_custody_enabled(enabled)
+        self.inner.write().unwrap().set_custody_enabled(enabled)
     }
 
     /// K5-2: разрешение на файловую кастодию и файл склада.
@@ -224,14 +230,14 @@ impl P2PCoreHandle {
     /// кастодия ничего на диск не пишет.
     pub fn set_file_custody_enabled(&self, enabled: bool, db_path: String) -> bool {
         self.inner
-            .lock()
+            .write()
             .unwrap()
             .set_file_custody_enabled(enabled, db_path)
     }
 
     /// K5-2: сколько места занимают чужие куски файлов (для настроек).
     pub fn file_custody_usage_bytes(&self) -> u64 {
-        self.inner.lock().unwrap().file_custody_usage_bytes()
+        self.inner.read().unwrap().file_custody_usage_bytes()
     }
 
     /// K5-2: отдать кусок файла соседям на хранение.
@@ -253,7 +259,7 @@ impl P2PCoreHandle {
         if chunk_index < 0 {
             return false;
         }
-        self.inner.lock().unwrap().offer_file_chunk_for_custody(
+        self.inner.read().unwrap().offer_file_chunk_for_custody(
             recipient_id,
             transfer_id_hex,
             chunk_index as u64,
@@ -268,47 +274,47 @@ impl P2PCoreHandle {
     /// Если брокер не ответит в пределах строгого таймаута, ядро само уйдёт
     /// на публичные. Пустая строка возвращает обычное поведение.
     pub fn set_own_broker(&self, host_port: String) -> bool {
-        self.inner.lock().unwrap().set_own_broker(host_port)
+        self.inner.write().unwrap().set_own_broker(host_port)
     }
 
     /// Отвечает ли брокер по этому адресу прямо сейчас (кнопка «Проверить»).
     /// `false` — адрес не разобран, порт закрыт или это не MQTT-брокер.
     /// Блокирующая: в приложении вызывается из фоновой нитки.
     pub fn probe_own_broker(&self, host_port: String) -> bool {
-        self.inner.lock().unwrap().probe_broker_address(host_port)
+        self.inner.read().unwrap().probe_broker_address(host_port)
     }
 
     /// K4-1: «свои» для presence (контакты и участники моих групп).
     /// Их ядро обслуживает лично, а в общий топик пишет редкий маяк.
     pub fn set_presence_audience(&self, ids: Vec<String>) -> u32 {
-        self.inner.lock().unwrap().set_presence_audience(ids)
+        self.inner.read().unwrap().set_presence_audience(ids)
     }
 
     pub fn import_address_book_json(&self, json: String) -> i32 {
-        self.inner.lock().unwrap().import_address_book_json(&json)
+        self.inner.read().unwrap().import_address_book_json(&json)
     }
 
     pub fn node_id(&self) -> Option<String> {
-        self.inner.lock().unwrap().node_id()
+        self.inner.read().unwrap().node_id()
     }
 
     pub fn public_key(&self) -> Option<String> {
-        self.inner.lock().unwrap().public_key()
+        self.inner.read().unwrap().public_key()
     }
 
     pub fn observed_public_ip(&self) -> Option<String> {
-        self.inner.lock().unwrap().observed_public_ip()
+        self.inner.read().unwrap().observed_public_ip()
     }
 
     pub fn network_status(&self) -> String {
-        self.inner.lock().unwrap().network_status()
+        self.inner.read().unwrap().network_status()
     }
 
     /// Диагностика прямого канала (стек, внешний адрес, нужен ли обходной
     /// путь). Машинная строка `DIRECT: …`; слова для человека собирает
     /// приложение, см. `DirectChannelText.kt`.
     pub fn direct_channel_status(&self) -> String {
-        self.inner.lock().unwrap().direct_channel_status()
+        self.inner.read().unwrap().direct_channel_status()
     }
 
     /// Настройки пути доставки: «только через relay» и «экономия трафика на
@@ -317,14 +323,14 @@ impl P2PCoreHandle {
     /// трафика» системы), потому что ядро этого не видит.
     pub fn set_network_path_policy(&self, relay_only: bool, save_traffic: bool, metered: bool) {
         self.inner
-            .lock()
+            .write()
             .unwrap()
             .set_network_path_policy(relay_only, save_traffic, metered)
     }
 
     /// Действует ли сейчас запрет прямого канала (для диагностики).
     pub fn direct_channel_blocked(&self) -> bool {
-        self.inner.lock().unwrap().network_path_suppresses_direct()
+        self.inner.read().unwrap().network_path_suppresses_direct()
     }
 
     /// Kill-switch IPv6 из настроек: `false` — только IPv4. Флаг общий для
@@ -337,31 +343,35 @@ impl P2PCoreHandle {
     }
 
     pub fn connected_peers(&self) -> u64 {
-        self.inner.lock().unwrap().connected_peers() as u64
+        self.inner.read().unwrap().connected_peers() as u64
     }
 
     pub fn has_live_swarm_peer(&self) -> bool {
-        self.inner.lock().unwrap().has_live_swarm_peer()
+        self.inner.read().unwrap().has_live_swarm_peer()
     }
 
     pub fn live_swarm_peer_ids(&self) -> Vec<String> {
-        self.inner.lock().unwrap().live_swarm_peer_ids()
+        self.inner.read().unwrap().live_swarm_peer_ids()
     }
 
     pub fn external_transport_allowed(&self) -> bool {
-        self.inner.lock().unwrap().external_transport_allowed()
+        self.inner.read().unwrap().external_transport_allowed()
     }
 
     pub fn trigger_gossip_discovery(&self) -> bool {
-        self.inner.lock().unwrap().trigger_gossip_discovery()
+        self.inner.read().unwrap().trigger_gossip_discovery()
+    }
+
+    pub fn on_foreground_recovery(&self) -> bool {
+        self.inner.read().unwrap().on_foreground_recovery()
     }
 
     pub fn on_network_available(&self) {
-        self.inner.lock().unwrap().on_network_available()
+        self.inner.write().unwrap().on_network_available()
     }
 
     pub fn on_network_lost(&self) {
-        self.inner.lock().unwrap().on_network_lost()
+        self.inner.write().unwrap().on_network_lost()
     }
 
     pub fn send_message(
@@ -371,10 +381,12 @@ impl P2PCoreHandle {
         recipient_id: String,
         text: String,
     ) -> bool {
-        self.inner
-            .lock()
-            .unwrap()
-            .send_message(message_id, chat_id, recipient_id, text)
+        // Join the current lifecycle before waiting on an identical message's
+        // attempt. A stop/restart must wait for callers already admitted here.
+        let core = self.inner.read().unwrap();
+        let gate = self.send_gates.for_message(&message_id);
+        let _message_attempt = gate.lock().unwrap();
+        core.send_message(message_id, chat_id, recipient_id, text)
     }
 
     pub fn retry_message(
@@ -384,10 +396,23 @@ impl P2PCoreHandle {
         recipient_id: String,
         text: String,
     ) -> bool {
-        self.inner
-            .lock()
-            .unwrap()
-            .retry_message(message_id, chat_id, recipient_id, text)
+        let core = self.inner.read().unwrap();
+        let gate = self.send_gates.for_message(&message_id);
+        let _message_attempt = gate.lock().unwrap();
+        core.retry_message(message_id, chat_id, recipient_id, text)
+    }
+
+    pub fn own_relay_message_ids(&self) -> Vec<String> {
+        self.inner.read().unwrap().own_relay_message_ids()
+    }
+
+    pub fn confirm_message_delivered(&self, message_id: String) -> bool {
+        // Serialize with already admitted attempts for this message. Room has
+        // committed the ACK before this call; this only frees our relay copy.
+        let core = self.inner.read().unwrap();
+        let gate = self.send_gates.for_message(&message_id);
+        let _message_attempt = gate.lock().unwrap();
+        core.confirm_message_delivered(&message_id)
     }
 
     pub fn receive_message(
@@ -398,7 +423,7 @@ impl P2PCoreHandle {
         encrypted_text: String,
         timestamp: i64,
     ) {
-        self.inner.lock().unwrap().receive_message(
+        self.inner.read().unwrap().receive_message(
             message_id,
             chat_id,
             sender_id,
@@ -408,34 +433,34 @@ impl P2PCoreHandle {
     }
 
     pub fn mark_message_read(&self, message_id: String) -> bool {
-        self.inner.lock().unwrap().mark_message_read(&message_id)
+        self.inner.read().unwrap().mark_message_read(&message_id)
     }
 
     pub fn create_chat(&self, chat_id: String) -> bool {
-        self.inner.lock().unwrap().create_chat(chat_id)
+        self.inner.read().unwrap().create_chat(chat_id)
     }
 
     pub fn add_contact(&self, user_id: String, display_name: String) -> bool {
         self.inner
-            .lock()
+            .read()
             .unwrap()
             .add_contact(user_id, display_name)
     }
 
 
     pub fn generate_invite(&self) -> String {
-        self.inner.lock().unwrap().generate_invite()
+        self.inner.read().unwrap().generate_invite()
     }
 
     pub fn connect_via_invite(&self, link: String) -> bool {
-        self.inner.lock().unwrap().connect_via_invite(link)
+        self.inner.write().unwrap().connect_via_invite(link)
     }
     pub fn send_message_mqtt(&self, to_node_id: String, payload: String) -> bool {
-        self.inner.lock().unwrap().send_message_mqtt(&to_node_id, &payload)
+        self.inner.read().unwrap().send_message_mqtt(&to_node_id, &payload)
     }
     pub fn get_chats(&self) -> Vec<ChatFfi> {
         self.inner
-            .lock()
+            .read()
             .unwrap()
             .get_chats()
             .into_iter()
@@ -445,7 +470,7 @@ impl P2PCoreHandle {
 
     pub fn get_messages(&self, chat_id: String, limit: u64) -> Vec<MessageFfi> {
         self.inner
-            .lock()
+            .read()
             .unwrap()
             .get_messages(&chat_id, limit as usize)
             .into_iter()
@@ -454,29 +479,45 @@ impl P2PCoreHandle {
     }
 
     pub fn poll_event(&self) -> Option<CoreEventFfi> {
-        self.inner.lock().unwrap().poll_event().map(event_to_ffi)
+        self.events.poll().map(event_to_ffi)
     }
 
     pub fn drain_events(&self) -> Vec<CoreEventFfi> {
-        self.inner
-            .lock()
-            .unwrap()
-            .drain_events()
-            .into_iter()
-            .map(event_to_ffi)
-            .collect()
+        self.events.drain().into_iter().map(event_to_ffi).collect()
     }
 
     pub fn pending_events(&self) -> u64 {
-        self.inner.lock().unwrap().pending_events() as u64
+        self.events.len() as u64
+    }
+
+    pub fn await_main_event(&self, timeout_ms: u64) -> bool {
+        self.events.wait_for_lane(
+            crate::engine::events::EventLane::Main,
+            std::time::Duration::from_millis(timeout_ms.min(60_000)),
+        )
+    }
+
+    pub fn poll_main_event(&self, prefer_interactive: bool) -> Option<CoreEventFfi> {
+        self.events.poll_lane(crate::engine::events::EventLane::Main, prefer_interactive).map(event_to_ffi)
+    }
+
+    pub fn await_file_event(&self, timeout_ms: u64) -> bool {
+        self.events.wait_for_lane(
+            crate::engine::events::EventLane::File,
+            std::time::Duration::from_millis(timeout_ms.min(60_000)),
+        )
+    }
+
+    pub fn poll_file_event(&self) -> Option<CoreEventFfi> {
+        self.events.poll_lane(crate::engine::events::EventLane::File, false).map(event_to_ffi)
     }
 
     pub fn relay_custody_mode(&self) -> String {
-        self.inner.lock().unwrap().relay_custody_mode()
+        self.inner.read().unwrap().relay_custody_mode()
     }
 
     pub fn relay_quarantine_count(&self) -> u64 {
-        self.inner.lock().unwrap().relay_quarantine_count()
+        self.inner.read().unwrap().relay_quarantine_count()
     }
 }
 
@@ -1312,10 +1353,12 @@ fn event_to_ffi(e: CoreEvent) -> CoreEventFfi {
             peer_id,
             display_name,
             is_local,
+            observed_at_ms,
         } => {
             ffi.peer_id = Some(peer_id);
             ffi.display_name = Some(display_name);
             ffi.is_local = Some(is_local);
+            ffi.timestamp = Some(observed_at_ms);
         }
         CoreEvent::PeerLost { peer_id } => {
             ffi.peer_id = Some(peer_id);
@@ -1388,8 +1431,24 @@ pub enum CoreError {
 // ============================================================
 
 #[cfg(test)]
+#[path = "engine/handle_tests.rs"]
+mod handle_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn presence_ffi_keeps_original_observation_timestamp() {
+        let event = event_to_ffi(CoreEvent::PeerDiscovered {
+            peer_id: "pk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            display_name: "Alice".into(),
+            is_local: false,
+            observed_at_ms: 1_234_567,
+        });
+        assert_eq!(event.event_type, "peer_discovered");
+        assert_eq!(event.timestamp, Some(1_234_567));
+    }
 
     #[test]
     fn file_transfer_functional_ffi_round_trip() {

@@ -42,6 +42,7 @@
 | [`CHANNEL_SWARM_DESIGN.md`](CHANNEL_SWARM_DESIGN.md) | Раздача постов канала роем |
 | [`CHAT_OPENING.md`](CHAT_OPENING.md) | Открытие личного чата без ожидания сети |
 | [`CHAT_CLEAR_AGREEMENT_DESIGN.md`](CHAT_CLEAR_AGREEMENT_DESIGN.md) | Проект согласованной очистки чата; пока не включён |
+| [`DIRECT_REPLY_DELIVERY_DESIGN.md`](DIRECT_REPLY_DELIVERY_DESIGN.md) | Проект долговременной доставки цитат и её нерешённые границы |
 | [`CONVERSATION_WALLPAPERS.md`](CONVERSATION_WALLPAPERS.md) | Фон отдельного чата |
 | [`CONTACT_DIRECTORY_RESET.md`](CONTACT_DIRECTORY_RESET.md) | Однократная очистка справочника контактов |
 | [`CORE_ROADMAP.md`](CORE_ROADMAP.md) | План развития ядра |
@@ -60,6 +61,8 @@
 | [`MQTT_MULTI_BROKER_DESIGN.md`](MQTT_MULTI_BROKER_DESIGN.md) | Multi-broker MQTT overlay |
 | [`MULTI_DEVICE_IDENTITY.md`](MULTI_DEVICE_IDENTITY.md) | Один аккаунт на нескольких устройствах |
 | [`OFFLINE_DELIVERY.md`](OFFLINE_DELIVERY.md) | Офлайн-доставка сообщений и файлов |
+| [`REMOTE_PUSH_DESIGN.md`](REMOTE_PUSH_DESIGN.md) | Не подключённый прототип удалённых push-сигналов и ограничения |
+| [`PUSH_INFRA_SETUP.md`](PUSH_INFRA_SETUP.md) | Безопасная подготовка GitHub Secrets для будущего push без включения сервиса |
 | [`OPERATIONAL_DIAGNOSTICS_AND_STORIES.md`](OPERATIONAL_DIAGNOSTICS_AND_STORIES.md) | Операционные метрики и досылка историй |
 | [`PC_TRANSFER.md`](PC_TRANSFER.md) | Перенос работы на другой ПК |
 | [`PEER_EXCHANGE.md`](PEER_EXCHANGE.md) | Прямой поиск через участников |

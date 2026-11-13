@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.mtproxy
 
+import com.vladimir.messenger.ui.components.ApuBackButton
+
 import com.vladimir.messenger.ui.components.ApuPremiumSpinner
 import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
@@ -76,11 +78,7 @@ fun MtProxyListScreen(
                     scrolledContainerColor = Color.Transparent,
                 ),
                 title = { ApuSettingsHeader(stringResource(R.string.mtproxy_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(Icons.Default.ArrowBack, stringResource(R.string.action_back))
-                    }
-                },
+                navigationIcon = { ApuBackButton(onClick = onBackClick) },
                 actions = {
                     Box {
                         IconButton(onClick = { showActionsMenu = true }) {

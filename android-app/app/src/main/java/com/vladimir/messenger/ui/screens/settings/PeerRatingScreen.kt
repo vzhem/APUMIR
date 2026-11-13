@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.ui.components.ApuBackButton
+
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -25,7 +27,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
@@ -138,14 +139,7 @@ fun PeerRatingScreen(onBackClick: () -> Unit) {
                         scrolledContainerColor = Color.Transparent,
                     ),
                     title = { ApuSettingsHeader(stringResource(R.string.peer_nodes_title)) },
-                    navigationIcon = {
-                        ApuHeaderButton(
-                            icon = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.action_back),
-                            onClick = onBackClick,
-                            modifier = Modifier.padding(start = 4.dp),
-                        )
-                    },
+                    navigationIcon = { ApuBackButton(onClick = onBackClick) },
                     actions = {
                         ApuHeaderButton(
                             icon = Icons.Default.DeleteSweep,

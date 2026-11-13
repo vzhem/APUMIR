@@ -975,6 +975,17 @@ impl RelayQueue {
             .filter(|entry| entry.own).map(|entry| entry.message.clone())
     }
 
+    /// Stable, bounded snapshot of IDs currently held on behalf of this
+    /// origin. Android reconciles these with committed Room delivery statuses
+    /// after a crash; ciphertext and foreign IDs never cross this API.
+    pub fn own_message_ids(&self) -> Vec<String> {
+        let entries = self.entries.lock().unwrap();
+        let mut ids: Vec<String> = entries.values().filter(|entry| entry.own)
+            .map(|entry| entry.message.msg_id.clone()).collect();
+        ids.sort_unstable();
+        ids
+    }
+
     /// Можно ли заменить существующую запись этой новой копией собственного
     /// сообщения, не затронув чужой relay или другой маршрут с тем же ID.
     pub fn can_refresh_own(&self, msg: &RelayMessage) -> bool {
@@ -1761,6 +1772,17 @@ mod tests {
 
         // Счётчик для журнала: считает только реальные снятия «своих».
         assert_eq!(q.delivered_removed(), 1);
+    }
+
+    #[test]
+    fn own_message_id_snapshot_is_sorted_and_never_exposes_foreign_entries() {
+        let q = RelayQueue::new();
+        assert!(q.enqueue_own(msg("z", "pk_b")).unwrap());
+        assert!(q.enqueue_own(msg("a", "pk_b")).unwrap());
+        assert!(q.enqueue(msg("foreign", "pk_b")).unwrap());
+        assert_eq!(q.own_message_ids(), vec!["a".to_string(), "z".to_string()]);
+        assert!(q.remove_delivered_own("a"));
+        assert_eq!(q.own_message_ids(), vec!["z".to_string()]);
     }
 
     #[test]

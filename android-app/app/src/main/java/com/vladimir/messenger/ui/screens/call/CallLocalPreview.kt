@@ -7,6 +7,7 @@ import android.graphics.Matrix
 import android.graphics.Rect
 import android.graphics.YuvImage
 import android.util.Size
+import android.util.Log
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -14,6 +15,7 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.UseCase
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.Box
@@ -44,6 +46,15 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
+private data class CameraBinding(val provider: ProcessCameraProvider, val useCases: List<UseCase>)
+
+// ProcessCameraProvider is process-wide: coordinate disposal across distinct
+// composable instances, not just across recompositions of one instance.
+private val callCameraLease = CallCameraLease<CameraBinding> { binding ->
+    runCatching { binding.provider.unbind(*binding.useCases.toTypedArray()) }
+        .onFailure { Log.w("CallCameraLease", "Unable to release preview use cases", it) }
+}
+
 /**
  * Локальная камера видеозвонка: превью + JPEG в транспорт, когда [send] = true.
  */
@@ -72,9 +83,11 @@ fun CallLocalPreview(
     val jpegSink = rememberUpdatedState(onJpeg)
 
     DisposableEffect(front, owner) {
+        val lease = callCameraLease.newOwner()
         val future = ProcessCameraProvider.getInstance(context)
         val main = ContextCompat.getMainExecutor(context)
         future.addListener({
+            if (!callCameraLease.isCurrent(lease)) return@addListener
             val provider = runCatching { future.get() }.getOrNull() ?: return@addListener
             val selector = if (front) CameraSelector.DEFAULT_FRONT_CAMERA
             else CameraSelector.DEFAULT_BACK_CAMERA
@@ -98,17 +111,12 @@ fun CallLocalPreview(
                 }
             }
             runCatching {
-                provider.unbindAll()
-                provider.bindToLifecycle(owner, selector, preview, analysis)
-            }
+                callCameraLease.install(lease, CameraBinding(provider, listOf(preview, analysis))) {
+                    provider.bindToLifecycle(owner, selector, preview, analysis)
+                }
+            }.onFailure { Log.w("CallCameraLease", "Unable to bind preview use cases", it) }
         }, main)
-        onDispose {
-            if (future.isDone) {
-                runCatching { future.get().unbindAll() }
-            } else {
-                future.addListener({ runCatching { future.get().unbindAll() } }, main)
-            }
-        }
+        onDispose { callCameraLease.dispose(lease) }
     }
     DisposableEffect(Unit) {
         onDispose { executor.shutdown() }
@@ -220,9 +228,11 @@ private fun CallBackgroundPreview(
     var renderedKey by remember { mutableStateOf("") }
 
     DisposableEffect(front, owner, background) {
+        val lease = callCameraLease.newOwner()
         val future = ProcessCameraProvider.getInstance(context)
         val main = ContextCompat.getMainExecutor(context)
         future.addListener({
+            if (!callCameraLease.isCurrent(lease)) return@addListener
             val provider = runCatching { future.get() }.getOrNull() ?: return@addListener
             val selector = if (front) CameraSelector.DEFAULT_FRONT_CAMERA
             else CameraSelector.DEFAULT_BACK_CAMERA
@@ -285,17 +295,12 @@ private fun CallBackgroundPreview(
                 }
             }
             runCatching {
-                provider.unbindAll()
-                provider.bindToLifecycle(owner, selector, analysis)
-            }
+                callCameraLease.install(lease, CameraBinding(provider, listOf(analysis))) {
+                    provider.bindToLifecycle(owner, selector, analysis)
+                }
+            }.onFailure { Log.w("CallCameraLease", "Unable to bind preview use cases", it) }
         }, main)
-        onDispose {
-            if (future.isDone) {
-                runCatching { future.get().unbindAll() }
-            } else {
-                future.addListener({ runCatching { future.get().unbindAll() } }, main)
-            }
-        }
+        onDispose { callCameraLease.dispose(lease) }
     }
     DisposableEffect(Unit) {
         onDispose { executor.shutdown() }

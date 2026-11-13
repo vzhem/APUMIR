@@ -26,8 +26,9 @@
 //! - **Keep-alive** раз в 20 с со стороны инициатора: отображение на NAT не
 //!   протухает, соединение переживает паузы в разговоре.
 //! - **Отправка не держит поток вызывающего** дольше [`DIRECT_SEND_BUDGET`]:
-//!   работа идёт в задачах tokio, по одной «полосе» на узел (кадры одному
-//!   узлу уходят по порядку, разные узлы - параллельно).
+//!   работа идёт в задачах tokio, по одному исполнителю на узел. Интерактивные
+//!   кадры обгоняют ожидающие бинарные данные файла; внутри каждого класса
+//!   сохраняется FIFO, а разные узлы работают параллельно.
 //!
 //! Формат кадра не менялся (`sender|msgId|chatId|text` в uni-стриме с
 //! префиксом длины), смысл ответа `bool` = «получатель подтвердил приём
@@ -90,8 +91,9 @@ const FAIL_FAST_WINDOW: Duration = Duration::from_secs(15);
 /// соединение безнадёжным (страховка от плотного цикла).
 const MAX_CONSECUTIVE_READ_ERRORS: u32 = 16;
 
-/// Ёмкость общей очереди команд и очереди одной полосы. При переполнении
-/// вызывающий получает `false` сразу - честный отказ лучше накопления.
+/// Ёмкость общей очереди команд и каждой из двух очередей полосы узла.
+/// Файлы не занимают зарезервированное место интерактивных кадров; при
+/// переполнении соответствующего класса вызывающий получает `false`.
 const COMMAND_QUEUE_CAPACITY: usize = 512;
 const LANE_QUEUE_CAPACITY: usize = 64;
 
@@ -664,7 +666,7 @@ async fn read_loop(conn: QuicConnection, shared: Arc<Shared>, inbound: bool) {
 
 /// Полоса одного узла: своя очередь и задача-исполнитель.
 struct PeerLane {
-    tx: mpsc::Sender<SendJob>,
+    tx: super::direct_priority::PrioritySender<SendJob>,
     last_used: Instant,
 }
 
@@ -686,7 +688,8 @@ async fn run_command_loop(mut rx: mpsc::Receiver<Command>, shared: Arc<Shared>) 
                             .entry(peer_id.clone())
                             .or_insert_with(|| spawn_lane(&peer_id, &shared));
                         lane.last_used = Instant::now();
-                        let job = match lane.tx.try_send(job) {
+                        let interactive = job.kind == JobKind::Interactive;
+                        let job = match lane.tx.try_send(interactive, job) {
                             Ok(()) => continue,
                             Err(mpsc::error::TrySendError::Full(job)) => {
                                 tracing::warn!("DIRECT: lane to {} is full, fallback", peer_id);
@@ -697,7 +700,7 @@ async fn run_command_loop(mut rx: mpsc::Receiver<Command>, shared: Arc<Shared>) 
                         };
                         // Полоса умерла (не должно случаться) - поднимаем заново.
                         let lane = spawn_lane(&peer_id, &shared);
-                        if let Err(e) = lane.tx.try_send(job) {
+                        if let Err(e) = lane.tx.try_send(interactive, job) {
                             match e {
                                 mpsc::error::TrySendError::Full(job)
                                 | mpsc::error::TrySendError::Closed(job) => job.reply.send(false),
@@ -733,7 +736,11 @@ async fn run_command_loop(mut rx: mpsc::Receiver<Command>, shared: Arc<Shared>) 
 }
 
 fn spawn_lane(peer_id: &str, shared: &Arc<Shared>) -> PeerLane {
-    let (tx, mut rx) = mpsc::channel::<SendJob>(LANE_QUEUE_CAPACITY);
+    // A single worker still owns connection establishment. Only jobs waiting
+    // behind it are reprioritized; an already-started stream is not cancelled.
+    let (tx, mut rx) = super::direct_priority::channel::<SendJob>(
+        LANE_QUEUE_CAPACITY, LANE_QUEUE_CAPACITY,
+    );
     let peer_id = peer_id.to_string();
     let shared = Arc::clone(shared);
     tokio::spawn(async move {

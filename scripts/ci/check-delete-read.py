@@ -77,6 +77,11 @@ class DeleteReadTest(unittest.TestCase):
         incoming = group[group.index("is GroupWire.Packet.MessageDelete -> {"):group.index("is GroupWire.Packet.PostsRequest -> {")]
         self.assertNotRegex(incoming, r'\.(?:status|isRead|readAt)\b')
 
+    def test_direct_delete_ack_routes_through_peer_scoped_queue_operation(self):
+        body = method(source("data/repository/MessageDeletionRepository.kt"), "routeIncoming")
+        self.assertIn("outbox.acknowledgeDirect(senderId, ackedId)", body)
+        self.assertNotIn("removeByTarget", body)
+
     def test_delete_action_is_based_on_ownership_or_moderation_not_read(self):
         ui = source("ui/screens/chat/ChatDetailScreen.kt")
         block = ui[ui.index("// Раунд 135: удаление своего сообщения"):]
@@ -159,7 +164,7 @@ class DeleteReadTest(unittest.TestCase):
         PENDING — то есть почти ноль, когда очередь ядра стояла полной
         («своё ждёт получателя=1000» в том же отчёте). Сообщение, отданное ядру,
         но не подтверждённое получателем, — такое же «ещё не ушло». Список
-        обязан совпадать с помпой досылки (`getPendingOutgoingMessages`).
+        обязан совпадать с помпой досылки (`getRetryableOutgoingMessages`).
         """
         sql = dao_query("countPendingOutgoing")
         self.insert("PENDING", own=True, message_id="pending")

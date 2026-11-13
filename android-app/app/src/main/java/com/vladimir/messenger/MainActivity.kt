@@ -77,6 +77,7 @@ interface MainActivityEntryPoint {
     fun botApi(): BotApi
     fun contactRepository(): ContactRepository
     fun updateChecker(): UpdateChecker
+    fun apkSeeder(): com.vladimir.messenger.data.update.ApkSeeder
     fun updateNotifier(): UpdateNotifier
     fun linkShortener(): LinkShortener
     /** Рассылка своего ранга собеседникам (знак VIP у имени). */
@@ -124,6 +125,8 @@ class MainActivity : ComponentActivity() {
     ) { isGranted: Boolean ->
         if (isGranted) {
             Log.i("MainActivity", "Notification permission granted")
+            runCatching { com.vladimir.messenger.worker.IncomingNotificationRecoveryWorker.enqueue(applicationContext) }
+                .onFailure { Log.w("MainActivity", "Local notification recovery could not be scheduled") }
             retryUpdateNotificationAfterPermission()
         } else {
             Log.w("MainActivity", "Notification permission denied")
@@ -185,6 +188,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // A return from Android's notification settings may unblock local work.
+        runCatching { com.vladimir.messenger.worker.IncomingNotificationRecoveryWorker.enqueue(applicationContext) }
+            .onFailure { Log.w("MainActivity", "Local notification recovery could not be scheduled") }
         applyIncomingCallWake(intent)
         handleDeepLinkIntent(intent)
         maybeCheckForUpdates()
@@ -521,10 +527,12 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         com.vladimir.messenger.service.DeliveryCadence.setForeground(true)
+        com.vladimir.messenger.service.ForegroundRecovery.onForeground(lifecycleScope)
     }
 
     override fun onStop() {
         com.vladimir.messenger.service.DeliveryCadence.setForeground(false)
+        com.vladimir.messenger.service.ForegroundRecovery.onBackground()
         super.onStop()
     }
 
@@ -696,7 +704,14 @@ class MainActivity : ComponentActivity() {
                                 val checker = entryPoint.updateChecker()
                                 lifecycleScope.launch {
                                     val attempt = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                        runCatching { checker.downloadApk(currentUpdate) }
+                                        runCatching {
+                                            // An explicit update tap prefers the site, even if a
+                                            // neighbour is already offering/receiving the update.
+                                            val seeder = entryPoint.apkSeeder()
+                                            seeder.cancelDownload()
+                                            seeder.cancelPatchDownload()
+                                            checker.downloadApk(currentUpdate, preferOfficial = true)
+                                        }
                                     }
                                     attempt.onSuccess { id ->
                                         updateRelease = null

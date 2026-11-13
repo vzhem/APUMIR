@@ -429,7 +429,7 @@ class ApkSeeder @Inject constructor(
      * старте (догнать, скачанное пока приложение было закрыто) и при
      * открытии настроек.
      */
-    suspend fun adoptCompletedDownloads() {
+    suspend fun adoptCompletedDownloads() = CompletedApkAdoption.run {
         val downloads = runCatching { updateChecker.completedApkDownloads() }.getOrDefault(emptyList())
         for (download in downloads) {
             runCatching { adoptDownloadedApk(download.file, displayName = download.file.name) }

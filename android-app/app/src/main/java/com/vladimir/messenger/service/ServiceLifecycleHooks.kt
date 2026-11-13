@@ -15,22 +15,36 @@ import android.content.Context
  *    личности, ядро не поднялось, перезапуск зеркала). Быстрый подъём здесь
  *    вреден: причина не исчезнет за две минуты, и телефон будил бы себя по
  *    кругу. Ставится редкая неточная страховка раз в час.
- *  - `planned = false` — процесс ушёл (смахнули приложение, система убила
- *    службу без `onDestroy`). Это ровно тот случай, ради которого владелец
- *    просил «как в Telegram»: подъём через две минуты, а не через час.
+ *  - `planned = false` — служба остановилась неожиданно: планируется более
+ *    ранняя локальная попытка запуска. Android может её задержать или запретить;
+ *    удалённого push в приложении нет.
  *  - `onTaskRemoved` — человек смахнул приложение из списка задач. Служба
  *    может прожить ещё несколько секунд, но система её почти наверняка
  *    добьёт, поэтому будильник назначается сразу.
  */
 internal object ServiceLifecycleHooks {
 
+    /** Android delivers creation in order; register ownership before foreground entry. */
+    fun onCreated(owner: Context) {
+        CoreStartupCoordinator.serviceCreated(owner)
+        EmergencyKeepAlive.onServiceCreated(owner)
+    }
+
+    /** Retire the owner before native shutdown is enqueued; never wait for native here. */
+    fun onDestroying(owner: Context) {
+        CoreStartupCoordinator.serviceDestroyed(owner)
+        com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.tracker.count(
+            com.vladimir.messenger.data.diagnostics.OperationalCounter.SERVICE_DESTROYED,
+        )
+    }
+
     /** Служба уничтожена: [planned] — остановилась сама, а не её убили. */
-    fun onDestroyed(context: Context, planned: Boolean) {
-        runCatching { EmergencyKeepAlive.onServiceStopped(context, intentional = planned) }
+    fun onDestroyed(context: Context, owner: Any, planned: Boolean) {
+        runCatching { EmergencyKeepAlive.onServiceStopped(context, owner, intentional = planned) }
     }
 
     /** Приложение убрали из списка задач: быстрый подъём. */
-    fun onTaskRemoved(context: Context) {
-        runCatching { EmergencyKeepAlive.onTaskRemoved(context) }
+    fun onTaskRemoved(context: Context, owner: Any) {
+        runCatching { EmergencyKeepAlive.onTaskRemoved(context, owner) }
     }
 }
