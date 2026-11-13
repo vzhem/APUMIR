@@ -66,8 +66,14 @@ DNS или другим аккаунтам. Право чтения списка
 
 ### Отдельный токен для создания выключенного Worker
 
-Владелец запросил инструкцию. Подтверждения, что токен сохранён, пока нет.
-Если он ещё не создан, в [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens)
+Владелец сообщил, что создал `Edit`-токен, но сохранил его в существующий
+`APU_PUSH_CLOUDFLARE_TOKEN`, предназначенный для `Read`. Его нужно сохранить в
+отдельном `APU_PUSH_CLOUDFLARE_DEPLOY_TOKEN`, а в прежнем секрете восстановить
+или создать отдельный `Read`-токен. Область одного аккаунта и права нового
+токена ещё не подтверждены. До исправления нельзя запускать или одобрять job,
+получающий Cloudflare-секреты. GitHub не показывает сохранённое значение.
+
+Если токен ещё не создан, в [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens)
 выберите **Create Token → Start from scratch → Start with an Account policy**
 (в старом интерфейсе — **Create Custom Token**). Разрешение — **Account → Workers
 Scripts → Edit**, ресурсы — только тот же аккаунт, где находится APU. Доступ к
