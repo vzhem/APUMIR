@@ -51,7 +51,7 @@ internal class PushRegistrationRunner(
             diag()
             null
         } ?: return Outcome.NotReady
-        try {
+        return try {
             val participants = PushRegistrationStore.Participants(
                 resolved.localId, resolved.peerId, resolved.localBinding, resolved.pinnedPeerBinding,
             )

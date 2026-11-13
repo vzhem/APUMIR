@@ -284,10 +284,11 @@ internal object PushServiceLocator {
     /**
      * Enqueues the drain worker. The failure callback belongs to the scheduling
      * gate: the worker manager invokes it exactly when the request itself fails,
-     * including asynchronously, so this function never calls it a second time.
+     * including asynchronously, so the accepted path never calls it again.
+     * `false` means the request was not accepted and must be retried.
      */
-    private fun enqueueDrain(context: Context, onFailure: () -> Unit) {
-        try {
+    private fun enqueueDrain(context: Context, onFailure: () -> Unit): Boolean {
+        return try {
             shared(context).workManager.enqueue(onFailure)
         } catch (cancelled: CoroutineCancellation) {
             throw cancelled
@@ -296,6 +297,7 @@ internal object PushServiceLocator {
         } catch (_: Exception) {
             diag("Wake request not scheduled")
             onFailure()
+            false
         }
     }
 
