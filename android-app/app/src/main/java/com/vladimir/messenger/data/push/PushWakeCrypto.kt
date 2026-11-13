@@ -15,17 +15,18 @@ import uniffi.p2p_core.signPushWakeRegistration
  * Strings created for the existing HTTP API cannot be zeroized; no returned
  * value is safe to log, save in a backup or pass to a different recipient.
  */
-internal open class PushWakeCrypto(
+internal class PushWakeCrypto(
     private val deriveFfi: (ByteArray, ByteArray, ByteArray, ByteArray, Boolean) -> ByteArray = ::derivePushWakeMaterial,
     private val sign: (ByteArray, ByteArray, ByteArray, ULong, ULong, ByteArray, Boolean) -> ByteArray = ::signPushWakeRegistration,
     private val signMailbox: (ByteArray, ByteArray, ByteArray, ULong, ByteArray, ByteArray, Boolean) -> ByteArray = ::signPushMailboxAccess,
     private val recordFailure: () -> Unit,
 ) {
     /**
-     * Open for a test fake only: the FFI is the single implementation in
-     * production, and a fake must never be able to produce real trust material.
+     * Derives material through this instance's FFI entry point. Only a
+     * constructor argument can replace it, and shipped code never passes one;
+     * a subclass could override the checks, so the class stays final.
      */
-    open fun derive(
+    fun derive(
         localBinding: ByteArray,
         pinnedPeerBinding: ByteArray,
         localSecret: ByteArray,

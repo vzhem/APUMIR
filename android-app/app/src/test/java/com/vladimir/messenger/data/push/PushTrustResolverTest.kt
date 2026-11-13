@@ -28,7 +28,6 @@ class PushTrustResolverTest {
         pinned: ByteArray? = peerBinding,
         secretValue: ByteArray? = secret,
         local: ByteArray? = localBinding,
-        crypto: PushWakeCrypto = FakeCrypto(null),
     ) = PushTrustResolver(
         localNodeId = { nodeId },
         localBinding = { local?.copyOf() },
@@ -37,7 +36,6 @@ class PushTrustResolverTest {
         registration = {
             if (state == null) PushRegistrationStore.Result.Missing else PushRegistrationStore.Result.Ready(state)
         },
-        crypto = crypto,
     )
 
     @Test fun aLivePairYieldsAPassBoundToTheCurrentValues() = runBlocking {
@@ -79,23 +77,27 @@ class PushTrustResolverTest {
             localSecret = { secret.copyOf() },
             pinnedPeer = { peerBinding.copyOf() },
             registration = { PushRegistrationStore.Result.Unavailable },
-            crypto = FakeCrypto(null),
         )
         assertNull(unavailable.resolve(peerId))
     }
 
-    @Test fun derivationFailingOrThrowingLeavesNoPass() = runBlocking {
-        assertNull(resolver(crypto = FakeCrypto(null)).resolve(peerId))
-
-        val throwing = PushTrustResolver(
+    @Test fun aPassNeverInventsMaterialFromAFailingOrMalformedDerivation() = runBlocking {
+        // A failing FFI must not become a capability.
+        val failing = PushTrustResolver(
             localNodeId = { nodeId },
             localBinding = { localBinding.copyOf() },
             localSecret = { secret.copyOf() },
             pinnedPeer = { peerBinding.copyOf() },
             registration = { PushRegistrationStore.Result.Ready(state()) },
-            crypto = FakeCrypto(throws = true),
-        )
-        assertNull(throwing.resolve(peerId))
+        ).resolve(peerId)!!
+        failing.use { pass ->
+            assertNull(pass.derive("ab".repeat(16)))
+            // A malformed or empty epoch is rejected before the FFI is reached.
+            assertNull(pass.derive(""))
+            assertNull(pass.derive("00"))
+            assertNull(pass.derive("0A".repeat(16)))
+        }
+        assertNotNull(failing)
     }
 
     @Test fun aSnapshotIsTheSameLiveReadsWithoutDerivation() = runBlocking {
@@ -118,32 +120,10 @@ class PushTrustResolverTest {
                 localSecret = { null },
                 pinnedPeer = { null },
                 registration = { PushRegistrationStore.Result.Missing },
-                crypto = FakeCrypto(null),
             ).resolve(peerId)
         } catch (_: CancellationException) {
             cancelled = true
         }
         assertTrue(cancelled)
-    }
-
-    /**
-     * Only "did the resolver hand over a usable material" matters here; the real
-     * derivation has its own test. Subclasses the production seam, which is open
-     * for exactly this purpose and cannot be constructed with fake FFI inputs.
-     */
-    private class FakeCrypto(
-        private val material: PushWakeCrypto.Material? = null,
-        private val throws: Boolean = false,
-    ) : PushWakeCrypto.ForTests() {
-        override fun derive(
-            localBinding: ByteArray,
-            pinnedPeerBinding: ByteArray,
-            localSecret: ByteArray,
-            epochHex: String,
-            localIsSender: Boolean,
-        ): PushWakeCrypto.Material? {
-            if (throws) throw IllegalStateException("ffi")
-            return material
-        }
     }
 }

@@ -248,7 +248,7 @@ EXPECTED = {
         "missingValuesAreNeverTurnedIntoTrust",
         "aReceivingPassRequiresAServerConfirmedRegistration",
         "anUnreadableJournalIsNotAnEmptyJournal",
-        "derivationFailingOrThrowingLeavesNoPass",
+        "aPassNeverInventsMaterialFromAFailingOrMalformedDerivation",
         "aSnapshotIsTheSameLiveReadsWithoutDerivation",
         "cancellationPropagatesFromEveryReader",
     },
