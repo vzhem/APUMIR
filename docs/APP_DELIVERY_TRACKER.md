@@ -56,6 +56,19 @@
   те же JVM/Android/Worker уже были зелёными (прогоны 43470325396/43470325381/43470325385).
   Обязательный отдельный `workflow_dispatch` для этого SHA не запускался. Это не сквозная
   доставка и не разрешение включать флаги.
+- Компиляцию поймал CI, а не локальные проверки: в `7f7e004` `toString()` был
+  объявлен внутри `sealed interface` (`PushRegistrationFlow.kt:70`,
+  `PushSignalInbox.kt:40`) — Kotlin такой override методов `Any` в интерфейсе
+  запрещает, `:app:compileReleaseKotlin` упал. Исправлено в `04746ed`
+  (переопределения удалены). Поучительно: `kt_syntax.py` и
+  `check_unresolved_symbols.py` этого класса ошибок не видят.
+- На `04746ed` зелёные [JVM](https://github.com/vzhem/APUMIR/actions/runs/43485784244)
+  (весь набор, все 34 новых кейса через отчётный гейт),
+  [Android](https://github.com/vzhem/APUMIR/actions/runs/43485784283),
+  [APK без публикации](https://github.com/vzhem/APUMIR/actions/runs/43485784396),
+  [Worker prototype](https://github.com/vzhem/APUMIR/actions/runs/43485784223) и
+  [Firebase preflight](https://github.com/vzhem/APUMIR/actions/runs/43485784385);
+  deploy/verify/site пропущены. Это по-прежнему не доставка.
 - **Чего нет и что блокирует включение:** реальный `FirebaseMessagingService`
   (токен и отсутствие Play Services), подключение `PushRegistrationFlow` к
   настоящей паре key/pin через FFI, производственный `commit`-callback

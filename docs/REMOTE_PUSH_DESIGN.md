@@ -696,8 +696,11 @@ Android-приложение с package name `com.vladimir.messenger`, а так
 `test-push-mailbox-jvm-results.py` и `check-android-compile.sh`): 9 кейсов
 `PushRegistrationFlowTest`, 5 `PushSignalInboxTest`, 5 `PushReceiveWindowTest`,
 6 `PushWakeSyncTest`, 9 `PushFullScanTest` — всего 34, плюс ранее 25.
-Это статические проверки с фейковыми транспортом и хранилищем; они не
-доказывают ни компиляцию, ни доставку.
+Это статические проверки с фейковыми транспортом и хранилищем; доставку они не
+доказывают, а компиляцию — только через CI: локальный `kt_syntax.py` пропустил
+`toString()` внутри `sealed interface`, и `:app:compileReleaseKotlin` упал на
+`7f7e004`; после исправления `04746ed` JVM, Android, APK, Worker и Firebase
+preflight прогоны ветки зелёные.
 
 Что **не** сделано и по-прежнему запрещает включать флаг: реальный
 `FirebaseMessagingService` (`FirebaseMessaging.getInstance().token`, честное
