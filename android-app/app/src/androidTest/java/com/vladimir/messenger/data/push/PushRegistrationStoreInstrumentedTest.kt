@@ -410,6 +410,50 @@ class PushRegistrationStoreInstrumentedTest {
         assertFalse(KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.containsAlias(alias))
     }
 
+    @Test fun recoveryRejectsAnOversizedJournalInsteadOfSkippingItsTail() {
+        assertTrue(PushWakeRecoveryProgress.MAX_SCAN_ROUTES >= PushRegistrationStore.MAX_ENTRIES)
+        var rejectedLimit = false
+        try { store(maxEntries = PushRegistrationStore.MAX_ENTRIES + 1) }
+        catch (_: IllegalArgumentException) { rejectedLimit = true }
+        assertTrue(rejectedLimit)
+        val journal = store()
+        assertTrue(journal.recoveryPage() is PushRegistrationStore.RecoveryPage.Ready)
+        journal.close()
+        SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            // Synthetic unindexed legacy rows: 2048 is within the journal's
+            // bound even though there is no route to decrypt or visit.
+            db.execSQL(
+                "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<2048) " +
+                    "INSERT INTO registrations(record_key,payload) SELECT printf('%064x',x),zeroblob(30) FROM n"
+            )
+        }
+        assertEquals(emptyList<String>(), (journal.recoveryPage() as PushRegistrationStore.RecoveryPage.Ready).routes)
+        journal.close()
+        SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.execSQL("INSERT INTO registrations(record_key,payload) VALUES (?,zeroblob(30))", arrayOf("f".repeat(64)))
+        }
+        assertEquals(PushRegistrationStore.RecoveryPage.Unavailable, journal.recoveryPage())
+        assertEquals(PushRegistrationStore.RecoveryPage.Unavailable, journal.recoveryPage(after = "f".repeat(64)))
+        assertEquals(PushRegistrationStore.Result.Full, journal.reserve(participants(), 1000))
+    }
+
+    @Test fun concurrentCreatorsCannotExceedTheRegistrationQuota() {
+        val journals = listOf(store(maxEntries = 1), store(maxEntries = 1))
+        val participants = listOf(participants(), participants(peerBinding = other, id = otherId))
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val results = participants.mapIndexed { i, peer -> executor.submit(Callable {
+                assertTrue(start.await(10, TimeUnit.SECONDS))
+                journals[i].reserve(peer, 1000)
+            }) }
+            start.countDown()
+            val done = results.map { it.get(20, TimeUnit.SECONDS) }
+            assertEquals(1, done.count { it is PushRegistrationStore.Result.Ready })
+            assertEquals(1, done.count { it == PushRegistrationStore.Result.Full })
+        } finally { start.countDown(); executor.shutdownNow() }
+    }
+
     @Test fun quotaAndFailedEntropyDoNotEvictOrCreateARegistration() {
         val journal = store(maxEntries = 1)
         val first = ready(journal.reserve(participants(), 1000))

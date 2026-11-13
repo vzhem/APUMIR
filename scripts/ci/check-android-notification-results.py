@@ -22,6 +22,7 @@ MAILBOX_OUTBOX_CLASS = "com.vladimir.messenger.data.push.PushMailboxOutboxInstru
 MAILBOX_OUTBOX_FFI_CLASS = "com.vladimir.messenger.data.push.PushMailboxOutboxRealFfiInstrumentedTest"
 PUSH_INBOX_CLASS = "com.vladimir.messenger.data.push.PushWakeInboxInstrumentedTest"
 PUSH_PERIODIC_CLASS = "com.vladimir.messenger.data.push.PushWakePeriodicRecoveryInstrumentedTest"
+PUSH_RECOVERY_CHECKPOINT_CLASS = "com.vladimir.messenger.data.push.PushWakeRecoveryCheckpointInstrumentedTest"
 PUSH_DRAIN_CLASS = "com.vladimir.messenger.data.push.PushWakeDrainInstrumentedTest"
 PUSH_WORK_CLASS = "com.vladimir.messenger.data.push.PushWakeWorkManagerInstrumentedTest"
 FIREBASE_CLASS = "com.vladimir.messenger.data.push.FirebaseClientConfigurationInstrumentedTest"
@@ -148,6 +149,8 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "recoveryPageDetectsMalformedAndPartialIndexEvenBeforeTheCursor",
     "recoveryPageRejectsEmbeddedNullBeforeTheCursor",
     "recoveryPageDoesNotRegenerateALostKeystoreKey",
+    "recoveryRejectsAnOversizedJournalInsteadOfSkippingItsTail",
+    "concurrentCreatorsCannotExceedTheRegistrationQuota",
     "quotaAndFailedEntropyDoNotEvictOrCreateARegistration",
 }, PUSH_INTEGRATION_CLASS: {
     "realFfiAndDeviceJournalsMatchWorkerVectorsWithoutProviderNetwork",
@@ -182,6 +185,9 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "recreatedDatabaseRejectsAnOldClaimWithMatchingCounters",
     "restoredPreLeaseSnapshotRejectsOldClaimEvenWhenCountersRepeat",
     "versionOneMigrationPreservesWakesAndReleasesLegacyLeases",
+    "versionTwoMigrationPreservesMarkerAndFencesLegacyLeases",
+    "markerIncarnationSurvivesRetryAndRevisionButNotARecreatedMarker",
+    "invalidMarkerEntropyOrCorruptIncarnationCannotConsumeWakes",
     "failedLeaseEntropyRollsBackTheClaimAndPreservesTheWake",
     "wrongOrCorruptedLeaseNonceCannotConsumeARealClaim",
     "failedWorkRespectsBackoffAndDoesNotLoseANewerWake",
@@ -203,6 +209,21 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "periodicPassRepairsFailedCallbackWithSqliteAndFakeSync",
     "expiredLeaseCannotStartConcurrentDrainsInOneClassloader",
     "periodicTickRacingLeasedScanNeedsLaterTickForUnrecordedCallback",
+}, PUSH_RECOVERY_CHECKPOINT_CLASS: {
+    "encryptedProgressAndFailureBitSurviveReopen",
+    "scopeChangesResetCursorAndInvalidateOlderWritersAcrossInstances",
+    "progressIsMonotonicAndOnlyTheCurrentSnapshotMayReset",
+    "revisionIsAuthenticatedAndNewerWakeDoesNotInterruptAnUnfinishedPass",
+    "newerRecoveryBetweenLeasesNeedsAFullFreshPassAcrossReopen",
+    "recreatedInboxCannotResumeAnOldMarkersPartialCheckpoint",
+    "currentCheckAfterWriteRollsBackAdvancesResetsAndScopeChanges",
+    "concurrentWritersHaveExactlyOneWinnerAndStaleTokensStayStale",
+    "malformedCiphertextTokenAndMissingKeyNeverSilentlyResetProgress",
+    "malformedTokenAndOversizedOrWrongTypePayloadFailClosed",
+    "missingOrRepeatedEntropyCannotAdvanceCheckpoint",
+    "cancellationAfterCheckpointCommitKeepsTheWakeAndResumesTheNextRoute",
+    "cancellationAfterFinalResetReplaysPassAndKeepsWake",
+    "realIndexInboxAndCheckpointResumeAcrossReopenWithoutLosingFailedRoute",
 }, PUSH_DRAIN_CLASS: {
     "mixedSignalsAreInspectedAndAllowedRoutesShareOneGenericSync",
     "batchOutcomesConsumeOnlyTheCorrespondingSqliteLeases",

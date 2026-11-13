@@ -57,7 +57,7 @@ class PushWakeInboxInstrumentedTest {
             db.rawQuery("PRAGMA table_info(pending)", null).use { cursor ->
                 val columns = mutableSetOf<String>()
                 while (cursor.moveToNext()) columns += cursor.getString(1)
-                assertEquals(setOf("route", "revision", "expires_at", "due_at", "lease", "lease_until", "lease_nonce"), columns)
+                assertEquals(setOf("route", "revision", "expires_at", "due_at", "lease", "lease_until", "lease_nonce", "recovery_nonce"), columns)
             }
         }
         val reopened = inbox(2)
@@ -273,6 +273,88 @@ class PushWakeInboxInstrumentedTest {
             assertEquals(PushWakeInbox.Completion.STALE, restored.complete(old, true, now + 3))
             assertEquals(PushWakeInbox.Completion.COMPLETED, restored.complete(current, true, now + 4))
         } finally { snapshot.delete() }
+    }
+
+    @Test fun markerIncarnationSurvivesRetryAndRevisionButNotARecreatedMarker() {
+        val first = inbox()
+        assertEquals(PushWakeInbox.EnqueueResult.RECOVERY_QUEUED, first.enqueueRecovery(now))
+        val original = ready(first, now)
+        val incarnation = checkNotNull(original.recoveryNonce)
+        assertEquals(64, incarnation.length)
+        assertTrue(incarnation.any { it != '0' })
+        assertFalse(original.toString().contains(incarnation))
+        val wrongNonce = (if (incarnation == "f".repeat(64)) "e" else "f").repeat(64)
+        val wrongMarker = PushWakeInbox.Claim(null, original.revision, original.lease, original.leaseNonce, wrongNonce)
+        assertEquals(PushWakeInbox.Completion.STALE, first.complete(wrongMarker, true, now))
+        assertEquals(PushWakeInbox.EnqueueResult.RECOVERY_QUEUED, first.enqueueRecovery(now + 1))
+        assertEquals(PushWakeInbox.Completion.NEWER_QUEUED, first.complete(original, true, now + 2))
+        val newer = ready(first, now + 2)
+        assertEquals(incarnation, newer.recoveryNonce)
+        assertEquals(2L, newer.revision)
+        assertTrue(original.leaseNonce != newer.leaseNonce)
+        assertEquals(PushWakeInbox.Completion.RETRY_QUEUED, first.complete(newer, false, now + 2))
+        first.close()
+        val reopened = inbox()
+        val retry = ready(reopened, now + 2 + PushWakeInbox.RETRY_MS)
+        assertEquals(incarnation, retry.recoveryNonce)
+        assertEquals(2L, retry.revision)
+        assertEquals(PushWakeInbox.Completion.COMPLETED, reopened.complete(retry, true, now + 3 + PushWakeInbox.RETRY_MS))
+        assertEquals(PushWakeInbox.EnqueueResult.RECOVERY_QUEUED, reopened.enqueueRecovery(now + 4 + PushWakeInbox.RETRY_MS))
+        val recreated = ready(reopened, now + 4 + PushWakeInbox.RETRY_MS)
+        assertEquals(1L, recreated.revision)
+        assertTrue(incarnation != recreated.recoveryNonce)
+        assertEquals(PushWakeInbox.Completion.STALE, reopened.complete(original, true, now + 5 + PushWakeInbox.RETRY_MS))
+        assertEquals(PushWakeInbox.Completion.COMPLETED, reopened.complete(recreated, true, now + 5 + PushWakeInbox.RETRY_MS))
+    }
+
+    @Test fun versionTwoMigrationPreservesMarkerAndFencesLegacyLeases() {
+        SQLiteDatabase.openOrCreateDatabase(dbFile, null).use { db ->
+            db.execSQL("CREATE TABLE meta (id INTEGER PRIMARY KEY, last_lease INTEGER NOT NULL)")
+            db.execSQL("INSERT INTO meta VALUES (1,7)")
+            db.execSQL("CREATE TABLE pending (route TEXT PRIMARY KEY NOT NULL, revision INTEGER NOT NULL, " +
+                "expires_at INTEGER NOT NULL, due_at INTEGER NOT NULL, lease INTEGER, lease_until INTEGER NOT NULL, lease_nonce TEXT)")
+            db.execSQL("CREATE INDEX pending_due ON pending(due_at)")
+            db.execSQL("INSERT INTO pending VALUES (?,?,?,?,?,?,?)",
+                arrayOf("*", 3L, now + PushWakeInbox.TTL_MS, now, 7L, now + PushWakeInbox.LEASE_MS, "ab".repeat(32)))
+            db.execSQL("INSERT INTO pending VALUES (?,?,?,?,?,?,?)",
+                arrayOf(a, 2L, now + PushWakeInbox.TTL_MS, now, 6L, now + PushWakeInbox.LEASE_MS, "cd".repeat(32)))
+            db.version = 2
+        }
+        val migrated = inbox()
+        val marker = ready(migrated, now + 1)
+        assertNull(marker.route)
+        assertEquals(3L, marker.revision)
+        assertEquals(8L, marker.lease)
+        val incarnation = checkNotNull(marker.recoveryNonce)
+        assertEquals(64, incarnation.length)
+        assertEquals(PushWakeInbox.Completion.COMPLETED, migrated.complete(marker, true, now + 2))
+        val route = ready(migrated, now + 2)
+        assertEquals(a, route.route)
+        assertNull(route.recoveryNonce)
+        assertEquals(9L, route.lease)
+        assertEquals(PushWakeInbox.Completion.COMPLETED, migrated.complete(route, true, now + 3))
+        assertEquals(PushWakeInbox.PendingResult.Empty, migrated.pending(now + 3))
+    }
+
+    @Test fun invalidMarkerEntropyOrCorruptIncarnationCannotConsumeWakes() {
+        val unavailable = PushWakeInbox(context, dbFile, fillRecoveryNonce = { it.fill(0) }).also(stores::add)
+        assertEquals(PushWakeInbox.EnqueueResult.UNAVAILABLE, unavailable.enqueueRecovery(now))
+        assertEquals(PushWakeInbox.PendingResult.Empty, unavailable.pending(now))
+        assertEquals(PushWakeInbox.EnqueueResult.QUEUED, unavailable.enqueueRoute(a, now))
+        // Expiry must not delete the route if creating the replacement marker fails.
+        assertEquals(PushWakeInbox.PendingResult.Unavailable, unavailable.pending(now + PushWakeInbox.TTL_MS))
+        unavailable.close()
+        val recovered = inbox()
+        val marker = ready(recovered, now + PushWakeInbox.TTL_MS)
+        assertNull(marker.route)
+        recovered.close()
+        SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.execSQL("UPDATE pending SET recovery_nonce=recovery_nonce || char(0) || 'x' WHERE route='*'")
+        }
+        val corrupted = inbox()
+        assertEquals(PushWakeInbox.Completion.UNAVAILABLE, corrupted.complete(marker, true, now + PushWakeInbox.TTL_MS + 1))
+        assertTrue(corrupted.pending(now + PushWakeInbox.TTL_MS + 1) is PushWakeInbox.PendingResult.Pending)
+        assertEquals(PushWakeInbox.ClaimResult.Unavailable, corrupted.claim(now + PushWakeInbox.TTL_MS + PushWakeInbox.LEASE_MS))
     }
 
     @Test fun versionOneMigrationPreservesWakesAndReleasesLegacyLeases() {

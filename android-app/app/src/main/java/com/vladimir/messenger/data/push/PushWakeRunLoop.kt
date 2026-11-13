@@ -26,7 +26,8 @@ import kotlinx.coroutines.ensureActive
  * outlives its coroutine. A drain must not detach side effects; it must itself
  * be bounded and cancellable. Effects must remain idempotent if a lease expires.
  * There is no fairness or execution-time guarantee from this guard. The
- * actual bounded authenticated full scan is still missing.
+ * production authenticated full-scan callback is still missing; the separate
+ * recovery scan and checkpoint only coordinate hints and do not perform it.
  */
 internal class PushWakeRunLoop(
     private val dispatcher: PushWakeDispatcher,

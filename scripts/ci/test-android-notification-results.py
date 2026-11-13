@@ -63,7 +63,7 @@ class NotificationResultsTest(unittest.TestCase):
         missing_mailbox_outbox_ffi = [case for case in self.all_cases() if case[0] != checker.MAILBOX_OUTBOX_FFI_CLASS]
         self.assertEqual(1, self.run_report(missing_mailbox_outbox_ffi))
         for classname in (checker.PUSH_INBOX_CLASS, checker.PUSH_PERIODIC_CLASS,
-                          checker.PUSH_DRAIN_CLASS, checker.PUSH_WORK_CLASS):
+                          checker.PUSH_DRAIN_CLASS, checker.PUSH_RECOVERY_CHECKPOINT_CLASS, checker.PUSH_WORK_CLASS):
             self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[0] != classname]))
         missing_firebase = [case for case in self.all_cases() if case[0] != checker.FIREBASE_CLASS]
         self.assertEqual(1, self.run_report(missing_firebase))
@@ -80,9 +80,12 @@ class NotificationResultsTest(unittest.TestCase):
 
     def test_push_source_cases_match_the_report_gate(self):
         tests = Path(__file__).resolve().parents[2] / "android-app/app/src/androidTest/java/com/vladimir/messenger/data/push"
-        for name, classname in (("PushWakePeriodicRecoveryInstrumentedTest", checker.PUSH_PERIODIC_CLASS),
+        for name, classname in (("PushRegistrationStoreInstrumentedTest", checker.REGISTRATION_CLASS),
+                                ("PushWakeInboxInstrumentedTest", checker.PUSH_INBOX_CLASS),
+                                ("PushWakePeriodicRecoveryInstrumentedTest", checker.PUSH_PERIODIC_CLASS),
                                 ("PushWakeWorkManagerInstrumentedTest", checker.PUSH_WORK_CLASS),
-                                ("PushWakeDrainInstrumentedTest", checker.PUSH_DRAIN_CLASS)):
+                                ("PushWakeDrainInstrumentedTest", checker.PUSH_DRAIN_CLASS),
+                                ("PushWakeRecoveryCheckpointInstrumentedTest", checker.PUSH_RECOVERY_CHECKPOINT_CLASS)):
             source = (tests / (name + ".kt")).read_text(encoding="utf-8")
             methods = re.findall(r"@Test\s+fun\s+([A-Za-z_]\w*)\s*\(", source)
             self.assertEqual(len(methods), len(set(methods)))
@@ -93,6 +96,15 @@ class NotificationResultsTest(unittest.TestCase):
         self.assertEqual(11, len(names))
         for name in names:
             key = (checker.PUSH_PERIODIC_CLASS, name)
+            self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[:2] != key]))
+            skipped = [(*case[:2], "<skipped/>") if case[:2] == key else case for case in self.all_cases()]
+            self.assertEqual(1, self.run_report(skipped))
+
+    def test_every_recovery_checkpoint_case_is_required(self):
+        names = checker.EXPECTED[checker.PUSH_RECOVERY_CHECKPOINT_CLASS]
+        self.assertEqual(14, len(names))
+        for name in names:
+            key = (checker.PUSH_RECOVERY_CHECKPOINT_CLASS, name)
             self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[:2] != key]))
             skipped = [(*case[:2], "<skipped/>") if case[:2] == key else case for case in self.all_cases()]
             self.assertEqual(1, self.run_report(skipped))

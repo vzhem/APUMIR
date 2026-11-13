@@ -38,14 +38,14 @@ internal class PushRegistrationStore(
     context: Context,
     private val databaseFile: File = File(context.applicationContext.noBackupFilesDir, "push_registration_v1.sqlite"),
     private val keyAlias: String = "apu_push_registration_v1",
-    private val maxEntries: Int = 2048,
+    private val maxEntries: Int = MAX_ENTRIES,
     private val bindingNodeId: (ByteArray) -> String = ::fileExchangeBindingNodeId,
     private val random: SecureRandom = SecureRandom(),
 ) {
     private val app = context.applicationContext
     private var helper: SQLiteOpenHelper? = null
 
-    init { require(maxEntries in 1..2048) }
+    init { require(maxEntries in 1..MAX_ENTRIES) }
 
     class Participants(
         val localId: String,
@@ -165,6 +165,13 @@ internal class PushRegistrationStore(
             val db = db()
             db.beginTransaction()
             try {
+                // A valid journal cannot exceed this limit: creations check it
+                // in a transaction. Do not silently scan a restored/tampered
+                // oversized journal whose stable tail could exceed the scan budget.
+                val oversized = db.rawQuery(
+                    "SELECT 1 FROM registrations LIMIT 1 OFFSET ?", arrayOf(MAX_ENTRIES.toString()),
+                ).use { it.moveToFirst() }
+                if (oversized) return@synchronized RecoveryPage.Unavailable
                 // Do not silently skip a malformed/partial index even when it
                 // sorts before the requested cursor. The journal is bounded to
                 // 2048 entries and no ciphertext or node id is loaded here.
@@ -403,10 +410,11 @@ internal class PushRegistrationStore(
     private fun routeAad(record: String, route: String) =
         "apu-push-route-index-v1\u0000$record\u0000$route".toByteArray(Charsets.US_ASCII)
 
-    private companion object {
-        const val TAG = "PushRegistrationStore"
-        val LOCK = Any()
-        val NODE = Regex("^pk_[0-9a-f]{32}([0-9a-f]{32})?$")
-        val ROUTE = Regex("^[0-9a-f]{64}$")
+    companion object {
+        const val MAX_ENTRIES = 2048
+        private const val TAG = "PushRegistrationStore"
+        private val LOCK = Any()
+        private val NODE = Regex("^pk_[0-9a-f]{32}([0-9a-f]{32})?$")
+        private val ROUTE = Regex("^[0-9a-f]{64}$")
     }
 }

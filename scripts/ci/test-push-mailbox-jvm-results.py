@@ -71,14 +71,23 @@ class MailboxResultsTest(unittest.TestCase):
         for name, expected in (("PushWakeRunLoopTest", checker.RUN_LOOP_EXPECTED),
                                ("PushWakePeriodicRecoveryTest", checker.PERIODIC_EXPECTED),
                                ("PushWakeDrainTest", checker.DRAIN_EXPECTED),
+                               ("PushWakeRecoveryScanTest", checker.RECOVERY_SCAN_EXPECTED),
                                ("PushMailboxHttpsTransportTest", checker.EXPECTED[checker.PREFIX + "PushMailboxHttpsTransportTest"])):
             source = (tests / (name + ".kt")).read_text(encoding="utf-8")
             methods = re.findall(r"@Test\s+fun\s+([A-Za-z_]\w*)\s*\(", source)
             self.assertEqual(len(methods), len(set(methods)))
             self.assertEqual(expected, set(methods))
 
+    def test_each_recovery_scan_case_is_required_and_cannot_be_skipped(self):
+        self.assertEqual(21, len(checker.RECOVERY_SCAN_EXPECTED))
+        for name in checker.RECOVERY_SCAN_EXPECTED:
+            key = (checker.RECOVERY_SCAN_CLASS, name)
+            self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[:2] != key]))
+            skipped = [(*case[:2], "<skipped/>") if case[:2] == key else case for case in self.all_cases()]
+            self.assertEqual(1, self.run_report(skipped))
+
     def test_each_wake_drain_case_is_required_and_cannot_be_skipped(self):
-        self.assertEqual(17, len(checker.DRAIN_EXPECTED))
+        self.assertEqual(19, len(checker.DRAIN_EXPECTED))
         for name in checker.DRAIN_EXPECTED:
             key = (checker.DRAIN_CLASS, name)
             self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[:2] != key]))

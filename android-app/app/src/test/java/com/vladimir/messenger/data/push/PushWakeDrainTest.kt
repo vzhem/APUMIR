@@ -47,7 +47,8 @@ class PushWakeDrainTest {
 
     private class BatchQueue(routes: List<String?>) : PushWakeQueue {
         private val items = routes.mapIndexed { index, route ->
-            PushWakeInbox.Claim(route, index.toLong() + 1, index.toLong() + 1, "ab".repeat(32))
+            PushWakeInbox.Claim(route, index.toLong() + 1, index.toLong() + 1, "ab".repeat(32),
+                if (route == null) "cd".repeat(32) else null)
         }
         private var next = 0
         val completions = mutableListOf<Pair<String?, Boolean>>()
@@ -404,6 +405,48 @@ class PushWakeDrainTest {
         assertEquals(listOf(b to true, c to false, null to false, a to true), queue.completions)
         assertEquals(1, batches)
         assertEquals(0, failures)
+    }
+
+    @Test fun recoveryItemCarriesTheExactLocalMarkerIdentityAndRevision() = runBlocking {
+        val route = "12".repeat(32)
+        val queue = BatchQueue(listOf(route, null))
+        val result = PushWakeDrain(queue, { 100 }, { PushWakeDrain.Inspection.ALLOW }, { batch ->
+            assertEquals(route, batch.items[0].route)
+            assertEquals(null, batch.items[0].recoverySignal)
+            val marker = batch.items[1]
+            assertEquals(null, marker.route)
+            val signal = checkNotNull(marker.recoverySignal)
+            assertEquals("cd".repeat(32), signal.incarnation)
+            assertEquals(2L, signal.revision)
+            assertFalse(signal.toString().contains(signal.incarnation))
+            batch.items.map { it.result(PushWakeDrain.SyncOutcome.COMPLETED_WINDOW) }
+        }, { error("unexpected diagnostics") }).run()
+        assertEquals(PushWakeDrain.Result.Empty, result)
+        assertEquals(listOf(route to true, null to true), queue.completions)
+    }
+
+    @Test fun malformedMarkerNeverReachesSyncOrCompletesItsLease() = runBlocking {
+        val route = "12".repeat(32)
+        val claims = listOf(
+            PushWakeInbox.Claim(null, 1, 1, "ab".repeat(32)),
+            PushWakeInbox.Claim(null, 1, 1, "ab".repeat(32), "bad"),
+            PushWakeInbox.Claim(null, 1, 1, "ab".repeat(32), "0".repeat(64)),
+            PushWakeInbox.Claim(null, 0, 1, "ab".repeat(32), "cd".repeat(32)),
+            PushWakeInbox.Claim(route, 1, 1, "ab".repeat(32), "cd".repeat(32)),
+        )
+        for (claim in claims) {
+            var taken = false
+            val queue = object : PushWakeQueue {
+                override fun claim(nowMs: Long): PushWakeInbox.ClaimResult =
+                    if (taken) PushWakeInbox.ClaimResult.Empty else PushWakeInbox.ClaimResult.Ready(claim).also { taken = true }
+                override fun complete(claim: PushWakeInbox.Claim, success: Boolean, nowMs: Long): PushWakeInbox.Completion =
+                    error("malformed claim must stay leased")
+                override fun pending(nowMs: Long): PushWakeInbox.PendingResult = error("storage result must be unavailable")
+            }
+            val result = PushWakeDrain(queue, { 100 }, { error("must not inspect") },
+                { error("must not sync") }, { error("unexpected diagnostics") }).run()
+            assertEquals(PushWakeDrain.Result.Unavailable, result)
+        }
     }
 
     @Test fun wrongOutcomeCountRetriesEveryLeaseInsteadOfGuessing() = runBlocking {

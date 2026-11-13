@@ -32,8 +32,8 @@ import java.util.concurrent.TimeUnit
  * [PushWakePeriodicRecovery]: ensure a generic scan marker, then run the bounded
  * drain directly rather than merely calling gate.request(). This can also repair
  * a stale ticket or a crash between SQLite commit and one-off scheduling. The
- * marker is not a scan: the authenticated, bounded full-scan callback and its
- * durable continuation are not implemented here. WorkManager/Android may
+ * marker is not a scan: the separate recovery scan/checkpoint still need an
+ * authenticated production callback and are not connected here. WorkManager/Android may
  * delay both requests; a 15-minute interval is not a delivery deadline. Both
  * workers must re-check the feature/identity gate and use [PushWakeRunLoop].
  *

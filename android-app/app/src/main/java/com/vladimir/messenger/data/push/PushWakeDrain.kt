@@ -13,9 +13,11 @@ import kotlinx.coroutines.ensureActive
  * A null route denotes a generic recovery marker (for example provider deletion,
  * inbox overflow or an unavailable admission index). The caller must check
  * local opt-in/identity before requesting a bounded generic sync, and revalidate
- * each registration and peer before acting. [sync] receives only the bounded opaque route hints it
- * must process, including a null generic-recovery marker; no peer id, token,
- * capability or message payload is passed. It must revalidate live trust under
+ * each registration and peer before acting. [sync] receives only bounded opaque
+ * route hints and, for the null marker, its local incarnation and revision; no
+ * peer id, token, capability or message payload is passed. The recovery scan
+ * must use that exact item's signal, not a new identifier or a lease nonce.
+ * It must revalidate live trust under
  * an ABA-safe lifecycle boundary before effects, not rely on [inspect] alone.
  *
  * The scheduler must redrive a pending inbox at [Result.Pending.readyAtMs],
@@ -50,14 +52,22 @@ internal class PushWakeDrain(
     enum class Inspection { ALLOW, DROP, RETRY }
     enum class SyncOutcome { COMPLETED_WINDOW, RETRY }
 
+    /** A local marker identity, not a peer, provider value or authorization. */
+    class RecoverySignal internal constructor(internal val incarnation: String, internal val revision: Long) {
+        internal fun valid(): Boolean = revision > 0 && NONCE.matches(incarnation) && incarnation.any { it != '0' }
+        override fun toString(): String = "PushWakeRecoverySignal(redacted)"
+    }
+
     /** Bounded hints only; a null route is the generic recovery marker, not a peer. */
-    class SyncBatch internal constructor(routes: List<String?>) {
-        val items: List<SyncItem> = java.util.Collections.unmodifiableList(routes.map { SyncItem(it) })
+    class SyncBatch internal constructor(claims: List<PushWakeInbox.Claim>) {
+        val items: List<SyncItem> = java.util.Collections.unmodifiableList(claims.map { claim ->
+            SyncItem(claim.route, claim.recoveryNonce?.let { RecoverySignal(it, claim.revision) })
+        })
         override fun toString(): String = "PushWakeSyncBatch(redacted)"
     }
 
     /** Each item represents one lease; the same route can occur more than once. */
-    class SyncItem internal constructor(val route: String?) {
+    class SyncItem internal constructor(val route: String?, val recoverySignal: RecoverySignal? = null) {
         fun result(outcome: SyncOutcome): SyncResult = SyncResult(this, outcome)
         override fun toString(): String = "PushWakeSyncItem(redacted)"
     }
@@ -91,6 +101,13 @@ internal class PushWakeDrain(
                 }
                 is PushWakeInbox.ClaimResult.Ready -> claimed.claim
             }
+            val signal = claim.recoveryNonce?.let { RecoverySignal(it, claim.revision) }
+            if ((claim.route == null && (signal == null || !signal.valid())) || (claim.route != null && signal != null)) {
+                // A malformed marker must not be presented as a completed pass.
+                // Leave its lease untouched for diagnosis/recovery.
+                storageUnavailable = true
+                continue
+            }
             when (inspectSafely(claim.route)) {
                 Inspection.ALLOW -> accepted.add(claim)
                 Inspection.DROP -> if (!completeClaim(claim, true)) storageUnavailable = true
@@ -99,7 +116,7 @@ internal class PushWakeDrain(
         }
         context.ensureActive()
         if (accepted.isNotEmpty()) {
-            val batch = SyncBatch(accepted.map { it.route })
+            val batch = SyncBatch(accepted)
             val outcomes = syncSafely(batch)
             context.ensureActive()
             for ((index, claim) in accepted.withIndex()) {
@@ -204,5 +221,6 @@ internal class PushWakeDrain(
 
     companion object {
         const val MAX_BATCH = 16
+        private val NONCE = Regex("^[0-9a-f]{64}$")
     }
 }
