@@ -12,7 +12,10 @@ import com.vladimir.messenger.data.local.dao.MessageReactionDao
 import com.vladimir.messenger.util.InlineImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.vladimir.messenger.data.chatclear.ChatClearRegistry
+import com.vladimir.messenger.data.chatclear.ChatClearWire
 import com.vladimir.messenger.data.mirror.MirrorHub
+import com.vladimir.messenger.data.schedule.DeferredInboxStore
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -41,6 +44,8 @@ class MessageDeletionRepository @Inject constructor(
     private val outbox: DeletionOutbox,
     private val chatClear: com.vladimir.messenger.data.chatclear.ChatClearDelivery,
     private val groupDao: GroupDao,
+    @dagger.hilt.android.qualifiers.ApplicationContext
+    private val appContext: android.content.Context,
     /** р252: удалённое сообщение уносит и карточку своего опроса. */
     private val directPollRepository: com.vladimir.messenger.data.directpoll.DirectPollRepository,
 ) {
@@ -336,12 +341,42 @@ class MessageDeletionRepository @Inject constructor(
         // иначе после удаления головы в ленте оставался бы обрывок.
         val stale = messageDao.getByContentPattern(chatId, InlineImage.textPartPattern(messageId))
             .filter { InlineImage.parseTextPart(it.content)?.headId == messageId }
+        // До удаления, а не после: поздняя копия того же письма, пришедшая
+        // из почтового ящика, обязана встретить надгробие, иначе удалённое
+        // «у себя» сообщение вернулось бы в ленту. Регистрируем ровно те
+        // строки, которые сейчас стираем.
+        rememberDeleted(chatId, messageId, stale.map { it.id })
         for (row in stale) messageDao.deleteById(row.id)
         messageDao.deleteById(messageId)
         reactionDao.deleteForMessage(messageId)
         // р252: карточка опроса без своего сообщения-вопроса - сирота.
         runCatching { directPollRepository.deleteForMessage(messageId) }
         refreshPreview(chatId)
+    }
+
+    /**
+     * Надгробия для путей, которые принимают чужие копии уже удалённого
+     * сообщения (почтовый ящик push, повторная сборка при обмене файлами).
+     *
+     * Тихо пропускаем, если собеседник неизвестен или надгробий больше
+     * допустимого батча: это защита от ВОЗВРАТА, а не обязательство удаления,
+     * поэтому сама команда удаления не должна из-за неё сорваться. Для группы
+     * маршрут почтового ящика не используется вовсе.
+     */
+    private suspend fun rememberDeleted(chatId: String, messageId: String, tailIds: List<String>) {
+        val peer = runCatching { chatDao.getChatById(chatId)?.contactId }.getOrNull().orEmpty()
+        if (peer.isBlank() || messageId.isBlank()) return
+        val ids = (listOf(messageId) + tailIds).distinct()
+        if (ids.size > ChatClearWire.MAX_IDS) return
+        try {
+            val owner = DeferredInboxStore.owner(appContext)
+            ChatClearRegistry.store(appContext).remember(owner = owner, peer = peer, ids = ids)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // Не логируем ни собеседника, ни идентификатор.
+            Log.w(TAG, "delete tombstone not stored")
+        }
     }
 
     /** Превью списка чатов - за оставшимся последним сообщением. */
