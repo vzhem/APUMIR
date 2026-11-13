@@ -77,6 +77,8 @@ class NotificationArrivalContract(unittest.TestCase):
         self.assertIn('IncomingNotificationRecoveryWorker.enqueue(context)', source('data/repository/ChatRepository.kt'))
         self.assertIn('IncomingNotificationRecoveryWorker.schedule(applicationContext)', source('MessengerApplication.kt'))
         self.assertIn('IncomingNotificationRecoveryWorker.enqueue(applicationContext)', source('MainActivity.kt'))
+        self.assertIn('NotificationRecoveryOperationObserver.watch(scheduler.oneOff(id).result, onFailure)', worker)
+        self.assertIn('NotificationRecoveryOperationObserver.watch(scheduler.periodic().result)', worker)
         for path in ('data/repository/IncomingNotificationReads.kt', 'data/repository/IncomingGroupNotificationReads.kt'):
             self.assertIn('IncomingNotificationGate.run', source(path))
         self.assertIn('notificationReads.topic(groupId, topicId)', source('data/group/GroupRepository.kt'))

@@ -1,11 +1,13 @@
 package com.vladimir.messenger.worker
 
 import android.content.Context
+import androidx.concurrent.futures.CallbackToFutureAdapter
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.work.Configuration
 import androidx.work.ListenableWorker
 import androidx.work.NetworkType
+import androidx.work.Operation
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.Worker
@@ -17,7 +19,6 @@ import androidx.work.testing.WorkManagerTestInitHelper
 import com.vladimir.messenger.service.DisposableNotificationTestProfile
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -28,6 +29,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -46,7 +48,6 @@ class NotificationRecoveryWorkManagerInstrumentedTest {
     private val release = CountDownLatch(1)
     private val pending = AtomicInteger()
     private val failures = AtomicInteger()
-    private val direct = Executor { it.run() }
     private var installedTestManager = false
 
     @Before fun setUp() {
@@ -61,8 +62,7 @@ class NotificationRecoveryWorkManagerInstrumentedTest {
         backend = NotificationRecoveryWorkManager(manager, NotificationRecoveryProbeWorker::class.java)
         gate = NotificationRecoveryScheduleGate(
             enqueue = { id, failed ->
-                val result = backend.oneOff(id).result
-                result.addListener({ try { result.get() } catch (_: Exception) { failed() } }, direct)
+                NotificationRecoveryOperationObserver.watch(backend.oneOff(id).result, failed)
                 true
             },
             recordFailure = { failures.incrementAndGet() },
@@ -169,6 +169,60 @@ class NotificationRecoveryWorkManagerInstrumentedTest {
         assertEquals(WorkInfo.State.SUCCEEDED, finished(second).state)
         assertEquals(0, pending.get())
         assertEquals(0, failures.get())
+        assertNull(NotificationRecoveryProbes.error.get())
+    }
+
+    @Test fun asynchronousEnqueueFailuresReleaseTheGateAndAllowRealWorkManagerRetry() {
+        var failedCompleter: CallbackToFutureAdapter.Completer<Operation.State.SUCCESS>? = null
+        val failed = CallbackToFutureAdapter.getFuture<Operation.State.SUCCESS> { completer ->
+            failedCompleter = completer
+            "synthetic notification enqueue failure"
+        }
+        var cancelledCompleter: CallbackToFutureAdapter.Completer<Operation.State.SUCCESS>? = null
+        val cancelled = CallbackToFutureAdapter.getFuture<Operation.State.SUCCESS> { completer ->
+            cancelledCompleter = completer
+            "synthetic notification enqueue cancellation"
+        }
+        val attempts = AtomicInteger()
+        val testGate = NotificationRecoveryScheduleGate(
+            enqueue = { id, onFailure ->
+                when (attempts.incrementAndGet()) {
+                    1 -> throw IllegalStateException("synthetic synchronous failure")
+                    2 -> NotificationRecoveryOperationObserver.watch(cancelled, onFailure)
+                    3 -> NotificationRecoveryOperationObserver.watch(failed, onFailure)
+                    else -> NotificationRecoveryOperationObserver.watch(backend.oneOff(id).result, onFailure)
+                }
+                true
+            },
+            recordFailure = { failures.incrementAndGet() },
+        )
+        pending.set(1) // probe for work already persisted before enqueue
+        assertFalse(testGate.request())
+        assertEquals(1, failures.get())
+        assertTrue(testGate.request())
+        assertTrue(cancelledCompleter != null) // retain until the future is cancelled
+        assertTrue(cancelled.cancel(false))
+        assertEquals(2, failures.get())
+        assertTrue(testGate.request())
+        assertTrue(requireNotNull(failedCompleter).setException(IllegalStateException("synthetic asynchronous failure")))
+        assertEquals(3, failures.get())
+        assertEquals(1, pending.get())
+        assertTrue(manager.getWorkInfosByTag(NotificationRecoveryWorkManager.ONE_OFF_TAG).get(15, TimeUnit.SECONDS).isEmpty())
+
+        val recovered = CountDownLatch(1)
+        NotificationRecoveryProbes.action = { id ->
+            testGate.workerStarted(id)
+            pending.set(0)
+            testGate.workerFinished(id, retrying = false)
+            recovered.countDown()
+            ListenableWorker.Result.success()
+        }
+        assertTrue(testGate.request())
+        val actual = workCount(1).single().id
+        assertTrue(recovered.await(15, TimeUnit.SECONDS))
+        assertEquals(WorkInfo.State.SUCCEEDED, finished(actual).state)
+        assertEquals(0, pending.get())
+        assertEquals(3, failures.get())
         assertNull(NotificationRecoveryProbes.error.get())
     }
 

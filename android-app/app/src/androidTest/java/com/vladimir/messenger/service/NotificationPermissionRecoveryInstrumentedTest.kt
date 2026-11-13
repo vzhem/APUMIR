@@ -13,6 +13,7 @@ import com.vladimir.messenger.data.local.AppDatabase
 import com.vladimir.messenger.data.local.entity.MessageEntity
 import com.vladimir.messenger.ui.navigation.ChatLinkEntryPoint
 import dagger.hilt.android.EntryPointAccessors
+import java.io.File
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -26,12 +27,13 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Three separate instrumentation runs on a disposable emulator. The CI runner
- * revokes the real runtime permission between the first two and grants it again
- * before the last; revocation can kill an app, so it cannot happen inside the
- * test process. This exercises actual Android permission state, NotificationManager,
- * and an isolated Room database, but manually invokes the processor with a fake
- * identity/suppression check rather than running the production worker or network.
+ * Separate instrumentation processes on a disposable emulator, without reinstalling
+ * the target between phases. The host snapshots the initial permission, ensures it
+ * is granted, revokes it, grants it for the retry, and finally restores the original
+ * state. Revocation can kill an app, so it cannot happen inside the test process.
+ * This exercises Android permission state, NotificationManager and isolated Room,
+ * but manually invokes the processor with a fake identity/suppression check rather
+ * than running the production worker or network.
  */
 @RunWith(AndroidJUnit4::class)
 @SdkSuppress(minSdkVersion = 33)
@@ -68,13 +70,30 @@ class NotificationPermissionRecoveryInstrumentedTest {
         }
     }
 
-    @Test fun disposableProfileStartsWithPermissionGranted() {
+    @Test fun disposableProfileSnapshotsTheOriginalPermission() {
         // The shell runner checks this exact passing test report before making
         // *any* permission change; a skipped test or nonempty profile is unsafe.
+        val database = context.getDatabasePath(DATABASE)
+        assertTrue("A previous test fixture or sidecar must not be overwritten",
+            listOf("", "-wal", "-shm", "-journal").none { File(database.path + it).exists() })
+        val marker = File(context.filesDir, PERMISSION_MARKER)
+        assertFalse("A previous permission snapshot must not be overwritten", marker.exists())
+        val permission = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
+        assertTrue(permission == PackageManager.PERMISSION_GRANTED || permission == PackageManager.PERMISSION_DENIED)
+        val granted = permission == PackageManager.PERMISSION_GRANTED
+        assertEquals(granted, manager.areNotificationsEnabled())
+        // This private marker is read via run-as only AFTER this exact test passes.
+        marker.outputStream().use { stream ->
+            stream.write((if (granted) "granted\n" else "denied\n").toByteArray(Charsets.US_ASCII))
+            stream.fd.sync()
+        }
+    }
+
+    @Test fun permissionIsGrantedBeforeRevocation() {
         assertEquals(PackageManager.PERMISSION_GRANTED,
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS))
         assertTrue(manager.areNotificationsEnabled())
-        assertFalse("A previous test fixture must not be overwritten", context.getDatabasePath(DATABASE).exists())
+        assertFalse(context.getDatabasePath(DATABASE).exists())
     }
 
     @Test fun revokedPermissionLeavesTheCommittedNotificationPending() = runBlocking {
@@ -153,6 +172,7 @@ class NotificationPermissionRecoveryInstrumentedTest {
 
     private companion object {
         const val DATABASE = "ci_notification_permission_recovery_fixture.db"
+        const val PERMISSION_MARKER = "ci_notification_permission_original_state.txt"
         const val OWNER = "ci-notification-owner"
         const val CHAT = "ci-notification-permission-chat"
         const val MESSAGE = "ci-notification-permission-message"

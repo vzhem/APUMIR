@@ -345,6 +345,12 @@ LOCAL_NOTIFICATION_EXPECTED = {
         'cancellationPropagatesAndDoesNotProcessLaterRows',
         'unusualRowidsAreTraversedAndInvalidLimitsAreRejected',
     },
+    'com.vladimir.messenger.worker.NotificationRecoveryOperationObserverTest': {
+        'failedFutureReleasesTicketForIndependentRetry',
+        'cancelledFutureReleasesTicketWithoutClaimingAWorkerRan',
+        'alreadyFailedFutureIsReportedBeforeRequestReturns',
+        'lateFailureCannotReleaseAStartedWorkerOrItsSuccessor',
+    },
     'com.vladimir.messenger.worker.NotificationRecoveryScheduleGateTest': {
         'dirtyWorkerEnqueuesAnIndependentSuccessorBeforeItReturns',
         'retryKeepsTicketButAConcurrentArrivalGetsAnIndependentSuccessor',

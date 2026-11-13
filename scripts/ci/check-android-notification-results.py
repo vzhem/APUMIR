@@ -299,11 +299,13 @@ LOCAL_NOTIFICATION_EXPECTED = {
         'appMuteIsAnIntentionalSuppressionRatherThanASystemPost',
     },
     PERMISSION_CLASS: {
-        'disposableProfileStartsWithPermissionGranted',
+        'disposableProfileSnapshotsTheOriginalPermission',
+        'permissionIsGrantedBeforeRevocation',
         'revokedPermissionLeavesTheCommittedNotificationPending',
         'grantingPermissionLetsTheReopenedPendingRowPostOnce',
     },
     'com.vladimir.messenger.worker.NotificationRecoveryWorkManagerInstrumentedTest': {
+        'asynchronousEnqueueFailuresReleaseTheGateAndAllowRealWorkManagerRetry',
         'arrivalAfterFinalCheckStartsIndependentSuccessorBeforeOlderFailure',
         'arrivalBeforeFinishCreatesOneSuccessorEvenIfTheOlderWorkerFails',
         'independentPeriodicPassRepairsACommitWithoutAnEnqueueDespiteAStaleTicket',

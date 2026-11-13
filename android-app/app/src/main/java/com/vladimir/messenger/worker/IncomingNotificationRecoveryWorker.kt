@@ -5,7 +5,6 @@ import android.content.SharedPreferences
 import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
-import androidx.work.Operation
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.vladimir.messenger.data.local.dao.MessageDao
@@ -16,7 +15,6 @@ import com.vladimir.messenger.service.NotificationHelper
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import java.security.MessageDigest
-import java.util.concurrent.Executor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -92,7 +90,6 @@ class IncomingNotificationRecoveryWorker @AssistedInject constructor(
         private const val CHECKPOINT_PREFS = "apu_local_notification_recovery_v1"
         private const val WINDOW_MS = 30_000L
         private val sweepGate = Mutex()
-        private val directExecutor = Executor { it.run() }
         @Volatile private var appContext: Context? = null
 
         // All producers and workers use this single instance. It is an
@@ -103,7 +100,7 @@ class IncomingNotificationRecoveryWorker @AssistedInject constructor(
                 val scheduler = NotificationRecoveryWorkManager(
                     WorkManager.getInstance(app), IncomingNotificationRecoveryWorker::class.java,
                 )
-                observe(scheduler.oneOff(id), onFailure)
+                NotificationRecoveryOperationObserver.watch(scheduler.oneOff(id).result, onFailure)
                 true
             },
             recordFailure = { Log.w(TAG, "Local notification work scheduling failed") },
@@ -122,22 +119,10 @@ class IncomingNotificationRecoveryWorker @AssistedInject constructor(
             val scheduler = NotificationRecoveryWorkManager(
                 WorkManager.getInstance(app), IncomingNotificationRecoveryWorker::class.java,
             )
-            observe(scheduler.periodic()) { Log.w(TAG, "Periodic notification recovery scheduling failed") }
+            NotificationRecoveryOperationObserver.watch(scheduler.periodic().result) {
+                Log.w(TAG, "Periodic notification recovery scheduling failed")
+            }
             enqueue(app)
-        }
-
-        private fun observe(operation: Operation, failure: () -> Unit) {
-            val result = operation.result
-            result.addListener({
-                try {
-                    result.get()
-                } catch (interrupted: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    failure()
-                } catch (_: Exception) {
-                    failure()
-                }
-            }, directExecutor)
         }
     }
 }

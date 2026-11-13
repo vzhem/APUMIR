@@ -85,8 +85,8 @@ class MailboxResultsTest(unittest.TestCase):
     def test_local_notification_cases_are_required_and_cannot_be_skipped(self):
         root = Path(__file__).resolve().parents[2] / 'android-app/app/src/test/java'
         expected_counts = {'IncomingNotificationProcessorTest': 14, 'IncomingNotificationSweepTest': 12,
-                           'NotificationRecoveryScheduleGateTest': 9}
-        self.assertEqual(3, len(checker.LOCAL_NOTIFICATION_EXPECTED))
+                           'NotificationRecoveryScheduleGateTest': 9, 'NotificationRecoveryOperationObserverTest': 4}
+        self.assertEqual(4, len(checker.LOCAL_NOTIFICATION_EXPECTED))
         for classname, names in checker.LOCAL_NOTIFICATION_EXPECTED.items():
             name = classname.rsplit('.', 1)[-1]
             self.assertEqual(expected_counts[name], len(names))

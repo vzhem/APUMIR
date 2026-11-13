@@ -81,6 +81,7 @@ jobs:
         run: |
           python3 scripts/ci/test-android-navigation-results.py
           python3 scripts/ci/test-android-notification-results.py
+          python3 scripts/ci/test-android-instrumentation-phase.py
           python3 scripts/ci/test-android-notification-runner.py
       # An intentionally fake Firebase project exercises the actual Gradle
       # plugin, resources and disabled SDK on the emulator without a token or

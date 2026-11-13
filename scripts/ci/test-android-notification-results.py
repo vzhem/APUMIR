@@ -104,8 +104,8 @@ class NotificationResultsTest(unittest.TestCase):
         expected_counts = {'BackupNotificationRestoreInstrumentedTest': 4,
                            'IncomingNotificationRecoveryInstrumentedTest': 13,
                            'NotificationManagerRecoveryInstrumentedTest': 4,
-                           'NotificationPermissionRecoveryInstrumentedTest': 3,
-                           'NotificationRecoveryWorkManagerInstrumentedTest': 3}
+                           'NotificationPermissionRecoveryInstrumentedTest': 4,
+                           'NotificationRecoveryWorkManagerInstrumentedTest': 4}
         self.assertEqual(5, len(checker.LOCAL_NOTIFICATION_EXPECTED))
         for classname, names in checker.LOCAL_NOTIFICATION_EXPECTED.items():
             self.assertEqual(expected_counts[classname.rsplit('.', 1)[-1]], len(names))
@@ -143,20 +143,33 @@ class NotificationResultsTest(unittest.TestCase):
                     self.assertIn("run_permission_phase " + method, runner)
             else:
                 self.assertIn(classname, selected.group(1).split(","))
-        guard = runner.index('if [ "$permission_isolated" -eq 1 ] && run_permission_phase disposableProfileStartsWithPermissionGranted')
-        revoke = runner.index("adb shell pm revoke com.vladimir.messenger android.permission.POST_NOTIFICATIONS")
-        blocked = runner.index("run_permission_phase revokedPermissionLeavesTheCommittedNotificationPending")
-        grant = runner.index("if restore_test_permission; then", blocked)
-        restored = runner.index("run_permission_phase grantingPermissionLetsTheReopenedPendingRowPostOnce")
-        self.assertLess(guard, revoke)
+        guard = runner.index('if [ "$permission_isolated" -eq 1 ] && run_permission_phase disposableProfileSnapshotsTheOriginalPermission')
+        snapshot = runner.index('adb shell run-as com.vladimir.messenger cat "$permission_marker"', guard)
+        precondition = runner.index('run_permission_phase permissionIsGrantedBeforeRevocation', snapshot)
+        revoke = runner.index('if adb shell pm revoke com.vladimir.messenger android.permission.POST_NOTIFICATIONS', precondition)
+        blocked = runner.index('run_permission_phase revokedPermissionLeavesTheCommittedNotificationPending', revoke)
+        grant = runner.index('if adb shell pm grant com.vladimir.messenger android.permission.POST_NOTIFICATIONS', blocked)
+        posted = runner.index('run_permission_phase grantingPermissionLetsTheReopenedPendingRowPostOnce', grant)
+        restore = runner.index('restore_test_permission || notification_status=1', posted)
+        self.assertLess(guard, snapshot)
+        self.assertLess(snapshot, precondition)
+        self.assertLess(precondition, revoke)
         self.assertLess(revoke, blocked)
         self.assertLess(blocked, grant)
-        self.assertLess(grant, restored)
+        self.assertLess(grant, posted)
+        self.assertLess(posted, restore)
+        self.assertIn('adb shell am instrument -w -r -e class', runner)
+        self.assertIn('check-android-instrumentation-phase.py', runner)
         self.assertIn("trap restore_test_permission EXIT", runner)
         self.assertIn("trap 'restore_test_permission; restore_metrics' EXIT", runner)
 
     def test_permission_phase_gate_rejects_wrong_skipped_or_missing_tests(self):
-        method = 'disposableProfileStartsWithPermissionGranted'
+        phase_spec = importlib.util.spec_from_file_location('raw_phase', Path(__file__).with_name('check-android-instrumentation-phase.py'))
+        phase = importlib.util.module_from_spec(phase_spec)
+        phase_spec.loader.exec_module(phase)
+        self.assertEqual(checker.PERMISSION_CLASS, phase.CLASS)
+        self.assertEqual(checker.EXPECTED[checker.PERMISSION_CLASS], phase.METHODS)
+        method = 'disposableProfileSnapshotsTheOriginalPermission'
         groups = {checker.PERMISSION_CLASS: {method}}
         good = (checker.PERMISSION_CLASS, method, '')
         self.assertEqual(0, self.run_report([good], groups=groups, strict=True))
