@@ -75,6 +75,8 @@ class MailboxResultsTest(unittest.TestCase):
                                *((name, checker.EXPECTED[checker.PREFIX + name]) for name in (
                                    "PushHttpClientTest", "PushWakeCryptoTest", "PushMailboxHttpClientTest",
                                    "PushMailboxHttpsTransportTest", "PushHttpLoopbackTlsTest", "PushMailboxDrainTest",
+                                   "PushSignalPolicyTest", "PushRuntimeConfigTest", "PushRuntimeCoordinatorTest",
+                                   "PushDrainTrustGateTest",
                                    "PushMailboxTextPolicyTest", "PushMailboxMessageSealerTest", "PushMailboxMessageOpenerTest",
                                ))):
             source = (tests / (name + ".kt")).read_text(encoding="utf-8")
