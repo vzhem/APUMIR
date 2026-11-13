@@ -44,10 +44,11 @@ class MessageDeletionRepository @Inject constructor(
     private val outbox: DeletionOutbox,
     private val chatClear: com.vladimir.messenger.data.chatclear.ChatClearDelivery,
     private val groupDao: GroupDao,
-    @dagger.hilt.android.qualifiers.ApplicationContext
-    private val appContext: android.content.Context,
     /** р252: удалённое сообщение уносит и карточку своего опроса. */
     private val directPollRepository: com.vladimir.messenger.data.directpoll.DirectPollRepository,
+    /** Только для надгробий одиночного удаления (см. [rememberDeleted]). */
+    @dagger.hilt.android.qualifiers.ApplicationContext
+    private val appContext: android.content.Context,
 ) {
 
     /** Удалить сообщение только у себя (в любом чате). */
