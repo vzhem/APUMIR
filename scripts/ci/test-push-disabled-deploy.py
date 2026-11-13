@@ -584,6 +584,22 @@ class MainTest(unittest.TestCase):
         self.assertNotIn(FAKE_ACCOUNT, output.getvalue())
         self.assertNotIn(FAKE_TOKEN, output.getvalue())
 
+    def test_failed_subdomain_stops_before_any_creation_or_version_upload(self):
+        output = io.StringIO()
+        with patch.dict(os.environ, values(), clear=True), patch.object(d, "validate_config"), \
+                patch.object(d, "check_checkout"), patch.object(d, "version_payload", return_value={}), \
+                patch.object(d, "workers_subdomain", side_effect=d.DeployError("subdomain")), \
+                patch.object(d, "create_worker") as create, patch.object(d, "create_disabled_version") as version, \
+                patch.object(d, "disabled_health") as health, redirect_stdout(output):
+            self.assertEqual(d.main(), 1)
+            create.assert_not_called()
+            version.assert_not_called()
+            health.assert_not_called()
+        self.assertIn("no deployment attempted", output.getvalue())
+        self.assertNotIn("Attempting to create", output.getvalue())
+        self.assertNotIn(FAKE_ACCOUNT, output.getvalue())
+        self.assertNotIn(FAKE_TOKEN, output.getvalue())
+
     def test_failed_create_stops_before_version_and_exposes_only_name(self):
         output = io.StringIO()
         with patch.dict(os.environ, values(), clear=True), patch.object(d, "validate_config"), \

@@ -1,0 +1,92 @@
+name: Diagnose push subdomain (read only)
+
+# Separate from Worker creation. Only a deliberate marker starts the tests;
+# even then, no environment credential is read without owner review.
+on:
+  push:
+    branches: ['arena/1266946d-apumir']
+    paths:
+      - '.github/workflows/push-subdomain-diagnostic.yml'
+      - 'scripts/ci/diagnose-push-subdomain.py'
+      - 'scripts/ci/test-diagnose-push-subdomain.py'
+      - 'scripts/ci/push-infra-preflight.py'
+      - 'scripts/ci/test-push-infra-preflight.py'
+      - 'scripts/ci/push-disabled-deploy.py'
+      - 'scripts/ci/test-push-disabled-deploy.py'
+      - 'scripts/ci/check-firebase-client-config.py'
+      - 'docs/APP_DELIVERY_TRACKER.md'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: push-subdomain-diagnostic-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-tests:
+    if: github.repository == 'vzhem/APUMIR' && github.ref == 'refs/heads/arena/1266946d-apumir' && contains(github.event.head_commit.message, '[diagnose-push-subdomain]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out this exact commit without retaining Git credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Test the diagnostic and its protection checks offline
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/test-diagnose-push-subdomain.py
+          python3 scripts/ci/test-push-infra-preflight.py
+          python3 scripts/ci/test-push-disabled-deploy.py
+
+  protection-check:
+    needs: offline-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out this exact commit without retaining Git credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Confirm owner-review and exact branch protection
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APU_GITHUB_STEP_DEBUG: ${{ secrets.ACTIONS_STEP_DEBUG || vars.ACTIONS_STEP_DEBUG }}
+          APU_GITHUB_RUNNER_DEBUG: ${{ secrets.ACTIONS_RUNNER_DEBUG || vars.ACTIONS_RUNNER_DEBUG }}
+        run: |
+          python3 scripts/ci/push-infra-preflight.py --check-protection
+          python3 scripts/ci/push-disabled-deploy.py --check-head
+
+  diagnose-read-only:
+    needs: protection-check
+    environment: apu-push-staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out this exact commit without retaining Git credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Recheck protection after owner approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APU_GITHUB_STEP_DEBUG: ${{ secrets.ACTIONS_STEP_DEBUG || vars.ACTIONS_STEP_DEBUG }}
+          APU_GITHUB_RUNNER_DEBUG: ${{ secrets.ACTIONS_RUNNER_DEBUG || vars.ACTIONS_RUNNER_DEBUG }}
+        run: |
+          python3 scripts/ci/push-infra-preflight.py --check-protection
+          python3 scripts/ci/push-disabled-deploy.py --check-head
+      # No npm, Worker code, or FCM credentials in this job. The script makes
+      # fixed Cloudflare GET requests only; it never prints provider contents.
+      - name: Diagnose access with fixed read-only Cloudflare requests
+        env:
+          APU_GITHUB_STEP_DEBUG: ${{ secrets.ACTIONS_STEP_DEBUG || vars.ACTIONS_STEP_DEBUG }}
+          APU_GITHUB_RUNNER_DEBUG: ${{ secrets.ACTIONS_RUNNER_DEBUG || vars.ACTIONS_RUNNER_DEBUG }}
+          APU_PUSH_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.APU_PUSH_CLOUDFLARE_ACCOUNT_ID }}
+          APU_PUSH_CLOUDFLARE_TOKEN: ${{ secrets.APU_PUSH_CLOUDFLARE_TOKEN }}
+          APU_PUSH_CLOUDFLARE_DEPLOY_TOKEN: ${{ secrets.APU_PUSH_CLOUDFLARE_DEPLOY_TOKEN }}
+        run: python3 scripts/ci/diagnose-push-subdomain.py
