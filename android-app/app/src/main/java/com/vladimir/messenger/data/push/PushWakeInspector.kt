@@ -54,7 +54,7 @@ internal class PushWakeInspector(
                             return@withPinnedBinding PushWakeDrain.Inspection.RETRY
                         is PushRegistrationStore.Result.Ready -> result.state
                     }
-                    val material = crypto.material(local.binding, pin, local.secret, registration.epochHex, false)
+                    val material = crypto.derive(local.binding, pin, local.secret, registration.epochHex, false)
                         ?: return@withPinnedBinding PushWakeDrain.Inspection.RETRY
                     val derived = try { material.routeHex() } finally { material.close() }
                     if (PushWakeAdmission.isConsistent(payload, index.localId, index.peerId, index.generation,
