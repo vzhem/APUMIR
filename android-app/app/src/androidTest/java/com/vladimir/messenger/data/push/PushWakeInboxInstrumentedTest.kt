@@ -460,6 +460,56 @@ class PushWakeInboxInstrumentedTest {
         assertTrue(store.pending(now + 5) is PushWakeInbox.PendingResult.Pending)
     }
 
+    @Test fun unavailableAdmissionPersistsOnlyGenericRecoveryAcrossReopen() {
+        val store = inbox()
+        val payload = mapOf("v" to "1", "route" to a)
+        var scheduled = 0
+        var reported = 0
+        val intake = PushWakeIntake(
+            lookup = { PushWakeIntake.Hint.UNAVAILABLE },
+            enqueueRoute = { _, _ -> error("an unavailable hint must not store its route") },
+            enqueueRecovery = store::enqueueRecovery,
+            pending = store::pending,
+            schedule = { scheduled++; false },
+            recordFailure = { reported++ },
+        )
+        assertEquals(PushWakeIntake.Result.QUEUED_WITHOUT_SCHEDULER, intake.onData(payload, now))
+        assertEquals(1, scheduled)
+        store.close()
+        val reopened = inbox()
+        val first = ready(reopened, now + 1)
+        assertNull(first.route) // no provider route, identity or message was persisted
+        // Another unavailable callback during the lease must advance the
+        // marker; a late completion cannot erase the newer recovery request.
+        assertEquals(PushWakeIntake.Result.QUEUED_WITHOUT_SCHEDULER, intake.onData(payload, now + 2))
+        assertEquals(PushWakeInbox.Completion.NEWER_QUEUED, reopened.complete(first, true, now + 2))
+        val newer = ready(reopened, now + 2)
+        assertNull(newer.route)
+        assertEquals(PushWakeInbox.Completion.COMPLETED, reopened.complete(newer, true, now + 2))
+        assertEquals(PushWakeInbox.PendingResult.Empty, reopened.pending(now + 2))
+
+        // Simulate the route write failing independently while a recovery write
+        // to real SQLite remains available. A crash after saving still leaves a
+        // marker for startup/periodic recovery; the scheduler here is a fake.
+        val failedRouteWrite = PushWakeIntake(
+            lookup = { PushWakeIntake.Hint.FOUND },
+            enqueueRoute = { _, _ -> PushWakeInbox.EnqueueResult.UNAVAILABLE },
+            enqueueRecovery = reopened::enqueueRecovery,
+            pending = reopened::pending,
+            schedule = { scheduled++; true },
+            recordFailure = { reported++ },
+        )
+        assertEquals(PushWakeIntake.Result.QUEUED, failedRouteWrite.onData(payload, now + 3))
+        reopened.close()
+        val afterCrash = inbox()
+        val second = ready(afterCrash, now + 4)
+        assertNull(second.route)
+        assertEquals(PushWakeInbox.Completion.COMPLETED, afterCrash.complete(second, true, now + 4))
+        assertEquals(PushWakeInbox.PendingResult.Empty, afterCrash.pending(now + 4))
+        assertEquals(3, scheduled)
+        assertEquals(0, reported)
+    }
+
     @Test fun malformedRoutesBadClockAndExhaustedLeaseSequenceFailClosed() {
         val store = inbox()
         listOf("", "*", "ab".repeat(32).uppercase(), a + "0", a.drop(1), "g".repeat(64), a + "\n").forEach {

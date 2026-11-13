@@ -7,9 +7,10 @@ import java.util.concurrent.CancellationException
  * Firebase, WorkManager or network implementation. [inspect] must obtain the
  * current profile and independently pinned peer, check the ACTIVE journal and
  * freshly derive the route; a queue claim/index hit is not authentication.
- * A null route denotes the provider's deleted-messages recovery marker, for
- * which the caller must instead check local opt-in/identity before requesting a
- * bounded generic sync. [sync] receives only the bounded opaque route hints it
+ * A null route denotes a generic recovery marker (for example provider deletion,
+ * inbox overflow or an unavailable admission index). The caller must check
+ * local opt-in/identity before requesting a bounded generic sync, and revalidate
+ * each registration and peer before acting. [sync] receives only the bounded opaque route hints it
  * must process, including a null generic-recovery marker; no peer id, token,
  * capability or message payload is passed. It must revalidate live trust under
  * an ABA-safe lifecycle boundary before effects, not rely on [inspect] alone.

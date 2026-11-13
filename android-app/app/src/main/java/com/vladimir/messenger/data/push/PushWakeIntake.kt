@@ -16,7 +16,13 @@ import java.util.concurrent.CancellationException
  * Enqueueing and scheduling are separate transactions: a crash between them is
  * possible, so startup recovery is mandatory. A true return only means the
  * scheduler accepted a request; it does not mean a worker ran or a message was
- * received. The production FCM listener and scheduler do not exist yet.
+ * received. If the index or route write is temporarily unavailable, a bounded
+ * generic recovery marker is persisted instead of forgetting the callback. It
+ * contains no untrusted route and is still not authorization: the eventual
+ * recovery worker must revalidate opt-in, identity and each pin/registration.
+ * If the recovery write also fails, only an independent periodic full scan can
+ * repair a callback that the provider will not redeliver. The production FCM
+ * listener, scheduler and full mailbox scan do not exist yet.
  */
 internal class PushWakeIntake(
     private val lookup: (String) -> Hint,
@@ -29,25 +35,37 @@ internal class PushWakeIntake(
     enum class Hint { FOUND, MISSING, UNAVAILABLE }
     enum class Result { IGNORED, QUEUED, QUEUED_WITHOUT_SCHEDULER, UNAVAILABLE }
 
-    /** Malformed or unknown routes never enter the inbox or trigger work. */
+    /** Malformed payloads and routes confirmed absent never enter the inbox or trigger work. */
     fun onData(data: Map<String, String>, nowMs: Long): Result {
         val payload = PushWakePayload.parse(data) ?: return Result.IGNORED
-        return try {
-            when (lookup(payload.route)) {
-                Hint.MISSING -> Result.IGNORED
-                Hint.UNAVAILABLE -> Result.UNAVAILABLE
-                Hint.FOUND -> queued(enqueueRoute(payload.route, nowMs))
-            }
+        // A provider may never redeliver a callback after a local read/write
+        // failure. The fallback records no route; it requests generic recovery.
+        val hint = try {
+            lookup(payload.route)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            // The callback must report only a generic count, not payload or exception text.
             recordFailure()
-            Result.UNAVAILABLE
+            Hint.UNAVAILABLE
+        }
+        return when (hint) {
+            Hint.MISSING -> Result.IGNORED
+            Hint.UNAVAILABLE -> onDeletedMessages(nowMs)
+            Hint.FOUND -> {
+                val saved = try {
+                    enqueueRoute(payload.route, nowMs)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    recordFailure()
+                    PushWakeInbox.EnqueueResult.UNAVAILABLE
+                }
+                if (saved == PushWakeInbox.EnqueueResult.UNAVAILABLE) onDeletedMessages(nowMs) else queued(saved)
+            }
         }
     }
 
-    /** For the provider's onDeletedMessages signal, which has no route. */
+    /** For a provider's deleted-messages signal or a transient local admission failure. */
     fun onDeletedMessages(nowMs: Long): Result = try {
         queued(enqueueRecovery(nowMs))
     } catch (cancelled: CancellationException) {

@@ -53,15 +53,16 @@ class PushWakeDispatcherTest {
         assertEquals(PushWakeScheduleGate.Finish.SUCCESS, fake.dispatcher.workerFinished(ticket, false, 103))
     }
 
-    @Test fun deletedMessagesSchedulesGenericRecoveryAndUnavailableLookupNeverWrites() {
+    @Test fun unavailableLookupAndDeletedMessagesBothScheduleGenericRecovery() {
         val fake = Fake()
         fake.hint = PushWakeIntake.Hint.UNAVAILABLE
-        assertEquals(PushWakeIntake.Result.UNAVAILABLE, fake.dispatcher.onData(data, 100))
+        assertEquals(PushWakeIntake.Result.QUEUED, fake.dispatcher.onData(data, 100))
         assertEquals(0, fake.routeWrites)
-        assertEquals(0, fake.failures.size)
-        assertEquals(PushWakeIntake.Result.QUEUED, fake.dispatcher.onDeletedMessages(101))
         assertEquals(1, fake.recoveryWrites)
         assertEquals(1, fake.failures.size)
+        assertEquals(PushWakeIntake.Result.QUEUED, fake.dispatcher.onDeletedMessages(101))
+        assertEquals(2, fake.recoveryWrites)
+        assertEquals(1, fake.failures.size) // generic work coalesces
     }
 
     @Test fun acceptedEnqueueFailureKeepsInboxAndResumeRedrivesIt() {

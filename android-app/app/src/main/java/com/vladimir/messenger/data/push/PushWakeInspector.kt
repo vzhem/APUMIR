@@ -30,7 +30,7 @@ internal class PushWakeInspector(
         override fun toString(): String = "PushWakeLocalIdentity(redacted)"
     }
 
-    /** Null route is exclusively the local provider-overflow recovery marker. */
+    /** Null route is a generic local recovery marker, never a peer identity. */
     suspend fun inspect(route: String?): PushWakeDrain.Inspection {
         try {
             if (route == null) return recoveryAllowed()

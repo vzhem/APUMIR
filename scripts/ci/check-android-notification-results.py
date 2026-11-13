@@ -186,6 +186,7 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "rollbackOfWallClockCannotLeaveAnAbandonedLeaseStuckForDays",
     "concurrentInstancesCoalesceAndStillPreserveAnInflightWake",
     "dispatcherRedrivesNewSignalsAndRestartUsingRealInboxWithFakeScheduler",
+    "unavailableAdmissionPersistsOnlyGenericRecoveryAcrossReopen",
     "malformedRoutesBadClockAndExhaustedLeaseSequenceFailClosed",
 }, PUSH_DRAIN_CLASS: {
     "mixedSignalsAreInspectedAndAllowedRoutesShareOneGenericSync",

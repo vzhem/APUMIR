@@ -31,6 +31,8 @@ jobs:
         run: npm test --prefix tools/worker/push
       - name: Guard early push-control quarantine in both Android receive paths
         run: python3 scripts/ci/check-push-ingress.py
+      - name: Test disabled deployment client with a fake provider
+        run: python3 scripts/ci/test-push-disabled-deploy.py
       - name: Check isolated disabled deployment bundle without deploying
         env:
           WRANGLER_SEND_METRICS: 'false'

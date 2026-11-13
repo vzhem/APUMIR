@@ -19,6 +19,8 @@ class PushWakeIntakeTest {
         var schedulerAvailable = true
         var scheduleThrows: Exception? = null
         var lookupThrows: Exception? = null
+        var enqueueThrows: Exception? = null
+        var recoveryThrows: Exception? = null
         var failures = 0
         var storedRoute: String? = null
 
@@ -30,12 +32,14 @@ class PushWakeIntakeTest {
             },
             enqueueRoute = { route, _ ->
                 events += "route"
+                enqueueThrows?.let { error -> throw error }
                 storedRoute = route
                 if (enqueue == PushWakeInbox.EnqueueResult.QUEUED || enqueue == PushWakeInbox.EnqueueResult.RECOVERY_QUEUED) persisted = true
                 enqueue
             },
             enqueueRecovery = {
                 events += "recovery"
+                recoveryThrows?.let { error -> throw error }
                 if (recovery == PushWakeInbox.EnqueueResult.QUEUED || recovery == PushWakeInbox.EnqueueResult.RECOVERY_QUEUED) persisted = true
                 recovery
             },
@@ -75,18 +79,64 @@ class PushWakeIntakeTest {
         // QUEUED is not an FCM, worker, message-delivery or notification receipt.
     }
 
-    @Test fun indexOrStorageUnavailableNeverSchedulesAnUnpersistedWake() {
+    @Test fun unavailableIndexOrRouteWritePersistsRouteFreeRecoveryBeforeScheduling() {
         val fake = Fake()
         val intake = fake.intake()
         fake.hint = PushWakeIntake.Hint.UNAVAILABLE
+        assertEquals(PushWakeIntake.Result.QUEUED, intake.onData(data, 1000))
+        assertEquals(listOf("lookup", "recovery", "schedule"), fake.events)
+        assertEquals(null, fake.storedRoute)
+        assertTrue(fake.persisted)
+        fake.events.clear()
+        fake.persisted = false
+        fake.hint = PushWakeIntake.Hint.FOUND
+        fake.enqueue = PushWakeInbox.EnqueueResult.UNAVAILABLE
+        assertEquals(PushWakeIntake.Result.QUEUED, intake.onData(data, 1000))
+        assertEquals(listOf("lookup", "route", "recovery", "schedule"), fake.events)
+        assertTrue(fake.persisted)
+    }
+
+    @Test fun failedRecoveryNeverSchedulesAndRequiresIndependentFullScan() {
+        val fake = Fake()
+        val intake = fake.intake()
+        fake.hint = PushWakeIntake.Hint.UNAVAILABLE
+        fake.recovery = PushWakeInbox.EnqueueResult.UNAVAILABLE
         assertEquals(PushWakeIntake.Result.UNAVAILABLE, intake.onData(data, 1000))
-        assertEquals(listOf("lookup"), fake.events)
+        assertEquals(listOf("lookup", "recovery"), fake.events)
+        assertFalse(fake.persisted)
         fake.events.clear()
         fake.hint = PushWakeIntake.Hint.FOUND
         fake.enqueue = PushWakeInbox.EnqueueResult.UNAVAILABLE
-        assertEquals(PushWakeIntake.Result.UNAVAILABLE, intake.onData(data, 1000))
-        assertEquals(listOf("lookup", "route"), fake.events)
+        assertEquals(PushWakeIntake.Result.UNAVAILABLE, intake.onData(data, 1001))
+        assertEquals(listOf("lookup", "route", "recovery"), fake.events)
         assertFalse(fake.persisted)
+        fake.events.clear()
+        fake.hint = PushWakeIntake.Hint.UNAVAILABLE
+        fake.recoveryThrows = IllegalStateException("do not expose")
+        assertEquals(PushWakeIntake.Result.UNAVAILABLE, intake.onData(data, 1002))
+        assertEquals(listOf("lookup", "recovery"), fake.events)
+        assertEquals(1, fake.failures)
+        assertFalse(fake.persisted)
+    }
+
+    @Test fun thrownLookupAndRouteErrorsAlsoFallBackWithoutExposingDetails() {
+        val fake = Fake()
+        val intake = fake.intake()
+        fake.lookupThrows = IllegalStateException("secret route")
+        assertEquals(PushWakeIntake.Result.QUEUED, intake.onData(data, 1000))
+        assertEquals(listOf("lookup", "recovery", "schedule"), fake.events)
+        assertEquals(1, fake.failures)
+        assertEquals(null, fake.storedRoute)
+        fake.events.clear()
+        fake.lookupThrows = null
+        fake.enqueueThrows = IllegalStateException("secret route")
+        fake.schedulerAvailable = false
+        assertEquals(PushWakeIntake.Result.QUEUED_WITHOUT_SCHEDULER, intake.onData(data, 1001))
+        assertEquals(listOf("lookup", "route", "recovery", "schedule"), fake.events)
+        assertEquals(2, fake.failures)
+        assertTrue(fake.persisted)
+        fake.schedulerAvailable = true
+        assertEquals(PushWakeIntake.Result.QUEUED, intake.resume(1002))
     }
 
     @Test fun deletedMessagesAndInboxOverflowRequestAFullRecovery() {
@@ -138,7 +188,20 @@ class PushWakeIntakeTest {
         fake.scheduleThrows = null
         assertEquals(PushWakeIntake.Result.QUEUED, intake.resume(1001))
         fake.lookupThrows = CancellationException("cancelled")
+        fake.events.clear()
         assertTrue(runCatching { intake.onData(data, 1002) }.exceptionOrNull() is CancellationException)
+        assertEquals(listOf("lookup"), fake.events)
+        fake.lookupThrows = null
+        fake.enqueueThrows = CancellationException("cancelled")
+        fake.events.clear()
+        assertTrue(runCatching { intake.onData(data, 1003) }.exceptionOrNull() is CancellationException)
+        assertEquals(listOf("lookup", "route"), fake.events)
+        fake.enqueueThrows = null
+        fake.hint = PushWakeIntake.Hint.UNAVAILABLE
+        fake.recoveryThrows = CancellationException("cancelled")
+        fake.events.clear()
+        assertTrue(runCatching { intake.onData(data, 1004) }.exceptionOrNull() is CancellationException)
+        assertEquals(listOf("lookup", "recovery"), fake.events)
         assertEquals(0, fake.failures)
     }
 }

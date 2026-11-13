@@ -16,10 +16,13 @@ import java.util.concurrent.CancellationException
  *
  * A future FCM listener must first check the local route index before enqueueing,
  * and its worker must revalidate current identity/pin/journal and rederive the
- * route before using a claim. [enqueueRecovery] is reserved for the provider's
- * onDeletedMessages callback and requests a bounded generic sync. Neither an
- * index hit nor this queue authenticates a message. This inbox does not start
- * Firebase, schedule work, send network traffic, or enable push.
+ * route before using a claim. [enqueueRecovery] also covers the provider's
+ * onDeletedMessages callback and a valid-shaped callback whose index or route
+ * write was unavailable. It requests a bounded generic sync, never a specific
+ * peer action. The caller must gate callbacks and every recovery effect; during
+ * an outage even an unknown route may request a coalesced recovery marker.
+ * Neither an index hit nor this queue authenticates a message. This inbox does
+ * not start Firebase, schedule work, send network traffic, or enable push.
  *
  * SQLite transactions and a process-wide lock prevent races among instances.
  * Each claim has both a monotonic lease number and a fresh random nonce: an old
@@ -76,7 +79,7 @@ internal class PushWakeInbox(
         return enqueue(route, nowMs)
     }
 
-    /** Called for FCM onDeletedMessages, not for arbitrary untrusted payloads. */
+    /** Generic recovery after overflow, deleted callbacks or failed local admission; never authorizes a peer. */
     fun enqueueRecovery(nowMs: Long): EnqueueResult {
         if (!validNow(nowMs)) return EnqueueResult.INVALID
         return enqueue(RECOVERY, nowMs)
