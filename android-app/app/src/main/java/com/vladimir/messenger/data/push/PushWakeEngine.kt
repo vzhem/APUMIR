@@ -33,7 +33,27 @@ internal class PushWakeEngine(
     private val recordFailure: () -> Unit = {},
 ) {
     /** One bounded pass; map [PushWakeRunLoop.Result.RETRY] to a durable retry. */
-    suspend fun runOnce(): PushWakeRunLoop.Result {
+    suspend fun runOnce(): PushWakeRunLoop.Result = runPass().loop
+
+    /**
+     * Same pass with a verdict a caller can act on.
+     *
+     * [Outcome.COMPLETED] says a window finished - not that a message arrived.
+     * A receive window commits zero rows most of the time, so this verdict must
+     * never be turned into a notification by itself; it may only trigger the
+     * ordinary local sweep, which is a no-op unless a committed row is pending.
+     */
+    suspend fun runWithOutcome(): Outcome {
+        val pass = runPass()
+        return when (pass.loop) {
+            PushWakeRunLoop.Result.RETRY -> Outcome.RETRY
+            PushWakeRunLoop.Result.SUCCESS ->
+                if (pass.drain == PushWakeDrain.Result.Unavailable) Outcome.UNAVAILABLE else Outcome.COMPLETED
+        }
+    }
+
+    private suspend fun runPass(): PassOutcome {
+        var lastDrain: PushWakeDrain.Result? = null
         val drain = PushWakeDrain(
             inbox = inbox,
             nowMs = nowMs,
@@ -41,13 +61,22 @@ internal class PushWakeEngine(
             sync = { batch -> sync.sync(batch) },
             recordFailure = recordFailure,
         )
-        return PushWakeRunLoop(
+        val loop = PushWakeRunLoop(
             dispatcher = dispatcher,
-            drain = { drain.run() },
+            drain = { drain.run().also { lastDrain = it } },
             nowMs = nowMs,
             recordFailure = recordFailure,
         ).run()
+        return PassOutcome(loop, lastDrain)
     }
+
+    private class PassOutcome(val loop: PushWakeRunLoop.Result, val drain: PushWakeDrain.Result?)
+
+    /**
+     * Verdict of one pass. `COMPLETED` is a finished window, never a delivery
+     * receipt: a stored row is not a screen the user looked at.
+     */
+    enum class Outcome { COMPLETED, RETRY, UNAVAILABLE }
 
     /**
      * Periodic repair: ensure a durable generic marker, then drain directly even

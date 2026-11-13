@@ -41,13 +41,19 @@ class PushWakeWorker(
         if (!PushServiceLocator.enabled(app)) return@withContext Result.success()
         val engine = PushWakeEngine.create(app) ?: return@withContext Result.success()
         try {
-            when (engine.runOnce()) {
-                com.vladimir.messenger.data.push.PushWakeRunLoop.Result.SUCCESS -> Result.success()
-                com.vladimir.messenger.data.push.PushWakeRunLoop.Result.RETRY -> {
+            when (engine.runWithOutcome()) {
+                PushWakeEngine.Outcome.RETRY, PushWakeEngine.Outcome.UNAVAILABLE -> {
                     // Requeue independently: the new request must not inherit
                     // this worker's eventual failure.
                     enqueue(app)
                     Result.retry()
+                }
+                PushWakeEngine.Outcome.COMPLETED -> {
+                    // Not "a message arrived": only "the window finished". The
+                    // ordinary local sweep is a no-op unless a committed row is
+                    // still marked pending, so no notification is invented here.
+                    IncomingNotificationRecoveryWorker.enqueue(app)
+                    Result.success()
                 }
             }
         } catch (error: Exception) {
