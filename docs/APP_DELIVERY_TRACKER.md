@@ -36,8 +36,8 @@
   сообщение и inline-хвосты **до** удаления: поздняя копия из ящика не вернёт
   удалённое.
 - JVM-гейты: `PushSignalSinkTest`, `PushTargetsTest`, `PushTrustResolverTest`,
-  `PushTokenRegistrarTest` добавлены в реестры CI; `:app:compileReleaseKotlin`
-  и JVM-набор на ветке зелёные.
+  `PushTokenRegistrarTest` добавлены в реестры CI. На `7be7067` зелёные JVM,
+  Android storage/navigation, APK, Worker-прототип и Firebase preflight.
 
 Что не сделано: утверждённый endpoint и хосты, настоящая регистрация и доставка
 на двух телефонах (Doze, закрытое приложение, ротация токена, отзыв, отсутствие

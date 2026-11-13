@@ -744,6 +744,8 @@ Firebase выключена, `APU_PUSH_ENDPOINT` по умолчанию пус�
   поздняя копия из ящика не возвращает удалённое «у себя» сообщение.
 - JVM-гейты: `PushSignalSinkTest`, `PushTargetsTest`, `PushTrustResolverTest`,
   `PushTokenRegistrarTest` добавлены в реестры CI.
+- На `7be7067` зелёные все пять прогонов ветки: JVM, Android storage/navigation,
+  APK, Worker-прототип и Firebase preflight.
 
 Что **не** сделано и по-прежнему запрещает включать флаг: настоящая регистрация
 на устройстве, утверждённый endpoint и хосты, проверка доставки на двух
