@@ -65,6 +65,14 @@ class MailboxResultsTest(unittest.TestCase):
                 skipped = [(*case[:2], "<skipped/>") if case[:2] == (classname, name) else case for case in self.all_cases()]
                 self.assertEqual(1, self.run_report(skipped))
 
+    def test_each_periodic_recovery_case_is_required_and_cannot_be_skipped(self):
+        self.assertEqual(13, len(checker.PERIODIC_EXPECTED))
+        for name in checker.PERIODIC_EXPECTED:
+            key = (checker.PERIODIC_CLASS, name)
+            self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[:2] != key]))
+            skipped = [(*case[:2], "<skipped/>") if case[:2] == key else case for case in self.all_cases()]
+            self.assertEqual(1, self.run_report(skipped))
+
     def test_each_reply_retry_case_is_required_and_cannot_be_skipped(self):
         self.assertEqual(16, len(checker.REPLY_OUTBOX_EXPECTED))
         for name in checker.REPLY_OUTBOX_EXPECTED:

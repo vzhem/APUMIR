@@ -21,8 +21,9 @@ import java.util.concurrent.CancellationException
  * contains no untrusted route and is still not authorization: the eventual
  * recovery worker must revalidate opt-in, identity and each pin/registration.
  * If the recovery write also fails, only an independent periodic full scan can
- * repair a callback that the provider will not redeliver. The production FCM
- * listener, scheduler and full mailbox scan do not exist yet.
+ * repair a callback that the provider will not redeliver. The disconnected
+ * [PushWakePeriodicRecovery] seam can ensure a marker on a later tick, but the
+ * production FCM listener, worker and full mailbox scan do not exist yet.
  */
 internal class PushWakeIntake(
     private val lookup: (String) -> Hint,

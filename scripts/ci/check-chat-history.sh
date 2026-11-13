@@ -242,6 +242,7 @@ PYGEN
     "$PUSH_SOURCE/PushEpochProtocol.kt" "$PUSH_SOURCE/PushRegistrationState.kt" "$PUSH_SOURCE/PushWakeAdmission.kt" "$PUSH_TESTS/PushWakeAdmissionTest.kt" \
     "$PUSH_SOURCE/PushWakeIntake.kt" "$PUSH_TESTS/PushWakeIntakeTest.kt" "$PUSH_SOURCE/PushWakeDispatcher.kt" "$PUSH_TESTS/PushWakeDispatcherTest.kt" \
     "$PUSH_SOURCE/PushWakeRunLoop.kt" "$PUSH_TESTS/PushWakeRunLoopTest.kt" \
+    "$PUSH_SOURCE/PushWakePeriodicRecovery.kt" "$PUSH_TESTS/PushWakePeriodicRecoveryTest.kt" \
     "$STORY_FEEDBACK_WIRE" "$STORY_FEEDBACK_LEDGER" "$STORY_FEEDBACK_OUTBOX" \
     "$STORY_FEEDBACK_WIRE_TEST" "$STORY_FEEDBACK_LEDGER_TEST" "$STORY_FEEDBACK_OUTBOX_TEST" \
     "$APK_UPDATE" "$UPDATE_POLICY" "$UPDATE_POLICY_TEST" "$OFFICIAL_UPDATE_POLICY" "$OFFICIAL_UPDATE_POLICY_TEST" "$COMPLETED_APK_ADOPTION" "$COMPLETED_APK_ADOPTION_TEST" \
@@ -285,6 +286,7 @@ PYGEN
     com.vladimir.messenger.data.push.PushWakeDispatcherTest \
     com.vladimir.messenger.data.push.PushWakeDrainTest \
     com.vladimir.messenger.data.push.PushWakeRunLoopTest \
+    com.vladimir.messenger.data.push.PushWakePeriodicRecoveryTest \
     com.vladimir.messenger.service.CoreServiceGateTest \
     com.vladimir.messenger.service.ProcessHeartbeatTest \
     com.vladimir.messenger.service.DeliveryWakePolicyTest \

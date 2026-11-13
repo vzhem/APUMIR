@@ -23,15 +23,19 @@ import java.util.concurrent.TimeUnit
  * check can run even while the previous worker returns, and cannot inherit its
  * eventual cancellation/failure. [PushWakeScheduleGate] coalesces normal
  * in-process requests; SQLite leases and idempotent message processing are
- * still required when jobs overlap or a process is restarted.
+ * still required when jobs overlap or a process is restarted. The per-drain
+ * batch limit is not a global bound on concurrent jobs: the future runtime must
+ * also bound shared sync work, including across any app processes.
  *
  * Before accepting FCM callbacks the caller must durably install [recovery]
- * and wait for its [Operation.result] to succeed. The periodic worker must run
- * the same bounded drain directly rather than merely calling gate.request():
- * that independently repairs a stale in-memory ticket or a crash between the
- * SQLite commit and one-off scheduling. WorkManager/Android may delay both
- * requests; a 15-minute interval is not a delivery deadline. Both workers
- * must re-check the feature/identity gate and use [PushWakeRunLoop].
+ * and wait for its [Operation.result] to succeed. The periodic worker needs
+ * [PushWakePeriodicRecovery]: ensure a generic scan marker, then run the bounded
+ * drain directly rather than merely calling gate.request(). This can also repair
+ * a stale ticket or a crash between SQLite commit and one-off scheduling. The
+ * marker is not a scan: the authenticated, bounded full-scan callback and its
+ * durable continuation are not implemented here. WorkManager/Android may
+ * delay both requests; a 15-minute interval is not a delivery deadline. Both
+ * workers must re-check the feature/identity gate and use [PushWakeRunLoop].
  *
  * No route, token, identity or message is placed into WorkManager input data.
  */

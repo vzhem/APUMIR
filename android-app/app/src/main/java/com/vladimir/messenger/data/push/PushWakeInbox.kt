@@ -85,13 +85,34 @@ internal class PushWakeInbox(
         return enqueue(RECOVERY, nowMs)
     }
 
-    private fun enqueue(route: String, nowMs: Long): EnqueueResult = synchronized(LOCK) {
+    /**
+     * Ensure a periodic full-scan marker exists even if a provider callback
+     * could not write anything. Unlike a new provider event, an already pending
+     * periodic marker does not advance its revision or bypass its retry/lease:
+     * repeated scheduler retries must not invalidate an ongoing scan forever.
+     * Normalization can still renew expiry, advance the revision for expired
+     * work, and clamp deadlines or leases after a wall-clock rollback.
+     * A later periodic tick is still needed if the current scan finishes while
+     * an unrecorded callback has raced it. This is not authorization or a scan.
+     */
+    fun ensurePeriodicRecovery(nowMs: Long): EnqueueResult {
+        if (!validNow(nowMs)) return EnqueueResult.INVALID
+        return enqueue(RECOVERY, nowMs, coalesceExisting = true)
+    }
+
+    private fun enqueue(route: String, nowMs: Long, coalesceExisting: Boolean = false): EnqueueResult = synchronized(LOCK) {
         try {
             val db = db()
             db.beginTransaction()
             try {
                 normalize(db, nowMs)
                 val existing = revision(db, route)
+                if (coalesceExisting && route == RECOVERY && existing != null) {
+                    // normalize() may have renewed expired work; commit it even
+                    // when this periodic request itself adds no new revision.
+                    db.setTransactionSuccessful()
+                    return@synchronized EnqueueResult.RECOVERY_QUEUED
+                }
                 val target = when {
                     existing == Long.MAX_VALUE && route != RECOVERY -> RECOVERY
                     existing == Long.MAX_VALUE -> return@synchronized EnqueueResult.UNAVAILABLE

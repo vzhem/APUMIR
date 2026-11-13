@@ -61,7 +61,8 @@ class NotificationResultsTest(unittest.TestCase):
         self.assertEqual(1, self.run_report(missing_mailbox_outbox))
         missing_mailbox_outbox_ffi = [case for case in self.all_cases() if case[0] != checker.MAILBOX_OUTBOX_FFI_CLASS]
         self.assertEqual(1, self.run_report(missing_mailbox_outbox_ffi))
-        for classname in (checker.PUSH_INBOX_CLASS, checker.PUSH_DRAIN_CLASS, checker.PUSH_WORK_CLASS):
+        for classname in (checker.PUSH_INBOX_CLASS, checker.PUSH_PERIODIC_CLASS,
+                          checker.PUSH_DRAIN_CLASS, checker.PUSH_WORK_CLASS):
             self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[0] != classname]))
         missing_firebase = [case for case in self.all_cases() if case[0] != checker.FIREBASE_CLASS]
         self.assertEqual(1, self.run_report(missing_firebase))
@@ -75,6 +76,15 @@ class NotificationResultsTest(unittest.TestCase):
             cases = [(classname, name, f"<{tag}/>") if i == 0 else (classname, name, "")
                      for i, (classname, name, _) in enumerate(self.all_cases())]
             self.assertEqual(1, self.run_report(cases))
+
+    def test_every_periodic_recovery_sqlite_case_is_required(self):
+        names = checker.EXPECTED[checker.PUSH_PERIODIC_CLASS]
+        self.assertEqual(10, len(names))
+        for name in names:
+            key = (checker.PUSH_PERIODIC_CLASS, name)
+            self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[:2] != key]))
+            skipped = [(*case[:2], "<skipped/>") if case[:2] == key else case for case in self.all_cases()]
+            self.assertEqual(1, self.run_report(skipped))
 
     def test_every_reply_retry_room_case_is_required(self):
         names = checker.EXPECTED[checker.REPLY_OUTBOX_CLASS]

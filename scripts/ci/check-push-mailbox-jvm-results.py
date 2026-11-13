@@ -10,7 +10,24 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 PREFIX = "com.vladimir.messenger.data.push."
+PERIODIC_CLASS = PREFIX + "PushWakePeriodicRecoveryTest"
+PERIODIC_EXPECTED = {
+    "allowedTickPersistsGenericMarkerBeforeDirectDrain",
+    "disabledOrUnavailableAdmissionNeverWritesOrStartsDrain",
+    "unavailableOrUnexpectedMarkerNeverRunsOrReportsSuccess",
+    "retryingDrainDoesNotPretendTheSavedMarkerWasProcessed",
+    "failedAdmissionMarkerOrDrainAreReportedWithoutBecomingSuccess",
+    "cancellationPropagatesFromEachStageWithoutBeingReported",
+    "cancellationAfterMarkerCommitLeavesItForAnotherTick",
+    "cancellationWhileAdmissionIsSuspendedDoesNotWriteMarker",
+    "cancellationAfterAdmissionOrDrainCannotReturnATaskResult",
+    "cancellationWhileDrainIsSuspendedLeavesTheMarkerForAnotherTick",
+    "diagnosticFailureCannotMakeARecoverableFailureTerminal",
+    "cancellationRacingAnOrdinaryFailureIsNotReturnedAsRetry",
+    "independentTickRepairsAnUnrecordedCallbackDespiteAStaleGate",
+}
 EXPECTED = {
+    PERIODIC_CLASS: PERIODIC_EXPECTED,
     PREFIX + "PushMailboxHttpClientTest": {
         "putStoresOnlyWithAValidServerReceiptAndClearsTransientBytes",
         "serverAcceptanceAndRetryStatesAreNotDelivery",

@@ -12,8 +12,9 @@ import java.util.concurrent.CancellationException
  * receive window and durable message processing have completed. A scheduler
  * must map RETRY to durable retry and install periodic recovery before it
  * accepts provider callbacks; a queued task is not proof of delivery. A periodic
- * recovery worker must run the drain directly, even if the in-memory gate
- * believes another worker is scheduled. This repairs stale in-memory tickets.
+ * recovery worker must use [PushWakePeriodicRecovery] to ensure a generic marker
+ * and run the drain directly, even if the in-memory gate believes another worker
+ * is scheduled. The actual bounded authenticated full scan is still missing.
  */
 internal class PushWakeRunLoop(
     private val dispatcher: PushWakeDispatcher,

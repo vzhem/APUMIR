@@ -21,6 +21,7 @@ MAILBOX_DRAIN_CLASS = "com.vladimir.messenger.data.push.PushMailboxDrainInstrume
 MAILBOX_OUTBOX_CLASS = "com.vladimir.messenger.data.push.PushMailboxOutboxInstrumentedTest"
 MAILBOX_OUTBOX_FFI_CLASS = "com.vladimir.messenger.data.push.PushMailboxOutboxRealFfiInstrumentedTest"
 PUSH_INBOX_CLASS = "com.vladimir.messenger.data.push.PushWakeInboxInstrumentedTest"
+PUSH_PERIODIC_CLASS = "com.vladimir.messenger.data.push.PushWakePeriodicRecoveryInstrumentedTest"
 PUSH_DRAIN_CLASS = "com.vladimir.messenger.data.push.PushWakeDrainInstrumentedTest"
 PUSH_WORK_CLASS = "com.vladimir.messenger.data.push.PushWakeWorkManagerInstrumentedTest"
 FIREBASE_CLASS = "com.vladimir.messenger.data.push.FirebaseClientConfigurationInstrumentedTest"
@@ -190,6 +191,17 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "dispatcherRedrivesNewSignalsAndRestartUsingRealInboxWithFakeScheduler",
     "unavailableAdmissionPersistsOnlyGenericRecoveryAcrossReopen",
     "malformedRoutesBadClockAndExhaustedLeaseSequenceFailClosed",
+}, PUSH_PERIODIC_CLASS: {
+    "emptyPeriodicTickCreatesOneGenericMarkerAcrossRestart",
+    "periodicTicksPreserveRetryBackoffAcrossReopen",
+    "providerEventsDuringPeriodicLeaseAdvanceRecoveryRevision",
+    "periodicNormalizationCommitsExpiredRouteDuringARecoveryLease",
+    "periodicNormalizationRenewsAnExpiredMarkerWithoutErasingItsLease",
+    "periodicNormalizationPreservesBackoffWhileCoalescingExpiredRoute",
+    "failedPeriodicNormalizationRollsBackBeforeRetry",
+    "concurrentPeriodicTicksCoalesceWithoutHidingProviderEvent",
+    "periodicPassRepairsFailedCallbackWithSqliteAndFakeSync",
+    "periodicTickRacingLeasedScanNeedsLaterTickForUnrecordedCallback",
 }, PUSH_DRAIN_CLASS: {
     "mixedSignalsAreInspectedAndAllowedRoutesShareOneGenericSync",
     "batchOutcomesConsumeOnlyTheCorrespondingSqliteLeases",
