@@ -675,6 +675,16 @@ Android-приложение с package name `com.vladimir.messenger`, а так
   изменение (включая ABA-возврат старого значения), нечитаемая база или
   структурно неверный снимок навсегда гасят проход. Это снимок, **не блокировка**:
   гонку со сменой identity/pin/restore между чтениями он не закрывает.
+- Связки между готовыми кусками (тоже **выключены** и из runtime не вызываются):
+  `PushRegistrationFlow` (резерв последовательности → подпись → POST → только
+  потом запись маршрута в индекс; revoke сначала локально, потом сеть),
+  `PushSignalInbox` (валидный `{v:"1"}` и `onDeletedMessages` → один общий
+  маркер в `PushWakeInbox`; в маркере нет маршрута, пира или текста),
+  `PushReceiveWindow` (одно окно `PushMailboxDrain`: `COMPLETED` только из
+  `Result.Completed`), `PushWakeSync` (реализация колбэка `sync`:
+  `COMPLETED_WINDOW` только после реально завершённого окна) и `PushFullScan`
+  (ограниченный обход индекса после generic-маркера: маршрут пересчитывается от
+  текущего pin/identity, несовпавший пропускается, а не «чинится»).
 - На сервере в `tools/worker/push/worker.mjs` исправлены две найденные при этом
   ошибки: переключатель ящика теперь проверяется **до** чтения страницы (раньше
   выключение во время проверки подписи могло вернуть полную страницу шифротекста),
@@ -682,12 +692,22 @@ Android-приложение с package name `com.vladimir.messenger`, а так
   `PUSH_ENABLED`. Новый `test-push-switches.mjs` проверяет оба случая; локальный
   прогон Worker — 64/64.
 
+Новые JVM-тесты (добавлены в реестры `check-push-mailbox-jvm-results.py`,
+`test-push-mailbox-jvm-results.py` и `check-android-compile.sh`): 9 кейсов
+`PushRegistrationFlowTest`, 5 `PushSignalInboxTest`, 5 `PushReceiveWindowTest`,
+6 `PushWakeSyncTest`, 9 `PushFullScanTest` — всего 34, плюс ранее 25.
+Это статические проверки с фейковыми транспортом и хранилищем; они не
+доказывают ни компиляцию, ни доставку.
+
 Что **не** сделано и по-прежнему запрещает включать флаг: реальный
-`FirebaseMessagingService`, регистрация маршрута от настоящей пары key/pin,
-производственный callback приёма, надёжное уведомление вне foreground-службы,
-tombstone для обычного одиночного удаления, расшифровка/сохранение на телефоне,
-две физические проверки и утверждённый endpoint. Локальные JVM-тесты и эмулятор
-не заменяют сквозное испытание.
+`FirebaseMessagingService` (`FirebaseMessaging.getInstance().token`, честное
+поведение без Play Services), подключение `PushRegistrationFlow` к настоящей
+паре key/pin через FFI, производственный callback приёма (расшифровка +
+транзакция Room) и `sync`-колбэк, реально привязанный к
+`RelayWakeWorker`/WorkManager вместе с `PushWakeScheduleGate` и периодическим
+маркером, надёжное уведомление вне foreground-службы, tombstone для обычного
+одиночного удаления, две физические проверки и утверждённый endpoint. Локальные
+JVM-тесты и эмулятор не заменяют сквозное испытание.
 
 ## Необходимые шаги перед включением
 

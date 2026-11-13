@@ -26,14 +26,25 @@
   `current`/`stable`, которую требовали `PushMailboxDrain`/`PushMailboxIncoming`:
   повторное чтение привязок, pin и секрета перед каждым вопросом, отказ после
   любого изменения/ABA/нечитаемой базы).
+- Добавлены **не подключённые** связки между готовыми кусками: `PushRegistrationFlow`
+  (durable резерв → подпись → POST → запись маршрута в индекс; revoke сначала
+  локально), `PushSignalInbox` (валидный `{v:"1"}` и `onDeletedMessages` → общий
+  маркер в `PushWakeInbox`, без маршрута/пира/текста), `PushReceiveWindow` (одно
+  окно `PushMailboxDrain`, `COMPLETED` только из `Result.Completed`),
+  `PushWakeSync` (колбэк `sync`: завершённое окно или `RETRY`) и `PushFullScan`
+  (ограниченный обход индекса с пересчётом маршрута от текущего pin; несовпавший
+  маршрут пропускается, а не «чинится»). Все по-прежнему выключены и из runtime
+  не вызываются.
 - На сервере найдены и исправлены две ошибки прототипа: `MAILBOX_ENABLED` больше
   не включает хранилище в обход мастер-флага `PUSH_ENABLED`, а выключение ящика
   во время асинхронной проверки подписи больше не возвращает страницу
   шифротекста (переключатель проверяется до чтения). `npm test` в
   `tools/worker/push` — **64/64** локально с поддельными Google/Cloudflare.
 - Локально прогнаны JVM-тесты нового кода (`PushSignalPolicyTest`,
-  `PushRuntimeConfigTest`, `PushRuntimeCoordinatorTest`, `PushDrainTrustGateTest`
-  — 25 кейсов, добавлены в гейт `check-push-mailbox-jvm-results.py` и в
+  `PushRuntimeConfigTest`, `PushRuntimeCoordinatorTest`, `PushDrainTrustGateTest`,
+  `PushRegistrationFlowTest`, `PushSignalInboxTest`, `PushReceiveWindowTest`,
+  `PushWakeSyncTest`, `PushFullScanTest` — 59 кейсов, все в гейте
+  `check-push-mailbox-jvm-results.py`, `test-push-mailbox-jvm-results.py` и
   `check-android-compile.sh`), Android-instrumented `FcmTokenJournalInstrumentedTest`
   (настоящие Keystore/SQLite; **на эмуляторе ещё не запускался**), `kt_syntax` и
   `check_unresolved_symbols` — 0.
@@ -45,11 +56,14 @@
   те же JVM/Android/Worker уже были зелёными (прогоны 43470325396/43470325381/43470325385).
   Обязательный отдельный `workflow_dispatch` для этого SHA не запускался. Это не сквозная
   доставка и не разрешение включать флаги.
-- **Чего нет и что блокирует включение:** реальный `FirebaseMessagingService`,
-  регистрация маршрута от настоящей пары key/pin, производственный callback
-  приёма, уведомления без foreground-службы, tombstone обычного одиночного
-  удаления, сквозная расшифровка/сохранение на телефоне, две физические проверки
-  и утверждённый endpoint. Зелёный локальный тест и эмулятор доставку не доказывают.
+- **Чего нет и что блокирует включение:** реальный `FirebaseMessagingService`
+  (токен и отсутствие Play Services), подключение `PushRegistrationFlow` к
+  настоящей паре key/pin через FFI, производственный `commit`-callback
+  (расшифровка + транзакция Room), `sync`-колбэк, реально привязанный к
+  `RelayWakeWorker`/WorkManager вместе с `PushWakeScheduleGate` и периодическим
+  маркером, уведомления без foreground-службы, tombstone обычного одиночного
+  удаления, две физические проверки и утверждённый endpoint. Зелёный локальный
+  тест и эмулятор доставку не доказывают.
 
 ## Текст прежде всего: онлайн и спящий получатель — работа продолжается
 

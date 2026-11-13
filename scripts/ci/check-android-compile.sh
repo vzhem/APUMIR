@@ -55,6 +55,8 @@ cd android-app || exit 1
     --tests '*PushHttpClientTest*' --tests '*PushWakeCryptoTest*' --tests '*PushMailboxHttpClientTest*' --tests '*PushMailboxAccessSignerTest*' --tests '*PushMailboxHttpsTransportTest*' --tests '*PushHttpLoopbackTlsTest*' \
     --tests '*PushEpochEnvelopeTest*' --tests '*PushMailboxMessageCodecTest*' --tests '*PushMailboxTextPolicyTest*' --tests '*PushMailboxMessageOpenerTest*' --tests '*PushMailboxMessageSealerTest*' --tests '*PushMailboxDrainTest*' --tests '*PushMailboxPutBuilderTest*' \
     --tests '*PushSignalPolicyTest*' --tests '*PushRuntimeConfigTest*' --tests '*PushRuntimeCoordinatorTest*' --tests '*PushDrainTrustGateTest*' \
+    --tests '*PushRegistrationFlowTest*' --tests '*PushSignalInboxTest*' --tests '*PushReceiveWindowTest*' \
+    --tests '*PushWakeSyncTest*' --tests '*PushFullScanTest*' \
     --tests '*MirrorPendingOutgoingTest*' --tests '*MirrorPendingScheduleIntegrationTest*' --tests '*MirrorPendingFlusherTest*' \
     --tests '*MirrorOutgoingFrameTest*' --tests '*MirrorOutgoingDispatcherTest*' --tests '*ReplyAwareOutboxSenderTest*' --tests '*DeletionOutboxTest*' \
     --tests '*IncomingNotificationProcessorTest*' --tests '*IncomingNotificationSweepTest*' --tests '*NotificationRecoveryScheduleGateTest*' --tests '*NotificationRecoveryOperationObserverTest*'
