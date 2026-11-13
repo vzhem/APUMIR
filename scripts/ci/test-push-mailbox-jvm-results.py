@@ -75,6 +75,7 @@ class MailboxResultsTest(unittest.TestCase):
                                *((name, checker.EXPECTED[checker.PREFIX + name]) for name in (
                                    "PushHttpClientTest", "PushWakeCryptoTest", "PushMailboxHttpClientTest",
                                    "PushMailboxHttpsTransportTest", "PushHttpLoopbackTlsTest", "PushMailboxDrainTest",
+                                   "PushMailboxTextPolicyTest", "PushMailboxMessageSealerTest", "PushMailboxMessageOpenerTest",
                                ))):
             source = (tests / (name + ".kt")).read_text(encoding="utf-8")
             methods = re.findall(r"@Test\s+fun\s+([A-Za-z_]\w*)\s*\(", source)
@@ -86,6 +87,17 @@ class MailboxResultsTest(unittest.TestCase):
         selected = set(re.findall(r"--tests '\*(\w+)\*'", script))
         for classname in checker.EXPECTED:
             self.assertIn(classname.rsplit(".", 1)[-1], selected)
+
+    def test_each_mailbox_text_case_is_required_and_cannot_be_skipped(self):
+        for name, count in (("PushMailboxTextPolicyTest", 3), ("PushMailboxMessageSealerTest", 8),
+                            ("PushMailboxMessageOpenerTest", 8)):
+            classname = checker.PREFIX + name
+            self.assertEqual(count, len(checker.EXPECTED[classname]))
+            for method in checker.EXPECTED[classname]:
+                key = (classname, method)
+                self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[:2] != key]))
+                skipped = [(*case[:2], "<skipped/>") if case[:2] == key else case for case in self.all_cases()]
+                self.assertEqual(1, self.run_report(skipped))
 
     def test_each_transport_and_mailbox_drain_case_is_required(self):
         for name, count in (("PushHttpClientTest", 8), ("PushMailboxHttpClientTest", 11),

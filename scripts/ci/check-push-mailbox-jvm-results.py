@@ -168,8 +168,14 @@ EXPECTED = {
         "independentlyExpectedPeersAndCanonicalMetadataAreRequired",
         "byteLimitAndMalformedUtf16AreRejectedWithoutSplittingTheBody",
     },
+    PREFIX + "PushMailboxTextPolicyTest": {
+        "boundedHumanTextPreservesUnicodePunctuationAndEmoji",
+        "controlsMediaCardsAndReservedFamiliesAreNeverPlainText",
+        "separatorsAndNonTextControlsAreRejectedEvenInsideAWordOrLaterLine",
+    },
     PREFIX + "PushMailboxMessageOpenerTest": {
         "validOpenedMessageIsBoundToThePinnedSenderLocalRecipientAndOriginalId",
+        "authenticatedUnsupportedBodiesAreRejectedAfterDecryption",
         "missingWrongOrSelfPinsAndWrongNodesNeverUnwrapAKey",
         "ciphertextAndUtf8TamperingAndWrongBoundMetadataAreRejected",
         "alteredBindingIdentityFfiCannotRelabelTheEnvelope",
@@ -180,6 +186,7 @@ EXPECTED = {
     PREFIX + "PushMailboxMessageSealerTest": {
         "originalMessageRoundTripsInsideAnAuthenticatedEnvelopeAndBuffersAreCleared",
         "invalidInputsPeersAndStateNeverInvokeKeyCreation",
+        "unsupportedBodiesNeverReachEncryptionOrFfi",
         "changingFfiInputsOrReturningMalformedHeadersFailsClosed",
         "changedCallerSnapshotsAndCurrentStateCannotReturnWire",
         "changingBindingWhileResolvingItsNodeIdIsRejectedAndCleared",

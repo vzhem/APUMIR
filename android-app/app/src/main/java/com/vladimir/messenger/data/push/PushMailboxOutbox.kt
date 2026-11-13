@@ -114,7 +114,9 @@ internal class PushMailboxOutbox(
         val suppliedSecret = draft.localSecret
         if (binding.size !in 1..512 || pin.size !in 1..512 || suppliedSecret.size != 32) return Result.Rejected
         val epoch = draft.epoch.epochHex ?: return Result.Rejected
-        if (draft.epoch.action != PushEpochProtocol.Action.OFFER) return Result.Rejected
+        if (draft.epoch.action != PushEpochProtocol.Action.OFFER || !PushMailboxTextPolicy.accepts(draft.content)) {
+            return Result.Rejected
+        }
         val text = PushMailboxMessageCodec.encode(draft.id, draft.sender, draft.recipient, draft.sentAtMs, draft.content)
             ?: return Result.Rejected
         val local = binding.copyOf()

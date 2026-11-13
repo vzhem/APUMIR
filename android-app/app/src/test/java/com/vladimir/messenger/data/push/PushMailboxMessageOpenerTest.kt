@@ -23,7 +23,7 @@ class PushMailboxMessageOpenerTest {
     private val secret = ByteArray(32) { 4 }
     private val key = ByteArray(32) { 7 }
     private val iv = ByteArray(12) { (it + 1).toByte() }
-    private val content = "Mailbox payload | привет 😀"
+    private val content = "Mailbox payload привет 😀"
 
     private fun plaintext(sender: String = this.sender, recipient: String = this.recipient) =
         PushMailboxMessageCodec.encode(id, sender, recipient, 1_700_000_000_000L, content)!!
@@ -103,6 +103,21 @@ class PushMailboxMessageOpenerTest {
         assertNull(client.open(envelope(plaintext(sender = other).toByteArray()), local, secret, pin, sender, recipient) { true })
         assertNull(client.open(envelope(plaintext(recipient = other).toByteArray()), local, secret, pin, sender, recipient) { true })
         assertEquals(2, failures) // GCM and strict UTF-8; valid but mismatched metadata is a rejection.
+    }
+
+    @Test fun authenticatedUnsupportedBodiesAreRejectedAfterDecryption() {
+        var opens = 0
+        var failures = 0
+        val client = opener(unwrap = { _, _, _, _ -> opens++; key.copyOf() }, failures = { failures++ })
+        val unsupported = listOf("APUQUIET1:quiet", "ack|id", "words\nAPUIMG1:photo", "a:b", "↩ Переслано из «Имя»")
+        for (text in unsupported) {
+            // Bypass the sender's policy and simulate an independently signed
+            // peer sending a valid authenticated envelope with another body.
+            val clear = PushMailboxMessageCodec.encode(id, sender, recipient, 1_700_000_000_000L, text)!!
+            assertNull(client.open(envelope(clear.toByteArray()), local, secret, pin, sender, recipient) { true })
+        }
+        assertEquals(unsupported.size, opens)
+        assertEquals(0, failures)
     }
 
     @Test fun alteredBindingIdentityFfiCannotRelabelTheEnvelope() {

@@ -58,6 +58,8 @@ class NotificationResultsTest(unittest.TestCase):
         self.assertEqual(1, self.run_report(missing_integration))
         missing_mailbox_drain = [case for case in self.all_cases() if case[0] != checker.MAILBOX_DRAIN_CLASS]
         self.assertEqual(1, self.run_report(missing_mailbox_drain))
+        missing_mailbox_room = [case for case in self.all_cases() if case[0] != checker.MAILBOX_ROOM_CLASS]
+        self.assertEqual(1, self.run_report(missing_mailbox_room))
         missing_mailbox_outbox = [case for case in self.all_cases() if case[0] != checker.MAILBOX_OUTBOX_CLASS]
         self.assertEqual(1, self.run_report(missing_mailbox_outbox))
         missing_mailbox_outbox_ffi = [case for case in self.all_cases() if case[0] != checker.MAILBOX_OUTBOX_FFI_CLASS]
@@ -81,6 +83,11 @@ class NotificationResultsTest(unittest.TestCase):
     def test_push_source_cases_match_the_report_gate(self):
         tests = Path(__file__).resolve().parents[2] / "android-app/app/src/androidTest/java/com/vladimir/messenger/data/push"
         for name, classname in (("PushRegistrationStoreInstrumentedTest", checker.REGISTRATION_CLASS),
+                                ("PushWakeIntegrationInstrumentedTest", checker.PUSH_INTEGRATION_CLASS),
+                                ("PushMailboxDrainInstrumentedTest", checker.MAILBOX_DRAIN_CLASS),
+                                ("PushMailboxRoomStoreInstrumentedTest", checker.MAILBOX_ROOM_CLASS),
+                                ("PushMailboxOutboxInstrumentedTest", checker.MAILBOX_OUTBOX_CLASS),
+                                ("PushMailboxOutboxRealFfiInstrumentedTest", checker.MAILBOX_OUTBOX_FFI_CLASS),
                                 ("PushWakeInboxInstrumentedTest", checker.PUSH_INBOX_CLASS),
                                 ("PushWakePeriodicRecoveryInstrumentedTest", checker.PUSH_PERIODIC_CLASS),
                                 ("PushWakeWorkManagerInstrumentedTest", checker.PUSH_WORK_CLASS),
@@ -90,6 +97,22 @@ class NotificationResultsTest(unittest.TestCase):
             methods = re.findall(r"@Test\s+fun\s+([A-Za-z_]\w*)\s*\(", source)
             self.assertEqual(len(methods), len(set(methods)))
             self.assertEqual(checker.EXPECTED[classname], set(methods))
+
+    def test_instrumentation_runner_selects_every_required_class(self):
+        runner = Path(__file__).with_name("run-android-navigation-tests.sh").read_text(encoding="utf-8")
+        selected = re.search(r"-Pandroid\.testInstrumentationRunnerArguments\.class=([^\s]+)", runner)
+        self.assertIsNotNone(selected)
+        for classname in checker.EXPECTED:
+            self.assertIn(classname, selected.group(1).split(","))
+
+    def test_every_mailbox_room_case_is_required(self):
+        names = checker.EXPECTED[checker.MAILBOX_ROOM_CLASS]
+        self.assertEqual(9, len(names))
+        for name in names:
+            key = (checker.MAILBOX_ROOM_CLASS, name)
+            self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[:2] != key]))
+            skipped = [(*case[:2], "<skipped/>") if case[:2] == key else case for case in self.all_cases()]
+            self.assertEqual(1, self.run_report(skipped))
 
     def test_every_periodic_recovery_sqlite_case_is_required(self):
         names = checker.EXPECTED[checker.PUSH_PERIODIC_CLASS]

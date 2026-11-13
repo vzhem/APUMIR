@@ -363,7 +363,7 @@ class PushWakeIntegrationInstrumentedTest {
         val senderId = "pk_" + "2".repeat(32)
         val recipientId = "pk_" + "1".repeat(32)
         val messageId = "01234567-89ab-4cde-8f01-23456789abcd"
-        val body = "Проверка сохранённого идентификатора | 😀"
+        val body = "Проверка сохранённого идентификатора 😀"
         try {
             installIdentitySigningSeed(1.toUByte(), senderId, ByteArray(32) { 2 })
             val senderIdentity = createIdentitySigningBinding(100)

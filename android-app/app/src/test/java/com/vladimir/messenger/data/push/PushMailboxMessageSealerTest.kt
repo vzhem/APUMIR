@@ -21,7 +21,7 @@ class PushMailboxMessageSealerTest {
     private val local = byteArrayOf(1, 3, 5)
     private val peer = byteArrayOf(2, 4, 6)
     private val secret = ByteArray(32) { 4 }
-    private val body = "Оригинальное сообщение | 😀"
+    private val body = "Оригинальное сообщение 😀"
     private val time = 1_700_000_000_000L
 
     private fun nodes(value: ByteArray): String = when (value.firstOrNull()) {
@@ -98,6 +98,16 @@ class PushMailboxMessageSealerTest {
         assertNull(sealer.sealMessage(secret = ByteArray(32)))
         assertNull(sealer.sealMessage(secret = ByteArray(31)))
         assertNull(sealer.sealMessage(current = { false }))
+        assertEquals(0, creates)
+    }
+
+    @Test fun unsupportedBodiesNeverReachEncryptionOrFfi() {
+        var creates = 0
+        val sealer = sealer(create = { a, b, _, m, _ -> creates++; fakeEnvelope(a, b, m) })
+        val unsupported = listOf("APUQUIET1:quiet", "ack|id", "words\nAPUIMG1:photo", "a:b", "↩ Переслано из «Имя»")
+        for (text in unsupported) {
+            assertNull(sealer.seal(id, sender, recipient, time, text, local, peer, secret) { true })
+        }
         assertEquals(0, creates)
     }
 

@@ -2,13 +2,12 @@ package com.vladimir.messenger.data.push
 
 import android.content.Context
 import androidx.room.Room
-import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.file.FileExchangePeerStore
 import com.vladimir.messenger.data.local.AppDatabase
-import com.vladimir.messenger.data.local.entity.MessageEntity
+import com.vladimir.messenger.data.local.entity.ChatEntity
 import com.vladimir.messenger.data.security.SealedWire
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
@@ -25,9 +24,10 @@ import uniffi.p2p_core.identitySigningMode
 import uniffi.p2p_core.installIdentitySigningSeed
 
 /**
- * Disposable identities and a test Room DB, with real Rust FFI and AES-GCM but
- * fake pull/ACK and a test-only commit callback. This is not the production
- * router, lifecycle lock, Firebase, server or a physical-phone delivery test.
+ * Disposable identities and a test Room DB, with real Rust FFI, AES-GCM and
+ * the experimental pinned Room commit boundary, but fake pull/ACK and a test
+ * suppression callback. This is not the live router, lifecycle lock, Firebase,
+ * server, notification display or a physical-phone delivery test.
  */
 @RunWith(AndroidJUnit4::class)
 class PushMailboxDrainInstrumentedTest {
@@ -49,6 +49,8 @@ class PushMailboxDrainInstrumentedTest {
         try {
             installIdentitySigningSeed(1.toUByte(), senderId, ByteArray(32) { 2 })
             val sender = createFileExchangeBinding(createIdentitySigningBinding(100), ByteArray(32) { 4 }, 200)
+            val changedSender = createFileExchangeBinding(createIdentitySigningBinding(100), ByteArray(32) { 5 }, 200)
+            db.chatDao().insertChat(ChatEntity(id = "test-direct-chat", contactId = senderId, contactName = "Friend"))
             installIdentitySigningSeed(1.toUByte(), recipientId, ByteArray(32) { 1 })
             val recipient = createFileExchangeBinding(createIdentitySigningBinding(100), ByteArray(32) { 3 }, 200)
             val initialPins = FileExchangePeerStore(db.fileExchangePeerDao())
@@ -68,36 +70,19 @@ class PushMailboxDrainInstrumentedTest {
 
             fun drainFor(database: AppDatabase, acceptAck: Boolean): PushMailboxDrain {
                 val pins = FileExchangePeerStore(database.fileExchangePeerDao())
-                val opener = PushMailboxMessageOpener(recordFailure = { openedFailures++ })
+                val incoming = PushMailboxIncoming(
+                    pins, PushMailboxMessageOpener(recordFailure = { openedFailures++ }),
+                    PushMailboxRoomStore(database, suppressed = { _, _ -> false }),
+                )
                 return PushMailboxDrain(
                     pull = { cursor ->
                         if (cursor == "-") PushMailboxHttpClient.PullResult.Page(listOf(goodItem, badItem), badItem.id)
                         else PushMailboxHttpClient.PullResult.Page(emptyList(), null)
                     },
-                    // This callback is intentionally test-only. Production must
-                    // additionally coordinate pin, identity, restore, controls,
-                    // chat selection, notification policy and normal transport.
-                    commit = commit@{ envelope ->
-                        val pin = pins.bindingFor(senderId) ?: return@commit PushMailboxDrain.Commit.RETRY
-                        val message = opener.open(envelope, recipient, ByteArray(32) { 3 }, pin, senderId, recipientId) { true }
-                            ?: return@commit PushMailboxDrain.Commit.RETRY
-                        database.withTransaction {
-                            val messages = database.messageDao()
-                            val prior = messages.getMessageById(message.id)
-                            if (prior != null) {
-                                if (!prior.isFromMe && prior.senderId == message.sender && prior.recipientId == message.recipient &&
-                                    prior.content == message.content && prior.timestamp == message.sentAtMs
-                                ) PushMailboxDrain.Commit.ALREADY_COMMITTED else PushMailboxDrain.Commit.RETRY
-                            } else {
-                                val row = MessageEntity(
-                                    id = message.id, chatId = "test-direct-chat", senderId = message.sender,
-                                    recipientId = message.recipient, content = message.content, timestamp = message.sentAtMs,
-                                    isFromMe = false, status = "DELIVERED", notificationPending = true,
-                                )
-                                if (messages.insertMessageIgnore(row) == -1L) PushMailboxDrain.Commit.RETRY
-                                else { inserted++; PushMailboxDrain.Commit.COMMITTED }
-                            }
-                        }
+                    // The suppression and lifecycle callbacks remain test-only.
+                    commit = { envelope ->
+                        incoming.commit(envelope, senderId, recipientId, recipient, ByteArray(32) { 3 }) { true }
+                            .also { if (it == PushMailboxDrain.Commit.COMMITTED) inserted++ }
                     },
                     ack = { receipts ->
                         ackCalls++
@@ -126,6 +111,25 @@ class PushMailboxDrainInstrumentedTest {
             assertEquals(2, ackCalls)
             assertEquals(2, openedFailures) // corrupted envelope was never acknowledged
             assertTrue(db.messageDao().getMessageById(messageId)!!.notificationPending)
+            assertEquals(1, db.chatDao().getChatById("test-direct-chat")!!.unreadCount)
+            assertEquals(content, db.chatDao().getChatById("test-direct-chat")!!.lastMessage)
+
+            // The actual pin gate and opener, not a caller-claimed sender, decide
+            // whether an already committed copy can be treated as a duplicate.
+            val pins = FileExchangePeerStore(db.fileExchangePeerDao())
+            val incoming = PushMailboxIncoming(
+                pins, PushMailboxMessageOpener(recordFailure = { openedFailures++ }),
+                PushMailboxRoomStore(db, suppressed = { _, _ -> false }),
+            )
+            suspend fun replay() = incoming.commit(wire, senderId, recipientId, recipient, ByteArray(32) { 3 }) { true }
+            assertTrue(pins.forgetPin(senderId))
+            assertEquals(PushMailboxDrain.Commit.RETRY, replay())
+            assertTrue(pins.pinFirstSeen(changedSender).newlyPinned)
+            assertEquals(PushMailboxDrain.Commit.RETRY, replay())
+            assertTrue(pins.forgetPin(senderId))
+            assertTrue(pins.pinFirstSeen(sender).newlyPinned)
+            assertEquals(PushMailboxDrain.Commit.ALREADY_COMMITTED, replay())
+            assertEquals(1, db.chatDao().getChatById("test-direct-chat")!!.unreadCount)
         } finally {
             clearIdentitySigningSeed()
             db.close()

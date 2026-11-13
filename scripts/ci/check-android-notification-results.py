@@ -18,6 +18,7 @@ PUSH_CLASS = "com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest"
 REGISTRATION_CLASS = "com.vladimir.messenger.data.push.PushRegistrationStoreInstrumentedTest"
 PUSH_INTEGRATION_CLASS = "com.vladimir.messenger.data.push.PushWakeIntegrationInstrumentedTest"
 MAILBOX_DRAIN_CLASS = "com.vladimir.messenger.data.push.PushMailboxDrainInstrumentedTest"
+MAILBOX_ROOM_CLASS = "com.vladimir.messenger.data.push.PushMailboxRoomStoreInstrumentedTest"
 MAILBOX_OUTBOX_CLASS = "com.vladimir.messenger.data.push.PushMailboxOutboxInstrumentedTest"
 MAILBOX_OUTBOX_FFI_CLASS = "com.vladimir.messenger.data.push.PushMailboxOutboxRealFfiInstrumentedTest"
 PUSH_INBOX_CLASS = "com.vladimir.messenger.data.push.PushWakeInboxInstrumentedTest"
@@ -157,7 +158,18 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "mailboxRoundTripAuthenticatesRealFfiAndPreviouslyPinnedParticipants",
 }, MAILBOX_DRAIN_CLASS: {
     "realRoomCommitPrecedesAckAndReplayedEnvelopeDeduplicatesAfterReopen",
+}, MAILBOX_ROOM_CLASS: {
+    "rowPreviewUnreadAndAlertCommitOnceAcrossReopenEvenWhenArrivalTimeDiffers",
+    "missingChangedPinsOrAmbiguousChatsNeverMutateRoom",
+    "conflictingRowsOrRichMetadataAreNeverTreatedAsDuplicates",
+    "existingFileOrPollMetadataPreventsFalseTextCommit",
+    "staleSuppressionCancellationAndMutatedPinRollBackAllChanges",
+    "clearRecordedDuringInsertionIsObservedBeforeRoomCommit",
+    "sqliteFailureRollsBackAndTheSameMessageCanBeRetried",
+    "delayedTextKeepsNewerPreviewAndFutureTimeIsCapped",
+    "concurrentCopiesAndOrdinaryIngressCannotRearmOrReplaceTheWinner",
 }, MAILBOX_OUTBOX_CLASS: {
+    "unsupportedBodiesNeverCreateOrReadAnOutboxRecord",
     "committedTripleSurvivesReopenAndALostResponseWithoutResealing",
     "concurrentDifferentCiphertextsAndCutoffsCommitOneWinner",
     "changedMessagePinBindingOrEpochCannotReplaceAnExistingRecord",

@@ -53,7 +53,7 @@ cd android-app || exit 1
     --tests '*SendTimePolicyTest*' --tests '*DeferredWireTest*' --tests '*DeferredDeliveryPolicyTest*' --tests '*FlashlightAlertPolicyTest*' --tests '*Ipv6NetworkProxyTest*' \
     --tests '*PushWakePeriodicRecoveryTest*' --tests '*PushWakeRunLoopTest*' --tests '*PushWakeDrainTest*' --tests '*PushWakeRecoveryScanTest*' \
     --tests '*PushHttpClientTest*' --tests '*PushWakeCryptoTest*' --tests '*PushMailboxHttpClientTest*' --tests '*PushMailboxAccessSignerTest*' --tests '*PushMailboxHttpsTransportTest*' --tests '*PushHttpLoopbackTlsTest*' \
-    --tests '*PushEpochEnvelopeTest*' --tests '*PushMailboxMessageCodecTest*' --tests '*PushMailboxMessageOpenerTest*' --tests '*PushMailboxMessageSealerTest*' --tests '*PushMailboxDrainTest*' --tests '*PushMailboxPutBuilderTest*' \
+    --tests '*PushEpochEnvelopeTest*' --tests '*PushMailboxMessageCodecTest*' --tests '*PushMailboxTextPolicyTest*' --tests '*PushMailboxMessageOpenerTest*' --tests '*PushMailboxMessageSealerTest*' --tests '*PushMailboxDrainTest*' --tests '*PushMailboxPutBuilderTest*' \
     --tests '*MirrorPendingOutgoingTest*' --tests '*MirrorPendingScheduleIntegrationTest*' --tests '*MirrorPendingFlusherTest*' \
     --tests '*MirrorOutgoingFrameTest*' --tests '*MirrorOutgoingDispatcherTest*' --tests '*ReplyAwareOutboxSenderTest*'
 TESTS_STATUS=$?

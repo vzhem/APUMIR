@@ -138,6 +138,16 @@ class PushMailboxOutboxInstrumentedTest {
         }
     }
 
+    @Test fun unsupportedBodiesNeverCreateOrReadAnOutboxRecord() {
+        val outbox = store()
+        for (body in listOf("APUQUIET1:quiet", "ack|id", "words\nAPUIMG1:photo", "a:b")) {
+            assertEquals(PushMailboxOutbox.Result.Rejected, prepare(outbox, draft(content = body)))
+        }
+        assertEquals(0, seals.get())
+        assertEquals(0, failures.get())
+        assertFalse(dbFile.exists())
+    }
+
     @Test fun committedTripleSurvivesReopenAndALostResponseWithoutResealing() {
         val first = store()
         val initial = result(first)
@@ -312,7 +322,7 @@ class PushMailboxOutboxInstrumentedTest {
 
     @Test fun quotasNeverEvictTerminalHistoryOrPartiallyInsertLargeCiphertexts() {
         val outbox = store(maxRecords = 1, maxActiveBytes = 1024)
-        assertEquals(PushMailboxOutbox.Result.Full, prepare(outbox, draft(content = "a".repeat(8_000))))
+        assertEquals(PushMailboxOutbox.Result.Full, prepare(outbox, draft(content = "a".repeat(2_000))))
         assertEquals(0, rawRows())
         val entry = result(outbox, draft(content = "small")).entry
         val another = draft(id = "11234567-89ab-4cde-8f01-23456789abcd", content = "small")

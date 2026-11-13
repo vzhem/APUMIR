@@ -42,7 +42,9 @@ internal class PushMailboxMessageSealer(
         localSecret: ByteArray,
         current: () -> Boolean,
     ): String? {
-        if (localBinding.size !in 1..512 || pinnedPeer.size !in 1..512 || localSecret.size != 32) return null
+        if (localBinding.size !in 1..512 || pinnedPeer.size !in 1..512 || localSecret.size != 32 ||
+            !PushMailboxTextPolicy.accepts(content)
+        ) return null
         val text = PushMailboxMessageCodec.encode(id, sender, recipient, sentAtMs, content) ?: return null
         val plaintext = text.toByteArray(Charsets.UTF_8)
         val local = localBinding.copyOf()

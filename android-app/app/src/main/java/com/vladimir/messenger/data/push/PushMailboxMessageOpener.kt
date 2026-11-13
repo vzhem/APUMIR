@@ -96,6 +96,9 @@ internal class PushMailboxMessageOpener(
             val text = Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
                 .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(clear)).toString()
             val message = PushMailboxMessageCodec.parse(text, expectedSender, expectedRecipient) ?: return null
+            // An authenticated peer can still send a control or unsupported card.
+            // Never hand such a body to the text-commit path.
+            if (!PushMailboxTextPolicy.accepts(message.content)) return null
             if (!current() || !MessageDigest.isEqual(localBinding, expectedLocal) ||
                 !MessageDigest.isEqual(localSecret, expectedSecret) || !MessageDigest.isEqual(pinnedPeer, expectedPin)
             ) return null

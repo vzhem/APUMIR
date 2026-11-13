@@ -59,6 +59,10 @@ interface ChatDao {
     @Query("SELECT * FROM chats WHERE contactId = :contactId LIMIT 1")
     suspend fun getChatByContactId(contactId: String): ChatEntity?
 
+    /** An authenticated mailbox message must not choose between duplicate chats. */
+    @Query("SELECT COUNT(*) FROM chats WHERE contactId = :contactId")
+    suspend fun countChatsForContact(contactId: String): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertChat(chat: ChatEntity)
 
@@ -86,6 +90,14 @@ interface ChatDao {
     /** Used in the same Room transaction as a newly inserted direct message. */
     @Query("UPDATE chats SET lastMessage = :message, lastMessageTime = :time, unreadCount = unreadCount + :unreadDelta WHERE id = :chatId")
     suspend fun recordIncoming(chatId: String, message: String, time: Long, unreadDelta: Int): Int
+
+    /** A delayed mailbox message increments unread without replacing a newer preview. */
+    @Query(
+        "UPDATE chats SET lastMessage = CASE WHEN lastMessageTime IS NULL OR lastMessageTime <= :time THEN :message ELSE lastMessage END, " +
+            "lastMessageTime = CASE WHEN lastMessageTime IS NULL OR lastMessageTime <= :time THEN :time ELSE lastMessageTime END, " +
+            "unreadCount = unreadCount + 1 WHERE id = :chatId AND contactId = :peer"
+    )
+    suspend fun recordMailboxIncoming(chatId: String, peer: String, message: String, time: Long): Int
 
     /** р239: снять с чата непрочитанные, накрученные мусорными пакетами. */
     @Query("UPDATE chats SET unreadCount = MAX(0, unreadCount - :count) WHERE id = :chatId")
