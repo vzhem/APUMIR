@@ -59,7 +59,7 @@ class PushMailboxHttpsTransportTest {
         override fun getServerCertificates(): Array<Certificate> = emptyArray()
     }
 
-    @Test fun postsOnlyToTheReviewedHttpsHostWithRedirectsDisabledAndBoundedIo() {
+    @Test fun postsOnlyToTheReviewedHttpsHostWithRedirectsDisabledAndSocketTimeouts() {
         val payload = "{\"items\":[],\"next\":null}".toByteArray(Charsets.US_ASCII)
         val request = "test request".toByteArray(Charsets.US_ASCII)
         lateinit var connection: FakeConnection

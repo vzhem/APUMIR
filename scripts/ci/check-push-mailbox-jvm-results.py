@@ -33,6 +33,7 @@ RUN_LOOP_EXPECTED = {
     "cancellationReleasesOnlyTheWorkerTicketAndAllowsAnotherRequest",
     "busyLoopRetriesWithoutReplacingTheActiveTicket",
     "distinctDispatchersShareTheClassloaderDrainLimit",
+    "simultaneousThreadsAdmitOneDrainAndRetryEveryOtherWorker",
     "cancelledCallerCannotTurnBusyLimitIntoRetry",
     "cancellationReleasesTheClassloaderLimitForAnotherLoop",
     "exceptionsAndBrokenDiagnosticsReleaseTheClassloaderLimit",
@@ -40,9 +41,30 @@ RUN_LOOP_EXPECTED = {
     "cancellationRacingAnErrorReleasesTicketAndClassloaderLimit",
     "independentRecoveryPassCanRepairAStaleRetryTicket",
 }
+DRAIN_CLASS = PREFIX + "PushWakeDrainTest"
+DRAIN_EXPECTED = {
+    "startedButUnfinishedWindowRetriesAndOnlyACompletedWindowConsumes",
+    "cancelledWindowLeavesTheClaimForLeaseRecovery",
+    "cancellationRacingCallbacksCannotConsumeOrReleaseTheClaim",
+    "cancellationExceptionsFromCallbacksPropagateWithoutCompletingClaims",
+    "cancellationAfterOneCompletionLeavesTheRemainingLeaseUntouched",
+    "cancellationDuringFinalPendingReadCannotReturnSuccess",
+    "cancellationAtFinalClockDoesNotStartPendingRead",
+    "brokenDiagnosticsStillRetryEachUnprocessedSignal",
+    "failedInspectionRetriesAndDroppedRouteDoesNotStartSync",
+    "onlyAllowedHintsReachTheBatchAndEachOutcomeControlsItsOwnLease",
+    "wrongOutcomeCountRetriesEveryLeaseInsteadOfGuessing",
+    "duplicateOrForeignResultsRetryTheEntireBatch",
+    "exceptionReadingAResultRetriesAllLeasesWithoutPartialCompletion",
+    "aPreviousBatchResultCannotCompleteANewLeaseForTheSameRoute",
+    "separateLeasesForTheSameRouteRemainDistinctItems",
+    "aBatchNeverIncludesMoreThanSixteenHints",
+    "syncExceptionRetriesRatherThanAcknowledgingSignal",
+}
 EXPECTED = {
     PERIODIC_CLASS: PERIODIC_EXPECTED,
     RUN_LOOP_CLASS: RUN_LOOP_EXPECTED,
+    DRAIN_CLASS: DRAIN_EXPECTED,
     PREFIX + "PushMailboxHttpClientTest": {
         "putStoresOnlyWithAValidServerReceiptAndClearsTransientBytes",
         "serverAcceptanceAndRetryStatesAreNotDelivery",
@@ -64,7 +86,7 @@ EXPECTED = {
         "failuresAndCancellationAreGenericAndClearInputs",
     },
     PREFIX + "PushMailboxHttpsTransportTest": {
-        "postsOnlyToTheReviewedHttpsHostWithRedirectsDisabledAndBoundedIo",
+        "postsOnlyToTheReviewedHttpsHostWithRedirectsDisabledAndSocketTimeouts",
         "redirectsAndErrorBodiesAreNeverReturnedAsSuccessData",
         "malformedContentTypeEncodingAndDeclaredLengthsFailClosed",
         "identityEncodingAndExactlyTheResponseCapRemainAcceptable",

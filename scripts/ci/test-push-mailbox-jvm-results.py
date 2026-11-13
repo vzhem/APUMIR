@@ -66,17 +66,27 @@ class MailboxResultsTest(unittest.TestCase):
                 skipped = [(*case[:2], "<skipped/>") if case[:2] == (classname, name) else case for case in self.all_cases()]
                 self.assertEqual(1, self.run_report(skipped))
 
-    def test_periodic_and_run_loop_source_cases_match_the_report_gate(self):
+    def test_push_source_cases_match_the_report_gate(self):
         tests = Path(__file__).resolve().parents[2] / "android-app/app/src/test/java/com/vladimir/messenger/data/push"
         for name, expected in (("PushWakeRunLoopTest", checker.RUN_LOOP_EXPECTED),
-                               ("PushWakePeriodicRecoveryTest", checker.PERIODIC_EXPECTED)):
+                               ("PushWakePeriodicRecoveryTest", checker.PERIODIC_EXPECTED),
+                               ("PushWakeDrainTest", checker.DRAIN_EXPECTED),
+                               ("PushMailboxHttpsTransportTest", checker.EXPECTED[checker.PREFIX + "PushMailboxHttpsTransportTest"])):
             source = (tests / (name + ".kt")).read_text(encoding="utf-8")
             methods = re.findall(r"@Test\s+fun\s+([A-Za-z_]\w*)\s*\(", source)
             self.assertEqual(len(methods), len(set(methods)))
             self.assertEqual(expected, set(methods))
 
+    def test_each_wake_drain_case_is_required_and_cannot_be_skipped(self):
+        self.assertEqual(17, len(checker.DRAIN_EXPECTED))
+        for name in checker.DRAIN_EXPECTED:
+            key = (checker.DRAIN_CLASS, name)
+            self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[:2] != key]))
+            skipped = [(*case[:2], "<skipped/>") if case[:2] == key else case for case in self.all_cases()]
+            self.assertEqual(1, self.run_report(skipped))
+
     def test_each_run_loop_case_is_required_and_cannot_be_skipped(self):
-        self.assertEqual(11, len(checker.RUN_LOOP_EXPECTED))
+        self.assertEqual(12, len(checker.RUN_LOOP_EXPECTED))
         for name in checker.RUN_LOOP_EXPECTED:
             key = (checker.RUN_LOOP_CLASS, name)
             self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[:2] != key]))

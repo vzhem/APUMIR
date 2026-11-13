@@ -7,7 +7,9 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
@@ -16,6 +18,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -198,6 +201,75 @@ class PushWakeDrainInstrumentedTest {
             assertEquals(PushWakeDrain.Result.Empty, drain({ PushWakeDrain.Inspection.ALLOW }, { completed }).run())
             assertEquals(0, failures)
         }
+    }
+
+    @Test fun nonCooperativeSyncCancellationKeepsSqliteLeaseForRecovery() = runBlocking {
+        val now = clock.get()
+        assertEquals(PushWakeInbox.EnqueueResult.QUEUED, inbox.enqueueRoute(a, now))
+        var returned = false
+        val job = launch(start = CoroutineStart.LAZY) {
+            val self = coroutineContext[Job]!!
+            val worker = drain({ PushWakeDrain.Inspection.ALLOW }, {
+                // A callback can return normally after cancellation. It is not
+                // proof that the remainder of the worker should consume a wake.
+                self.cancel()
+                completed
+            })
+            worker.run()
+            returned = true
+        }
+        job.start()
+        job.join()
+        assertTrue(job.isCancelled)
+        assertFalse(returned)
+        assertEquals(now + PushWakeInbox.LEASE_MS,
+            (inbox.pending(now) as PushWakeInbox.PendingResult.Pending).readyAtMs)
+        clock.set(now + PushWakeInbox.LEASE_MS)
+        var retried = 0
+        assertEquals(PushWakeDrain.Result.Empty, drain({ PushWakeDrain.Inspection.ALLOW }, {
+            retried++
+            completed
+        }).run())
+        assertEquals(1, retried)
+        assertEquals(0, failures)
+    }
+
+    @Test fun cancellationAfterSqliteCommitLeavesRemainingLeaseForRecovery() = runBlocking {
+        val now = clock.get()
+        assertEquals(PushWakeInbox.EnqueueResult.QUEUED, inbox.enqueueRoute(a, now))
+        assertEquals(PushWakeInbox.EnqueueResult.QUEUED, inbox.enqueueRoute(b, now))
+        var returned = false
+        val job = launch(start = CoroutineStart.LAZY) {
+            val self = coroutineContext[Job]!!
+            val queue = object : PushWakeQueue {
+                override fun claim(nowMs: Long) = inbox.claim(nowMs)
+                override fun complete(claim: PushWakeInbox.Claim, success: Boolean, nowMs: Long) =
+                    inbox.complete(claim, success, nowMs).also {
+                        if (claim.route == a) self.cancel()
+                    }
+                override fun pending(nowMs: Long) = inbox.pending(nowMs)
+            }
+            PushWakeDrain(queue, clock::get, { PushWakeDrain.Inspection.ALLOW }, { batch ->
+                batch.items.map { it.result(completed) }
+            }) { failures++ }.run()
+            returned = true
+        }
+        job.start()
+        job.join()
+        assertTrue(job.isCancelled)
+        assertFalse(returned)
+        assertEquals(now + PushWakeInbox.LEASE_MS,
+            (inbox.pending(now) as PushWakeInbox.PendingResult.Pending).readyAtMs)
+        clock.set(now + PushWakeInbox.LEASE_MS)
+        val redriven = mutableListOf<String?>()
+        assertEquals(PushWakeDrain.Result.Empty, drain({ route ->
+            redriven += route
+            PushWakeDrain.Inspection.ALLOW
+        }, { completed }).run())
+        // The first completion committed before cancellation and is not rolled
+        // back. Only the uncompleted second lease is retried.
+        assertEquals(listOf(b), redriven)
+        assertEquals(0, failures)
     }
 
     @Test fun eachPassIsBoundedAndUnprocessedRoutesRemainPending() = runBlocking {

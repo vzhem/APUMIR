@@ -211,6 +211,8 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "inspectAndSyncFailuresRetryWithoutBlockingOtherRoutes",
     "startingWithoutACompletedReceiveWindowDoesNotConsumeTheWake",
     "cancellationKeepsLeaseAndRecoveryCanRetryAfterDeadline",
+    "nonCooperativeSyncCancellationKeepsSqliteLeaseForRecovery",
+    "cancellationAfterSqliteCommitLeavesRemainingLeaseForRecovery",
     "eachPassIsBoundedAndUnprocessedRoutesRemainPending",
 }, PUSH_WORK_CLASS: {
     "independentSuccessorRunsBeforeOlderWorkerReturnsAndSurvivesItsFailure",

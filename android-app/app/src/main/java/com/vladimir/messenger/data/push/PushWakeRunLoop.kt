@@ -7,7 +7,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 
 /**
- * One bounded worker pass over the durable wake inbox. Both the one-off worker
+ * One count-bounded worker pass over the durable wake inbox. Both the one-off worker
  * and the independently scheduled periodic recovery worker must invoke this
  * same loop with the same process-local dispatcher. This code does not start
  * WorkManager, Firebase, network traffic or notifications.

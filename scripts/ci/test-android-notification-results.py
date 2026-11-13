@@ -78,10 +78,11 @@ class NotificationResultsTest(unittest.TestCase):
                      for i, (classname, name, _) in enumerate(self.all_cases())]
             self.assertEqual(1, self.run_report(cases))
 
-    def test_push_periodic_and_workmanager_source_cases_match_the_report_gate(self):
+    def test_push_source_cases_match_the_report_gate(self):
         tests = Path(__file__).resolve().parents[2] / "android-app/app/src/androidTest/java/com/vladimir/messenger/data/push"
         for name, classname in (("PushWakePeriodicRecoveryInstrumentedTest", checker.PUSH_PERIODIC_CLASS),
-                                ("PushWakeWorkManagerInstrumentedTest", checker.PUSH_WORK_CLASS)):
+                                ("PushWakeWorkManagerInstrumentedTest", checker.PUSH_WORK_CLASS),
+                                ("PushWakeDrainInstrumentedTest", checker.PUSH_DRAIN_CLASS)):
             source = (tests / (name + ".kt")).read_text(encoding="utf-8")
             methods = re.findall(r"@Test\s+fun\s+([A-Za-z_]\w*)\s*\(", source)
             self.assertEqual(len(methods), len(set(methods)))
@@ -92,6 +93,15 @@ class NotificationResultsTest(unittest.TestCase):
         self.assertEqual(11, len(names))
         for name in names:
             key = (checker.PUSH_PERIODIC_CLASS, name)
+            self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[:2] != key]))
+            skipped = [(*case[:2], "<skipped/>") if case[:2] == key else case for case in self.all_cases()]
+            self.assertEqual(1, self.run_report(skipped))
+
+    def test_every_push_drain_sqlite_case_is_required(self):
+        names = checker.EXPECTED[checker.PUSH_DRAIN_CLASS]
+        self.assertEqual(10, len(names))
+        for name in names:
+            key = (checker.PUSH_DRAIN_CLASS, name)
             self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[:2] != key]))
             skipped = [(*case[:2], "<skipped/>") if case[:2] == key else case for case in self.all_cases()]
             self.assertEqual(1, self.run_report(skipped))

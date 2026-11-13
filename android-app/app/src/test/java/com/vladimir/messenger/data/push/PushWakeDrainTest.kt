@@ -1,8 +1,11 @@
 package com.vladimir.messenger.data.push
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -100,6 +103,250 @@ class PushWakeDrainTest {
             assertTrue(queue.pending)
             assertTrue(queue.leased)
             assertTrue(queue.completions.isEmpty())
+        }
+    }
+
+    @Test fun cancellationRacingCallbacksCannotConsumeOrReleaseTheClaim() = runBlocking {
+        val stages = listOf("before", "clockBeforeClaim", "claim", "inspectAllow", "inspectDrop", "inspectRetry",
+            "inspectFailure", "sync", "syncFailure", "resultRead", "clockBeforeComplete", "invalidResult",
+            "diagnostics", "invalidDiagnosticsThrows", "diagnosticsThrows")
+        for (stage in stages) {
+            val stored = FakeQueue()
+            var inspections = 0
+            var syncs = 0
+            var diagnostics = 0
+            var clockReads = 0
+            var resultReads = 0
+            var returned = false
+            var ordinaryFailure = false
+            val job = launch(start = CoroutineStart.LAZY) {
+                val self = coroutineContext[Job]!!
+                val queue = object : PushWakeQueue {
+                    override fun claim(nowMs: Long): PushWakeInbox.ClaimResult = stored.claim(nowMs).also {
+                        if (stage == "claim" && it is PushWakeInbox.ClaimResult.Ready) self.cancel()
+                    }
+                    override fun complete(claim: PushWakeInbox.Claim, success: Boolean, nowMs: Long) =
+                        stored.complete(claim, success, nowMs)
+                    override fun pending(nowMs: Long) = stored.pending(nowMs)
+                }
+                val drain = PushWakeDrain(queue, {
+                    clockReads++
+                    if (stage == "clockBeforeClaim" && clockReads == 1 || stage == "clockBeforeComplete" && clockReads == 3) {
+                        self.cancel()
+                    }
+                    100
+                }, {
+                    inspections++
+                    when (stage) {
+                        "inspectAllow" -> { self.cancel(); PushWakeDrain.Inspection.ALLOW }
+                        "inspectDrop" -> { self.cancel(); PushWakeDrain.Inspection.DROP }
+                        "inspectRetry" -> { self.cancel(); PushWakeDrain.Inspection.RETRY }
+                        "inspectFailure" -> { self.cancel(); error("private detail") }
+                        "diagnostics", "diagnosticsThrows" -> error("private detail")
+                        else -> PushWakeDrain.Inspection.ALLOW
+                    }
+                }, { batch ->
+                    syncs++
+                    when (stage) {
+                        "sync" -> {
+                            val completed = batch.items.single().result(PushWakeDrain.SyncOutcome.COMPLETED_WINDOW)
+                            self.cancel()
+                            object : AbstractList<PushWakeDrain.SyncResult>() {
+                                override val size: Int get() { resultReads++; return 1 }
+                                override fun get(index: Int): PushWakeDrain.SyncResult { resultReads++; return completed }
+                            }
+                        }
+                        "syncFailure" -> { self.cancel(); error("private detail") }
+                        "resultRead" -> {
+                            val completed = batch.items.single().result(PushWakeDrain.SyncOutcome.COMPLETED_WINDOW)
+                            object : AbstractList<PushWakeDrain.SyncResult>() {
+                                override val size = 1
+                                override fun get(index: Int): PushWakeDrain.SyncResult {
+                                    self.cancel()
+                                    return completed
+                                }
+                            }
+                        }
+                        "invalidResult", "invalidDiagnosticsThrows" -> emptyList()
+                        else -> batch.items.map { it.result(PushWakeDrain.SyncOutcome.COMPLETED_WINDOW) }
+                    }
+                }, {
+                    diagnostics++
+                    if (stage in setOf("diagnostics", "invalidResult", "diagnosticsThrows", "invalidDiagnosticsThrows")) {
+                        self.cancel()
+                        if (stage.endsWith("Throws")) error("broken diagnostics")
+                    }
+                })
+                if (stage == "before") self.cancel()
+                try {
+                    drain.run()
+                    returned = true
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    // Capture an incorrectly surfaced non-cancellation failure.
+                    ordinaryFailure = true
+                }
+            }
+            job.start()
+            job.join()
+            assertTrue("$stage must cancel", job.isCancelled)
+            assertFalse("$stage must not return", returned)
+            assertFalse("$stage must not surface an ordinary failure", ordinaryFailure)
+            assertTrue("$stage must keep the signal", stored.pending)
+            assertEquals("$stage lease", stage != "before" && stage != "clockBeforeClaim", stored.leased)
+            assertTrue("$stage must not complete the claim", stored.completions.isEmpty())
+            if (stage == "before" || stage == "clockBeforeClaim" || stage == "claim") {
+                assertEquals("$stage inspection", 0, inspections)
+            }
+            if (stage.startsWith("inspect") || stage == "before" || stage == "clockBeforeClaim" ||
+                stage == "claim" || stage.startsWith("diagnostics")
+            ) {
+                assertEquals("$stage sync", 0, syncs)
+            }
+            if (stage == "sync") assertEquals("$stage result reads", 0, resultReads)
+            val diagnosticStage = stage in setOf("diagnostics", "invalidResult", "diagnosticsThrows", "invalidDiagnosticsThrows")
+            assertEquals("$stage diagnostics", if (diagnosticStage) 1 else 0, diagnostics)
+        }
+    }
+
+    @Test fun cancellationExceptionsFromCallbacksPropagateWithoutCompletingClaims() = runBlocking {
+        for (stage in listOf("inspection", "sync", "resultRead", "diagnostics", "invalidDiagnostics")) {
+            val queue = FakeQueue()
+            var diagnostics = 0
+            var syncs = 0
+            val drain = PushWakeDrain(queue, { 100 }, {
+                when (stage) {
+                    "inspection" -> throw CancellationException("stop")
+                    "diagnostics" -> error("private inspection detail")
+                    else -> PushWakeDrain.Inspection.ALLOW
+                }
+            }, { batch ->
+                syncs++
+                when (stage) {
+                    "sync" -> throw CancellationException("stop")
+                    "resultRead" -> object : AbstractList<PushWakeDrain.SyncResult>() {
+                        override val size = 1
+                        override fun get(index: Int): PushWakeDrain.SyncResult = throw CancellationException("stop")
+                    }
+                    "invalidDiagnostics" -> emptyList()
+                    else -> batch.items.map { it.result(PushWakeDrain.SyncOutcome.COMPLETED_WINDOW) }
+                }
+            }, {
+                diagnostics++
+                throw CancellationException("stop")
+            })
+            var cancelled = false
+            try { drain.run() } catch (_: CancellationException) { cancelled = true }
+            assertTrue("$stage cancellation must propagate", cancelled)
+            assertTrue(queue.pending && queue.leased)
+            assertTrue(queue.completions.isEmpty())
+            assertEquals(if (stage == "diagnostics" || stage == "invalidDiagnostics") 1 else 0, diagnostics)
+            assertEquals(if (stage == "inspection" || stage == "diagnostics") 0 else 1, syncs)
+        }
+    }
+
+    @Test fun cancellationAfterOneCompletionLeavesTheRemainingLeaseUntouched() = runBlocking {
+        val a = "12".repeat(32)
+        val b = "34".repeat(32)
+        val stored = BatchQueue(listOf(a, b))
+        var returned = false
+        val job = launch(start = CoroutineStart.LAZY) {
+            val self = coroutineContext[Job]!!
+            val queue = object : PushWakeQueue {
+                override fun claim(nowMs: Long) = stored.claim(nowMs)
+                override fun complete(claim: PushWakeInbox.Claim, success: Boolean, nowMs: Long) =
+                    stored.complete(claim, success, nowMs).also {
+                        if (stored.completions.size == 1) self.cancel()
+                    }
+                override fun pending(nowMs: Long) = stored.pending(nowMs)
+            }
+            PushWakeDrain(queue, { 100 }, { PushWakeDrain.Inspection.ALLOW }, { batch ->
+                batch.items.map { it.result(PushWakeDrain.SyncOutcome.COMPLETED_WINDOW) }
+            }, { error("unexpected diagnostics") }).run()
+            returned = true
+        }
+        job.start()
+        job.join()
+        assertTrue(job.isCancelled)
+        assertFalse(returned)
+        // The first SQLite transaction could already have committed. Cancellation
+        // cannot undo it, but the second lease must not be completed afterwards.
+        assertEquals(listOf(a to true), stored.completions)
+    }
+
+    @Test fun cancellationDuringFinalPendingReadCannotReturnSuccess() = runBlocking {
+        var returned = false
+        val job = launch(start = CoroutineStart.LAZY) {
+            val self = coroutineContext[Job]!!
+            val queue = object : PushWakeQueue {
+                override fun claim(nowMs: Long) = PushWakeInbox.ClaimResult.Empty
+                override fun complete(claim: PushWakeInbox.Claim, success: Boolean, nowMs: Long): PushWakeInbox.Completion =
+                    error("nothing was leased")
+                override fun pending(nowMs: Long): PushWakeInbox.PendingResult {
+                    self.cancel()
+                    return PushWakeInbox.PendingResult.Empty
+                }
+            }
+            PushWakeDrain(queue, { 100 }, { error("nothing to inspect") }, { error("nothing to sync") },
+                { error("unexpected diagnostics") }).run()
+            returned = true
+        }
+        job.start()
+        job.join()
+        assertTrue(job.isCancelled)
+        assertFalse(returned)
+    }
+
+    @Test fun cancellationAtFinalClockDoesNotStartPendingRead() = runBlocking {
+        var clockReads = 0
+        var pendingReads = 0
+        var returned = false
+        val job = launch(start = CoroutineStart.LAZY) {
+            val self = coroutineContext[Job]!!
+            val queue = object : PushWakeQueue {
+                override fun claim(nowMs: Long) = PushWakeInbox.ClaimResult.Empty
+                override fun complete(claim: PushWakeInbox.Claim, success: Boolean, nowMs: Long): PushWakeInbox.Completion =
+                    error("nothing was leased")
+                override fun pending(nowMs: Long): PushWakeInbox.PendingResult {
+                    pendingReads++
+                    return PushWakeInbox.PendingResult.Empty
+                }
+            }
+            PushWakeDrain(queue, {
+                if (++clockReads == 2) self.cancel()
+                100
+            }, { error("nothing to inspect") }, { error("nothing to sync") },
+                { error("unexpected diagnostics") }).run()
+            returned = true
+        }
+        job.start()
+        job.join()
+        assertTrue(job.isCancelled)
+        assertFalse(returned)
+        assertEquals(2, clockReads)
+        assertEquals(0, pendingReads)
+    }
+
+    @Test fun brokenDiagnosticsStillRetryEachUnprocessedSignal() = runBlocking {
+        for (stage in listOf("inspection", "sync", "invalid")) {
+            val queue = FakeQueue()
+            var diagnostics = 0
+            var syncs = 0
+            val result = PushWakeDrain(queue, { 100 }, {
+                if (stage == "inspection") error("private route detail")
+                PushWakeDrain.Inspection.ALLOW
+            }, { batch ->
+                syncs++
+                if (stage == "sync") error("private sync detail")
+                if (stage == "invalid") emptyList()
+                else batch.items.map { it.result(PushWakeDrain.SyncOutcome.COMPLETED_WINDOW) }
+            }, { diagnostics++; error("private diagnostic detail") }).run()
+            assertTrue("$stage must retry", result is PushWakeDrain.Result.Pending)
+            assertEquals("$stage completion", listOf(false), queue.completions)
+            assertTrue(queue.pending)
+            assertEquals(1, diagnostics)
+            assertEquals(if (stage == "inspection") 0 else 1, syncs)
         }
     }
 

@@ -1,9 +1,12 @@
 package com.vladimir.messenger.data.push
 
 import java.util.concurrent.CancellationException
+import java.util.logging.Logger
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 /**
- * Bounded drain of the experimental signal inbox. It deliberately has no
+ * Count-bounded drain of the experimental signal inbox. It deliberately has no
  * Firebase, WorkManager or network implementation. [inspect] must obtain the
  * current profile and independently pinned peer, check the ACTIVE journal and
  * freshly derive the route; a queue claim/index hit is not authentication.
@@ -29,6 +32,13 @@ import java.util.concurrent.CancellationException
  * inability to start, or an unfinished window must return RETRY. Even a
  * completed window does not prove delivery or a displayed notification. No
  * production implementation of that callback is connected yet.
+ *
+ * Cancellation is checked at each synchronous storage/callback boundary. A
+ * cancelled pass leaves uncompleted claims leased for later recovery. Checks
+ * are cooperative, not a transaction with cancellation: an operation that
+ * already began can still finish, and a committed completion is not undone.
+ * Callbacks must not detach effects beyond their lifetime, and an actual
+ * receive window must itself be bounded, cancellable and idempotent.
  */
 internal class PushWakeDrain(
     private val inbox: PushWakeQueue,
@@ -63,37 +73,64 @@ internal class PushWakeDrain(
     }
 
     suspend fun run(): Result {
+        val context = currentCoroutineContext()
+        context.ensureActive()
         val accepted = ArrayList<PushWakeInbox.Claim>(MAX_BATCH)
         var storageUnavailable = false
         for (index in 0 until MAX_BATCH) {
-            val claim = when (val result = inbox.claim(nowMs())) {
+            context.ensureActive()
+            val time = nowMs()
+            context.ensureActive()
+            val claimed = inbox.claim(time)
+            context.ensureActive()
+            val claim = when (claimed) {
                 PushWakeInbox.ClaimResult.Empty -> break
                 PushWakeInbox.ClaimResult.Unavailable -> {
                     storageUnavailable = true
                     break
                 }
-                is PushWakeInbox.ClaimResult.Ready -> result.claim
+                is PushWakeInbox.ClaimResult.Ready -> claimed.claim
             }
             when (inspectSafely(claim.route)) {
                 Inspection.ALLOW -> accepted.add(claim)
-                Inspection.DROP -> if (!completed(inbox.complete(claim, true, nowMs()))) storageUnavailable = true
-                Inspection.RETRY -> if (!completed(inbox.complete(claim, false, nowMs()))) storageUnavailable = true
+                Inspection.DROP -> if (!completeClaim(claim, true)) storageUnavailable = true
+                Inspection.RETRY -> if (!completeClaim(claim, false)) storageUnavailable = true
             }
         }
+        context.ensureActive()
         if (accepted.isNotEmpty()) {
             val batch = SyncBatch(accepted.map { it.route })
             val outcomes = syncSafely(batch)
+            context.ensureActive()
             for ((index, claim) in accepted.withIndex()) {
+                context.ensureActive()
                 val completedWindow = outcomes?.get(index) == SyncOutcome.COMPLETED_WINDOW
-                if (!completed(inbox.complete(claim, completedWindow, nowMs()))) storageUnavailable = true
+                if (!completeClaim(claim, completedWindow)) storageUnavailable = true
             }
         }
+        context.ensureActive()
         if (storageUnavailable) return Result.Unavailable
-        return when (val pending = inbox.pending(nowMs())) {
+        val time = nowMs()
+        context.ensureActive()
+        val pending = inbox.pending(time)
+        context.ensureActive()
+        return when (pending) {
             PushWakeInbox.PendingResult.Empty -> Result.Empty
             PushWakeInbox.PendingResult.Unavailable -> Result.Unavailable
             is PushWakeInbox.PendingResult.Pending -> Result.Pending(pending.readyAtMs)
         }
+    }
+
+    private suspend fun completeClaim(claim: PushWakeInbox.Claim, success: Boolean): Boolean {
+        val context = currentCoroutineContext()
+        context.ensureActive()
+        val time = nowMs()
+        context.ensureActive()
+        val result = inbox.complete(claim, success, time)
+        // A committed completion cannot be rolled back, but do not start the
+        // next claim/completion or return success after observing cancellation.
+        context.ensureActive()
+        return completed(result)
     }
 
     private fun completed(result: PushWakeInbox.Completion): Boolean = when (result) {
@@ -103,12 +140,14 @@ internal class PushWakeDrain(
     }
 
     private suspend fun inspectSafely(route: String?): Inspection = try {
-        inspect(route)
+        val result = inspect(route)
+        currentCoroutineContext().ensureActive()
+        result
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: Exception) {
         // Never pass route or exception text to diagnostics.
-        recordFailure()
+        diag()
         Inspection.RETRY
     }
 
@@ -117,6 +156,7 @@ internal class PushWakeDrain(
             // Match at most MAX_BATCH results to the exact items issued for
             // this batch. Do not log routes, callback data, or exception text.
             val supplied = sync(batch)
+            currentCoroutineContext().ensureActive()
             if (supplied.size != batch.items.size) {
                 null
             } else {
@@ -138,11 +178,28 @@ internal class PushWakeDrain(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            recordFailure()
+            diag()
             return null
         }
-        if (outcomes == null) recordFailure()
+        // Reading an injected result list may itself race cancellation.
+        currentCoroutineContext().ensureActive()
+        if (outcomes == null) diag()
+        currentCoroutineContext().ensureActive()
         return outcomes
+    }
+
+    private suspend fun diag() {
+        currentCoroutineContext().ensureActive()
+        try {
+            recordFailure()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // Never turn cancellation into a normal retry or expose details.
+            currentCoroutineContext().ensureActive()
+            Logger.getLogger("PushWakeDrain").warning("Wake diagnostics unavailable")
+        }
+        currentCoroutineContext().ensureActive()
     }
 
     companion object {

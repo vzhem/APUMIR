@@ -1,5 +1,9 @@
 package com.vladimir.messenger.data.push
 
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
@@ -150,6 +154,67 @@ class PushWakeRunLoopTest {
                 assertEquals(PushWakeIntake.Result.QUEUED, two.wake())
                 assertEquals(2, two.scheduled.size)
             } finally { release.complete(Unit) }
+        }
+    }
+
+    @Test fun simultaneousThreadsAdmitOneDrainAndRetryEveryOtherWorker() {
+        val count = 12
+        val workers = List(count) { Fake().also { it.wake() } }
+        val ready = CountDownLatch(count)
+        val start = CountDownLatch(1)
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val rejected = CountDownLatch(count - 1)
+        val active = AtomicInteger()
+        val maximum = AtomicInteger()
+        val pool = Executors.newFixedThreadPool(count)
+        val results = workers.map { fake ->
+            pool.submit<PushWakeRunLoop.Result> {
+                ready.countDown()
+                check(start.await(10, TimeUnit.SECONDS))
+                val result = runBlocking {
+                    fake.loop {
+                        val current = active.incrementAndGet()
+                        maximum.updateAndGet { maxOf(it, current) }
+                        entered.countDown()
+                        try { check(release.await(60, TimeUnit.SECONDS)) }
+                        finally { active.decrementAndGet() }
+                        fake.pending = false
+                        PushWakeDrain.Result.Empty
+                    }.run()
+                }
+                if (result == PushWakeRunLoop.Result.RETRY) rejected.countDown()
+                result
+            }
+        }
+        try {
+            assertTrue(ready.await(10, TimeUnit.SECONDS))
+            start.countDown()
+            assertTrue(entered.await(10, TimeUnit.SECONDS))
+            assertTrue(rejected.await(10, TimeUnit.SECONDS))
+            assertEquals(1, maximum.get())
+            release.countDown()
+            val finished = results.map { it.get(10, TimeUnit.SECONDS) }
+            assertEquals(1, finished.count { it == PushWakeRunLoop.Result.SUCCESS })
+            assertEquals(count - 1, finished.count { it == PushWakeRunLoop.Result.RETRY })
+            for ((index, result) in finished.withIndex()) {
+                if (result == PushWakeRunLoop.Result.RETRY) {
+                    assertTrue(workers[index].pending)
+                    assertEquals(PushWakeRunLoop.Result.SUCCESS, runBlocking {
+                        workers[index].loop {
+                            workers[index].pending = false
+                            PushWakeDrain.Result.Empty
+                        }.run()
+                    })
+                }
+            }
+            assertTrue(workers.none { it.pending })
+            assertEquals(0, active.get())
+        } finally {
+            start.countDown()
+            release.countDown()
+            pool.shutdownNow()
+            assertTrue("test workers did not stop", pool.awaitTermination(10, TimeUnit.SECONDS))
         }
     }
 
