@@ -31,8 +31,8 @@ internal class PushFullScan(
     private val page: (after: String?, limit: Int) -> PushRegistrationStore.RecoveryPage,
     /** Resolves one hint; the result is a hint, not authorization. */
     private val find: (String) -> PushRegistrationStore.RouteResult,
-    private val trust: (localId: String, peerId: String) -> PushDrainTrustGate.Snapshot?,
-    private val derive: (localId: String, peerId: String, snapshot: PushDrainTrustGate.Snapshot) -> String?,
+    private val trust: suspend (localId: String, peerId: String) -> PushDrainTrustGate.Snapshot?,
+    private val derive: suspend (localId: String, peerId: String, snapshot: PushDrainTrustGate.Snapshot) -> String?,
     private val receive: suspend (route: String) -> PushReceiveWindow.Outcome,
     private val recordFailure: () -> Unit = {},
 ) {

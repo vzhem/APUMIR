@@ -196,6 +196,15 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
             android.util.Log.i("MessengerApp", "early core start deferred: local identity is not ready")
         }
 
+        // Remote push: a no-op in every released build. Only a build that is
+        // Firebase-configured, explicitly marked as a push test build *and* has
+        // a reviewed endpoint host installs the periodic repair job and asks for
+        // a registration attempt here. Nothing below runs while it is disabled,
+        // and the call never starts a network request by itself.
+        if (localIdentityReady) {
+            com.vladimir.messenger.data.push.PushServiceLocator.onStartup(applicationContext)
+        }
+
         // Automatic collection is an Organizer (20 qualified referrals) entitlement.
         try {
             val qualified = ReferralRankStore.qualifiedDirectCount(applicationContext)

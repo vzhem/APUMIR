@@ -78,7 +78,8 @@ class MailboxResultsTest(unittest.TestCase):
                                    "PushSignalPolicyTest", "PushRuntimeConfigTest", "PushRuntimeCoordinatorTest",
                                    "PushDrainTrustGateTest", "PushRegistrationFlowTest",
                                    "PushSignalInboxTest", "PushReceiveWindowTest", "PushWakeSyncTest",
-                                   "PushFullScanTest",
+                                   "PushFullScanTest", "PushSignalSinkTest", "PushTargetsTest",
+                                   "PushTrustResolverTest", "PushTokenRegistrarTest",
                                    "PushMailboxTextPolicyTest", "PushMailboxMessageSealerTest", "PushMailboxMessageOpenerTest",
                                ))):
             source = (tests / (name + ".kt")).read_text(encoding="utf-8")
