@@ -22,9 +22,8 @@ internal class PushWakeCrypto(
     private val recordFailure: () -> Unit,
 ) {
     /**
-     * Derives material through this instance's FFI entry point. Only a
-     * constructor argument can replace it, and shipped code never passes one;
-     * a subclass could override the checks, so the class stays final.
+     * Derives material through the FFI entry point bound at construction. The
+     * class stays final: a subclass could otherwise bypass these checks.
      */
     fun derive(
         localBinding: ByteArray,
