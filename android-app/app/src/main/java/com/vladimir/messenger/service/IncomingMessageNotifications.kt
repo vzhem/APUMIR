@@ -8,70 +8,85 @@ import com.vladimir.messenger.data.local.entity.MessageEntity
 import com.vladimir.messenger.data.schedule.DeferredInboxStore
 import com.vladimir.messenger.util.ChatPreviews
 import com.vladimir.messenger.util.InlineImage
-import com.vladimir.messenger.util.QuietMessage
-import com.vladimir.messenger.util.SosMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collect
 
-internal enum class IncomingAlert { NORMAL, QUIET, SOS }
-
-/** Claims local work once, including suppressed rows, before invoking any side effect. */
-internal class IncomingNotificationProcessor(
-    private val claim: suspend (String) -> Boolean,
-    private val isDeferred: (String) -> Boolean,
-    private val alert: suspend (MessageEntity, IncomingAlert) -> Unit,
-) {
-    suspend fun process(message: MessageEntity) {
-        if (!claim(message.id)) return
-        // Deferred reveal owns its separate notification, including after completion.
-        if (isDeferred(message.id) || InlineImage.isPart(message.content) ||
-            ChatPreviews.isServiceEnvelope(message.content)
-        ) return
-        val kind = when {
-            SosMessage.isSos(message.content) -> IncomingAlert.SOS
-            QuietMessage.isQuiet(message.content) -> IncomingAlert.QUIET
-            else -> IncomingAlert.NORMAL
-        }
-        alert(message, kind)
-    }
-}
-
 /**
- * A bounded Room queue is filled only by actual local arrivals, not by history
- * imports. Claiming before posting avoids duplicate alerts after restart; a
- * process death between that claim and Android's notification call can still
- * lose an alert. Delivery itself and sender timestamps are not changed.
+ * The service may observe arrivals continuously; the local recovery worker can
+ * also drain a bounded batch without starting the service or the Rust engine.
+ * Both use the same processor/gate and the same privacy, mute, SOS and quiet
+ * paths. Scheduling a worker is not proof that Android displayed a notification.
  */
 internal class IncomingMessageNotifications(
     private val context: Context,
     private val messages: MessageDao,
     private val notifications: NotificationHelper,
 ) {
+    private fun processor(recipientId: String) = IncomingNotificationProcessor(
+        recipientId = recipientId,
+        load = messages::getMessageById,
+        complete = { message ->
+            messages.completePendingNotification(
+                message.id, message.chatId, message.senderId, message.recipientId,
+                message.content, message.timestamp, message.topicId, message.channel,
+            ) == 1
+        },
+        isSuppressed = { message ->
+            DeferredInboxStore.owns(context, message.id) ||
+                DeferredInboxStore.isCancelled(context, message.senderId, message.id) ||
+                (message.channel != "GROUP" && com.vladimir.messenger.data.chatclear.ChatClearRegistry
+                    .isCleared(context, message.senderId, message.id))
+        },
+        isActive = { message ->
+            notifications.isMessageNotificationActive(message.id, IncomingNotificationSnapshot.of(recipientId, message))
+        },
+        alert = { message, kind -> show(message, kind, IncomingNotificationSnapshot.of(recipientId, message)) },
+        cancel = { message ->
+            notifications.cancelMessageNotification(message.id, IncomingNotificationSnapshot.of(recipientId, message))
+        },
+        current = { IncomingNotificationIdentity.isCurrent(context, recipientId) },
+    )
+
     suspend fun observe(recipientId: String) {
-        val processor = IncomingNotificationProcessor(
-            claim = { messages.claimPendingNotification(it) == 1 },
-            isDeferred = { DeferredInboxStore.owns(context, it) },
-            alert = { message, kind -> show(message, kind) },
-        )
+        val processor = processor(recipientId)
         messages.observePendingNotifications(recipientId).collect { batch ->
+            var retry = false
             for (message in batch) {
                 try {
-                    processor.process(message)
+                    if (processor.process(message.id) == IncomingNotificationProcessor.Result.RETRY) retry = true
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
-                    Log.w("IncomingNotifications", "Notification processing failed", error)
+                    Log.w("IncomingNotifications", "Notification processing failed: ${error.javaClass.simpleName}")
+                    retry = true
                 }
             }
+            // The outer service loop waits before resubscribing; an unchanged
+            // failed row would otherwise never trigger another Room emission.
+            if (retry) throw IllegalStateException("Pending notification needs retry")
         }
     }
 
-    private suspend fun show(message: MessageEntity, kind: IncomingAlert) {
+    /** Used by the background worker; cursor persistence is the worker's responsibility. */
+    suspend fun drainBatch(recipientId: String, cursor: IncomingNotificationSweep.Cursor): IncomingNotificationSweep.Step? {
+        val processor = processor(recipientId)
+        val sweep = IncomingNotificationSweep(
+            maxPendingRowId = { messages.maxPendingNotificationRowId(recipientId) },
+            page = { after, through, limit -> messages.pendingNotificationPage(recipientId, after, through, limit) },
+            process = processor::process,
+            current = { IncomingNotificationIdentity.isCurrent(context, recipientId) },
+            recordFailure = { error ->
+                Log.w("IncomingNotifications", "Notification recovery failed: ${error.javaClass.simpleName}")
+            },
+        )
+        return sweep.run(cursor)
+    }
+
+    private suspend fun show(message: MessageEntity, kind: IncomingAlert, snapshot: String): IncomingNotificationPost {
         val topic = message.topicId?.takeIf { it.isNotBlank() }
         if (kind == IncomingAlert.SOS) {
             // SOS deliberately bypasses ordinary mute settings, as before.
-            notifications.showSosNotification(message.chatId, message.senderId, topic, messageId = message.id)
-            return
+            return notifications.showSosNotification(message.chatId, message.senderId, topic, messageId = message.id, snapshot = snapshot)
         }
         val text = if (GifLibrary.isGifRef(message.content)) {
             "🖼 Гифка"
@@ -81,9 +96,9 @@ internal class IncomingMessageNotifications(
         }
         // NotificationHelper is the common final privacy/mute gate for app,
         // section, chat/group and topic. Quiet messages use its silent path.
-        notifications.showMessageNotification(
+        return notifications.showMessageNotification(
             message.chatId, message.senderId, text, true, topic,
-            quiet = kind == IncomingAlert.QUIET, messageId = message.id,
+            quiet = kind == IncomingAlert.QUIET, messageId = message.id, snapshot = snapshot,
         )
     }
 }

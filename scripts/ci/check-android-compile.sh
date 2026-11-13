@@ -55,7 +55,8 @@ cd android-app || exit 1
     --tests '*PushHttpClientTest*' --tests '*PushWakeCryptoTest*' --tests '*PushMailboxHttpClientTest*' --tests '*PushMailboxAccessSignerTest*' --tests '*PushMailboxHttpsTransportTest*' --tests '*PushHttpLoopbackTlsTest*' \
     --tests '*PushEpochEnvelopeTest*' --tests '*PushMailboxMessageCodecTest*' --tests '*PushMailboxTextPolicyTest*' --tests '*PushMailboxMessageOpenerTest*' --tests '*PushMailboxMessageSealerTest*' --tests '*PushMailboxDrainTest*' --tests '*PushMailboxPutBuilderTest*' \
     --tests '*MirrorPendingOutgoingTest*' --tests '*MirrorPendingScheduleIntegrationTest*' --tests '*MirrorPendingFlusherTest*' \
-    --tests '*MirrorOutgoingFrameTest*' --tests '*MirrorOutgoingDispatcherTest*' --tests '*ReplyAwareOutboxSenderTest*' --tests '*DeletionOutboxTest*'
+    --tests '*MirrorOutgoingFrameTest*' --tests '*MirrorOutgoingDispatcherTest*' --tests '*ReplyAwareOutboxSenderTest*' --tests '*DeletionOutboxTest*' \
+    --tests '*IncomingNotificationProcessorTest*' --tests '*IncomingNotificationSweepTest*' --tests '*NotificationRecoveryScheduleGateTest*'
 TESTS_STATUS=$?
 
 # ---- почему тесты упали: словами в лог, а не «красный шаг без причины» -------

@@ -98,6 +98,25 @@ class NotificationResultsTest(unittest.TestCase):
             self.assertEqual(len(methods), len(set(methods)))
             self.assertEqual(checker.EXPECTED[classname], set(methods))
 
+    def test_local_notification_cases_are_required_and_cannot_be_skipped(self):
+        root = Path(__file__).resolve().parents[2] / 'android-app/app/src/androidTest/java'
+        expected_counts = {'IncomingNotificationRecoveryInstrumentedTest': 13,
+                           'NotificationManagerRecoveryInstrumentedTest': 5,
+                           'NotificationRecoveryWorkManagerInstrumentedTest': 3}
+        self.assertEqual(3, len(checker.LOCAL_NOTIFICATION_EXPECTED))
+        for classname, names in checker.LOCAL_NOTIFICATION_EXPECTED.items():
+            self.assertEqual(expected_counts[classname.rsplit('.', 1)[-1]], len(names))
+            source = (root / (classname.replace('.', '/') + '.kt')).read_text(encoding='utf-8')
+            methods = re.findall(r'@Test\s+fun\s+([A-Za-z_]\w*)\s*\(', source)
+            self.assertEqual(len(methods), len(set(methods)))
+            self.assertEqual(names, set(methods))
+            for name in names:
+                key = (classname, name)
+                self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[:2] != key]))
+                skipped = [(*case[:2], '<skipped/>') if case[:2] == key else case for case in self.all_cases()]
+                self.assertEqual(1, self.run_report(skipped))
+        self.assertEqual(1, self.run_report(self.all_cases() + self.all_cases()[:1]))
+
     def test_deletion_ack_routing_cases_are_all_required(self):
         source = (Path(__file__).resolve().parents[2] /
                   "android-app/app/src/androidTest/java/com/vladimir/messenger/data/repository/DeletionOutboxRoutingInstrumentedTest.kt").read_text(encoding="utf-8")

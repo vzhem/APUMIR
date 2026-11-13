@@ -125,6 +125,8 @@ class MainActivity : ComponentActivity() {
     ) { isGranted: Boolean ->
         if (isGranted) {
             Log.i("MainActivity", "Notification permission granted")
+            runCatching { com.vladimir.messenger.worker.IncomingNotificationRecoveryWorker.enqueue(applicationContext) }
+                .onFailure { Log.w("MainActivity", "Local notification recovery could not be scheduled") }
             retryUpdateNotificationAfterPermission()
         } else {
             Log.w("MainActivity", "Notification permission denied")
@@ -186,6 +188,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // A return from Android's notification settings may unblock local work.
+        runCatching { com.vladimir.messenger.worker.IncomingNotificationRecoveryWorker.enqueue(applicationContext) }
+            .onFailure { Log.w("MainActivity", "Local notification recovery could not be scheduled") }
         applyIncomingCallWake(intent)
         handleDeepLinkIntent(intent)
         maybeCheckForUpdates()

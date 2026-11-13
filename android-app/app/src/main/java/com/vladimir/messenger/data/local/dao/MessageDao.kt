@@ -309,9 +309,44 @@ interface MessageDao {
     )
     fun observePendingNotifications(recipientId: String): Flow<List<MessageEntity>>
 
-    /** Claim before posting: a service/process restart cannot re-alert an already claimed row. */
+    /** Legacy atomic claim, retained for existing callers and schema tests. */
     @Query("UPDATE messages SET notificationPending = 0 WHERE id = :id AND notificationPending = 1 AND isFromMe = 0")
     suspend fun claimPendingNotification(id: String): Int
+
+    /** A direct-chat read consumes only work that was already present in this transaction. */
+    @Query(
+        "UPDATE messages SET notificationPending = 0 WHERE chatId = :chatId " +
+            "AND isFromMe = 0 AND notificationPending = 1 AND channel <> 'GROUP' " +
+            "AND (topicId IS NULL OR topicId = '') " +
+            "AND NOT EXISTS (SELECT 1 FROM groups WHERE groups.id = messages.chatId)"
+    )
+    suspend fun clearPendingForReadDirectChat(chatId: String): Int
+
+    /** Post first, then clear only the exact content/recipient snapshot that was shown. */
+    @Query(
+        "UPDATE messages SET notificationPending = 0 WHERE id = :id AND notificationPending = 1 AND isFromMe = 0 " +
+            "AND chatId = :chatId AND senderId = :senderId AND recipientId = :recipientId " +
+            "AND content = :content AND timestamp = :timestamp AND topicId IS :topicId AND channel = :channel"
+    )
+    suspend fun completePendingNotification(
+        id: String, chatId: String, senderId: String, recipientId: String, content: String,
+        timestamp: Long, topicId: String?, channel: String,
+    ): Int
+
+    /** Capture a finite upper bound, so newer arrivals cannot starve a retry. */
+    @Query(
+        "SELECT MAX(rowid) FROM messages WHERE isFromMe = 0 AND notificationPending = 1 " +
+            "AND (recipientId = :recipientId OR recipientId = '')"
+    )
+    suspend fun maxPendingNotificationRowId(recipientId: String): Long?
+
+    /** Resume the same bounded local pass; message contents are re-read before posting. */
+    @Query(
+        "SELECT rowid AS sequence, id FROM messages WHERE isFromMe = 0 AND notificationPending = 1 " +
+            "AND (recipientId = :recipientId OR recipientId = '') AND (:after IS NULL OR rowid > :after) AND rowid <= :through " +
+            "ORDER BY rowid ASC LIMIT :limit"
+    )
+    suspend fun pendingNotificationPage(recipientId: String, after: Long?, through: Long, limit: Int): List<PendingNotificationCandidate>
 
     // ── Группы и темы (v8) ──────────────────────────────────────────────────
     @Query("SELECT * FROM messages WHERE chatId = :chatId AND topicId = :topicId ORDER BY timestamp ASC, id ASC")

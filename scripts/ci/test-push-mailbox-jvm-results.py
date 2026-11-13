@@ -82,6 +82,24 @@ class MailboxResultsTest(unittest.TestCase):
             self.assertEqual(len(methods), len(set(methods)))
             self.assertEqual(expected, set(methods))
 
+    def test_local_notification_cases_are_required_and_cannot_be_skipped(self):
+        root = Path(__file__).resolve().parents[2] / 'android-app/app/src/test/java'
+        expected_counts = {'IncomingNotificationProcessorTest': 14, 'IncomingNotificationSweepTest': 12,
+                           'NotificationRecoveryScheduleGateTest': 9}
+        self.assertEqual(3, len(checker.LOCAL_NOTIFICATION_EXPECTED))
+        for classname, names in checker.LOCAL_NOTIFICATION_EXPECTED.items():
+            name = classname.rsplit('.', 1)[-1]
+            self.assertEqual(expected_counts[name], len(names))
+            source = (root / (classname.replace('.', '/') + '.kt')).read_text(encoding='utf-8')
+            methods = re.findall(r'@Test\s+fun\s+([A-Za-z_]\w*)\s*\(', source)
+            self.assertEqual(len(methods), len(set(methods)))
+            self.assertEqual(names, set(methods))
+            for method in names:
+                key = (classname, method)
+                self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[:2] != key]))
+                skipped = [(*case[:2], '<skipped/>') if case[:2] == key else case for case in self.all_cases()]
+                self.assertEqual(1, self.run_report(skipped))
+
     def test_deletion_outbox_source_cases_are_all_required(self):
         source = (Path(__file__).resolve().parents[2] /
                   "android-app/app/src/test/java/com/vladimir/messenger/data/repository/DeletionOutboxTest.kt").read_text(encoding="utf-8")

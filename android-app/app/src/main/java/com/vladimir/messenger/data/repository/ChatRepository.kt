@@ -43,7 +43,8 @@ class ChatRepository @Inject constructor(
     private val contactDao: com.vladimir.messenger.data.local.dao.ContactDao,
     private val database: com.vladimir.messenger.data.local.AppDatabase,
 ) {
-    private val incomingMessageStore = IncomingMessageStore(database)
+    private val incomingMessageStore = IncomingMessageStore(database) { com.vladimir.messenger.worker.IncomingNotificationRecoveryWorker.enqueue(context) }
+    private val notificationReads = IncomingNotificationReads(database) { com.vladimir.messenger.service.LocalMessageNotifications.cancelChat(context, it) }
     private val mirrorOutgoingStore = MirrorOutgoingStore(database) { peer, id ->
         com.vladimir.messenger.data.chatclear.ChatClearRegistry.isCleared(context, peer, id)
     }
@@ -1054,9 +1055,8 @@ class ChatRepository @Inject constructor(
         chatDao.updateChat(chat.copy(lastMessage = null, lastMessageTime = null, unreadCount = 0))
     }
 
-    suspend fun markAsRead(chatId: String) {
-        chatDao.markAsRead(chatId)
-    }
+    suspend fun markAsRead(chatId: String) = notificationReads.markRead(chatId)
+    suspend fun toggleReadState(chatId: String) = notificationReads.toggleRead(chatId)
 
     // ── р249: архив и «без звука» ──────────────────────────────────────────
 

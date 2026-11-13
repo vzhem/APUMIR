@@ -228,8 +228,21 @@ interface GroupDao {
     @Query("UPDATE groups SET unreadCount = unreadCount + 1 WHERE id = :groupId")
     suspend fun incrementGroupUnread(groupId: String)
 
-    @Query("UPDATE groups SET unreadCount = 0 WHERE id = :groupId")
-    suspend fun markGroupRead(groupId: String)
+    @Query("UPDATE groups SET unreadCount = 0 WHERE id = :groupId AND unreadCount <> 0")
+    suspend fun resetGroupUnread(groupId: String)
+
+    @Query(
+        "UPDATE messages SET notificationPending = 0 WHERE chatId = :groupId AND channel = 'GROUP' " +
+            "AND isFromMe = 0 AND notificationPending = 1 AND EXISTS (SELECT 1 FROM groups WHERE id = :groupId)"
+    )
+    suspend fun clearPendingGroupAlerts(groupId: String): Int
+
+    /** Read and pending-alert state move together; later arrivals remain pending. */
+    @Transaction
+    suspend fun markGroupRead(groupId: String) {
+        resetGroupUnread(groupId)
+        clearPendingGroupAlerts(groupId)
+    }
 
     /**
      * Счётчик группы = сумма непрочитанных по её темам.
@@ -373,8 +386,21 @@ interface GroupDao {
     @Query("UPDATE group_topics SET unreadCount = unreadCount + 1 WHERE id = :topicId")
     suspend fun incrementTopicUnread(topicId: String)
 
-    @Query("UPDATE group_topics SET unreadCount = 0 WHERE id = :topicId")
-    suspend fun markTopicRead(topicId: String)
+    @Query("UPDATE group_topics SET unreadCount = 0 WHERE id = :topicId AND groupId = :groupId AND unreadCount <> 0")
+    suspend fun resetTopicUnread(groupId: String, topicId: String)
+
+    @Query(
+        "UPDATE messages SET notificationPending = 0 WHERE chatId = :groupId AND topicId = :topicId AND channel = 'GROUP' " +
+            "AND isFromMe = 0 AND notificationPending = 1 AND EXISTS " +
+            "(SELECT 1 FROM group_topics WHERE id = :topicId AND groupId = :groupId)"
+    )
+    suspend fun clearPendingTopicAlerts(groupId: String, topicId: String): Int
+
+    @Transaction
+    suspend fun markTopicRead(groupId: String, topicId: String) {
+        resetTopicUnread(groupId, topicId)
+        clearPendingTopicAlerts(groupId, topicId)
+    }
 
     @Query("DELETE FROM group_topics WHERE id = :topicId")
     suspend fun deleteTopic(topicId: String)

@@ -118,6 +118,7 @@ jobs:
           python3 scripts/ci/check-delivery-cadence.py
           python3 scripts/ci/check-emergency-keepalive.py
           python3 scripts/ci/check-notification-arrival.py
+          python3 scripts/ci/check-local-notification-sql.py
           python3 scripts/ci/check-presence-recovery.py
           python3 scripts/ci/check-ipv6-proxy-settings.py
           python3 scripts/ci/check-ui-return-contracts.py

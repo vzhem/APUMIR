@@ -268,6 +268,38 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "externalStartRefusalDoesNotDisableTheRunningServicesFuturePulses",
 }}
 
+# Real Room, NotificationManager and WorkManager adapters on an empty emulator.
+LOCAL_NOTIFICATION_EXPECTED = {
+    'com.vladimir.messenger.service.IncomingNotificationRecoveryInstrumentedTest': {
+        'snapshotCompletionDoesNotClearChangedOrForeignRows',
+        'postBeforeCompletionSurvivesReopenAndActivePostAvoidsSecondAlert',
+        'simultaneousServiceAndWorkerProcessorsPostOnce',
+        'boundedCursorSurvivesReopenAndVisitsPastFailuresBeforeWrapping',
+        'checkpointIsPrivateProfileScopedAndMalformedValuesRescan',
+        'hiltCreatesTheActualWorkerAndNoIdentityStopsTheSweep',
+        'directReadClearsOnlyPriorWorkAndLaterArrivalsRemainPending',
+        'directReadWaitsForAnInFlightPostAndCancelsItAfterCompletion',
+        'groupAndTopicReadsClearOnlyTheirScopedPendingAlerts',
+        'groupReadWaitsForInFlightPostAndCancelsOnlyTheReadTopic',
+        'mirroredTopicReadKeepsOtherTopicUnreadAndPending',
+        'sqlitePagesIncludeNegativeAndZeroRowidsAfterReopen',
+        'notificationSchedulingIsAfterCommitAndNeverRearmsDuplicates',
+    },
+    'com.vladimir.messenger.service.NotificationManagerRecoveryInstrumentedTest': {
+        'collidingChatIdsKeepSeparatePostsAndTapIntents',
+        'readingOneTopicCancelsOnlyItsPostsIncludingSos',
+        'disabledOrMissingAndroidChannelIsNotReportedAsPostable',
+        'androidAppOpsBlockLeavesThePostBlockedUntilRestored',
+        'appMuteIsAnIntentionalSuppressionRatherThanASystemPost',
+    },
+    'com.vladimir.messenger.worker.NotificationRecoveryWorkManagerInstrumentedTest': {
+        'arrivalAfterFinalCheckStartsIndependentSuccessorBeforeOlderFailure',
+        'arrivalBeforeFinishCreatesOneSuccessorEvenIfTheOlderWorkerFails',
+        'independentPeriodicPassRepairsACommitWithoutAnEnqueueDespiteAStaleTicket',
+    },
+}
+EXPECTED.update(LOCAL_NOTIFICATION_EXPECTED)
+
 
 def check(results: Path, log: Path, status: int) -> int:
     seen = set()
@@ -283,7 +315,10 @@ def check(results: Path, log: Path, status: int) -> int:
             if classname not in EXPECTED:
                 continue
             name = case.get("name", "")
-            seen.add((classname, name))
+            key = (classname, name)
+            if key in seen and name in EXPECTED[classname]:
+                errors.append(f"Duplicate expected test: {classname}.{name}")
+            seen.add(key)
             for tag in ("failure", "error", "skipped"):
                 for bad in case.findall(tag):
                     detail = (bad.get("message") or bad.text or tag).strip()[:1000]

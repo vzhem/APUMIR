@@ -1849,8 +1849,7 @@ class CoreServerService : Service() {
     private suspend fun mirrorApplyRead(peerId: String, groupId: String, topicId: String) {
         runCatching {
             if (groupId.isNotBlank()) {
-                if (topicId.isNotBlank()) groupDao.markTopicRead(topicId)
-                groupDao.markGroupRead(groupId)
+                com.vladimir.messenger.data.repository.IncomingGroupNotificationReads.forContext(groupDao, applicationContext).mirror(groupId, topicId)
                 Log.i(TAG, "Mirror read: непрочитанное группы снято по партнёру")
                 return@runCatching
             }

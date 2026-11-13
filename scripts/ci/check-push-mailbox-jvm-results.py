@@ -313,6 +313,52 @@ DELETION_OUTBOX_EXPECTED = {
 }
 EXPECTED[DELETION_OUTBOX_CLASS] = DELETION_OUTBOX_EXPECTED
 
+# Local notification recovery has its own report gate; these are not push delivery tests.
+LOCAL_NOTIFICATION_EXPECTED = {
+    'com.vladimir.messenger.service.IncomingNotificationProcessorTest': {
+        'delayedQuietSosAndOrdinaryMessagesUseTheCorrectPathsOnce',
+        'deferredClearedAndServiceOrMediaPartsAreConsumedWithoutAlerts',
+        'systemBlockedLeavesPendingWhileIntentionalMuteIsCompleted',
+        'failureBeforePostingLeavesWorkForRetry',
+        'activePostRepairsCrashBeforeRoomCompletionWithoutAlertingTwice',
+        'dismissedPostInCrashWindowCanBePostedAgainRatherThanLost',
+        'activeOldBodyOrDifferentProfileCannotCompleteANewSnapshot',
+        'snapshotSeparatesEveryIdentityAndShownFieldIncludingNullTopics',
+        'cancelledAfterNotifyKeepsFlagAndASecondProcessorRepairsIt',
+        'serviceAndWorkerCannotBothPostTheSamePendingRowInOneProcess',
+        'changedMessageCancelsOnlyItsPostAndStaysPending',
+        'staleCompletionDoesNotCancelANewerSnapshotOfTheSameId',
+        'profileChangeDuringPostCancelsAndDoesNotComplete',
+        'otherRecipientsOutgoingAndMissingRowsAreNeverPostedOrClaimed',
+    },
+    'com.vladimir.messenger.service.IncomingNotificationSweepTest': {
+        'emptyQueueCompletesWithoutInventingWork',
+        'boundedPassSurvivesNewArrivalsAndWrapsBackToFailedRows',
+        'failedItemsDoNotHideHealthyItemsInTheSamePage',
+        'systemBlockedRowsRemainForPeriodicRecoveryWithoutAnEagerRetryLoop',
+        'transientFailureAndNewArrivalsStillRetryWhenOtherRowsAreBlocked',
+        'newWorkAfterCapturedHighWaterIsRetriedEvenWhenAnOlderRowIsBlocked',
+        'brokenDiagnosticsCannotHideOtherRowsOrTurnFailureIntoSuccess',
+        'identityChangeAbortsWithoutAdvancingCursor',
+        'corruptCursorStartsARescanRatherThanSkippingTheQueue',
+        'malformedPageCannotAdvanceOrPostAnyRow',
+        'cancellationPropagatesAndDoesNotProcessLaterRows',
+        'unusualRowidsAreTraversedAndInvalidLimitsAreRejected',
+    },
+    'com.vladimir.messenger.worker.NotificationRecoveryScheduleGateTest': {
+        'dirtyWorkerEnqueuesAnIndependentSuccessorBeforeItReturns',
+        'retryKeepsTicketButAConcurrentArrivalGetsAnIndependentSuccessor',
+        'cancellationWithDirtyWorkSchedulesSuccessorAndWithoutItReleasesTheTicket',
+        'lateFailureCannotClearAStartedOrReplacementTicket',
+        'asynchronousAndSynchronousEnqueueFailuresReleaseTheTicket',
+        'thrownFailureOrBrokenDiagnosticsCannotLeaveADeadTicket',
+        'cancellationPropagatesWithoutLeavingAReservedTicket',
+        'concurrentRequestsCoalesceAndStillCreateOneSuccessor',
+        'untrackedPeriodicAndRestoredWorkersCannotChangeTheCurrentTicket',
+    },
+}
+EXPECTED.update(LOCAL_NOTIFICATION_EXPECTED)
+
 
 def check(results: Path) -> int:
     expected = {(classname, name) for classname, names in EXPECTED.items() for name in names}

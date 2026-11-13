@@ -33,22 +33,56 @@ class NotificationArrivalContract(unittest.TestCase):
         self.assertIn('AppDatabase.MIGRATION_40_41', source("di/AppModule.kt"))
         self.assertIn('AppDatabase.MIGRATION_41_42', source("di/AppModule.kt"))
 
-    def test_queue_and_atomic_claim_do_not_depend_on_sender_timestamp(self):
-        dao = source("data/local/dao/MessageDao.kt")
+    def test_pending_work_posts_before_snapshot_completion_and_ignores_sender_clock(self):
+        dao = source('data/local/dao/MessageDao.kt')
         query = section(dao, '/** Newly inserted local work', '// ── Группы')
-        self.assertIn('notificationPending = 1', query)
-        self.assertIn('recipientId = :recipientId', query)
-        self.assertIn('LIMIT 512', query)
-        self.assertNotIn("strftime", query)
+        for marker in ('notificationPending = 1', 'recipientId = :recipientId', 'LIMIT 512',
+                       'MAX(rowid)', 'rowid <= :through', ':after IS NULL',
+                       'AND notificationPending = 1 AND isFromMe = 0', 'topicId IS :topicId',
+                       'channel = :channel'):
+            self.assertIn(marker, query)
+        self.assertNotIn('strftime', query)
         self.assertNotIn('timestamp >=', query)
-        self.assertIn('UPDATE messages SET notificationPending = 0', query)
-        self.assertIn('AND notificationPending = 1 AND isFromMe = 0', query)
-        processor = source('service/IncomingMessageNotifications.kt')
-        self.assertLess(processor.index('if (!claim(message.id)) return'), processor.index('alert(message, kind)'))
-        for marker in ('DeferredInboxStore.owns', 'InlineImage.isPart', 'ChatPreviews.isServiceEnvelope',
-                       'IncomingAlert.SOS', 'IncomingAlert.QUIET', 'quiet = kind == IncomingAlert.QUIET'):
+        processor = source('service/IncomingNotificationProcessor.kt')
+        self.assertIn('IncomingNotificationGate.run', processor)
+        self.assertLess(processor.index('alert(message, kind)'), processor.index('complete(message)'))
+        self.assertIn('IncomingNotificationPost.BLOCKED', processor)
+        self.assertIn('return@run Result.BLOCKED', processor)
+        self.assertIn('isActive(message)', processor)
+        self.assertIn('cancel(message)', processor)
+        self.assertNotIn('claimPendingNotification', processor)
+        for marker in ('InlineImage.isPart', 'ChatPreviews.isServiceEnvelope', 'IncomingAlert.SOS', 'IncomingAlert.QUIET'):
             self.assertIn(marker, processor)
-        self.assertIn('isMuted(chatId, topicId, group, nowMs)', source('service/NotificationHelper.kt'))
+        observer = source('service/IncomingMessageNotifications.kt')
+        for marker in ('DeferredInboxStore.owns', 'DeferredInboxStore.isCancelled', 'ChatClearRegistry',
+                       'quiet = kind == IncomingAlert.QUIET', 'completePendingNotification', 'IncomingNotificationSweep'):
+            self.assertIn(marker, observer)
+        helper = source('service/NotificationHelper.kt')
+        for marker in ('isMuted(chatId, topicId, group, nowMs)', 'POST_NOTIFICATIONS', 'areNotificationsEnabled()',
+                       'IMPORTANCE_NONE', 'IncomingNotificationPost.SUPPRESSED', 'IncomingNotificationPost.BLOCKED',
+                       'LocalMessageNotifications.EXTRA_SNAPSHOT'):
+            self.assertIn(marker, helper)
+
+    def test_recovery_and_read_boundaries_are_wired_but_not_claimed_atomic(self):
+        worker = source('worker/IncomingNotificationRecoveryWorker.kt')
+        self.assertLess(worker.index('.drainBatch(owner, cursor)'), worker.index('checkpoint.save(owner, step.cursor)'))
+        self.assertIn('IncomingNotificationIdentity.current', worker)
+        self.assertIn('scheduleGate.workerFinished(id', worker)
+        adapter = source('worker/NotificationRecoveryWorkManager.kt')
+        self.assertIn('manager.enqueue(request)', adapter)
+        self.assertIn('enqueueUniquePeriodicWork', adapter)
+        self.assertNotIn('NetworkType.CONNECTED', adapter)
+        store = source('data/repository/IncomingMessageStore.kt')
+        self.assertLess(store.index('val saved = database.withTransaction'), store.index('notificationCommitted()'))
+        self.assertIn('IncomingNotificationRecoveryWorker.enqueue(context)', source('data/repository/ChatRepository.kt'))
+        self.assertIn('IncomingNotificationRecoveryWorker.schedule(applicationContext)', source('MessengerApplication.kt'))
+        self.assertIn('IncomingNotificationRecoveryWorker.enqueue(applicationContext)', source('MainActivity.kt'))
+        for path in ('data/repository/IncomingNotificationReads.kt', 'data/repository/IncomingGroupNotificationReads.kt'):
+            self.assertIn('IncomingNotificationGate.run', source(path))
+        self.assertIn('notificationReads.topic(groupId, topicId)', source('data/group/GroupRepository.kt'))
+        self.assertIn('notificationReads.group(groupId)', source('data/group/GroupRepository.kt'))
+        self.assertIn('.mirror(groupId, topicId)', source('service/CoreServerService.kt'))
+        self.assertIn('LocalMessageNotifications.cancelTopic', source('data/repository/IncomingGroupNotificationReads.kt'))
 
     def test_live_sources_history_and_deferred_are_separated(self):
         repo = source('data/repository/ChatRepository.kt')

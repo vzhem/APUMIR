@@ -228,6 +228,7 @@ class GroupRepository(
     /** Android context for local text/name colour preferences; null in JVM tests. */
     private val appContext: android.content.Context? = null,
 ) {
+    private val notificationReads = com.vladimir.messenger.data.repository.IncomingGroupNotificationReads.forContext(groupDao, appContext)
 
     /** Раунд 137: что уже ретранслировали (и когда) - без повторного шторма. */
     private val deletionRelayedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
@@ -2022,10 +2023,10 @@ class GroupRepository(
             }
         } else {
             for (topic in groupDao.getTopics(groupId)) {
-                groupDao.markTopicRead(topic.id)
+                groupDao.markTopicRead(groupId, topic.id)
             }
         }
-        groupDao.markGroupRead(groupId)
+        notificationReads.group(groupId)
         groupDao.updateGroupLastMessage(groupId, "", 0L)
 
         val envelope = GroupWire.buildMessageDelete(groupId, GroupWire.DELETE_ALL_MARKER, me)
@@ -3238,10 +3239,10 @@ class GroupRepository(
                             }
                         } else {
                             for (topic in groupDao.getTopics(packet.groupId)) {
-                                groupDao.markTopicRead(topic.id)
+                                groupDao.markTopicRead(packet.groupId, topic.id)
                             }
                         }
-                        groupDao.markGroupRead(packet.groupId)
+                        notificationReads.group(packet.groupId)
                         groupDao.updateGroupLastMessage(packet.groupId, "", 0L)
                         relayMessageDelete(group.id, packet.messageId, deleter, senderId)
                         Log.i(TAG, "delete all messages applied group=${group.id} via=$senderId deleter=$deleter")
@@ -4083,14 +4084,7 @@ class GroupRepository(
         // проверки получался замкнутый круг: сброс непрочитанных писал в
         // таблицу, поток тем перезапускал ленту, лента снова звала сброс - и
         // так без конца, пока приложение не зависало.
-        var hadTopicUnread = false
-        if (!topicId.isNullOrBlank()) {
-            val topic = groupDao.getTopicById(topicId)
-            if (topic != null && topic.unreadCount > 0) {
-                groupDao.markTopicRead(topicId)
-                hadTopicUnread = true
-            }
-        }
+        val hadTopicUnread = if (!topicId.isNullOrBlank()) notificationReads.topic(groupId, topicId) ?: false else false
         val group = groupDao.getGroupById(groupId) ?: return
         val unread = groupDao.sumTopicUnread(groupId)
         val hadGroupUnread = group.unreadCount != unread
@@ -4842,7 +4836,7 @@ class GroupRepository(
 
     /** Снять счётчик непрочитанного - пункт меню в пузыре группы. */
     suspend fun markGroupRead(groupId: String) {
-        groupDao.markGroupRead(groupId)
+        notificationReads.group(groupId)
         // р228: снять непрочитанное и на партнёрском устройстве личности.
         com.vladimir.messenger.data.mirror.MirrorHub.publishReadSync(peerId = "", groupId = groupId)
     }

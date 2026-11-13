@@ -154,6 +154,9 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
         com.vladimir.messenger.worker.OfficialUpdateMonitor.restore(applicationContext)
         scheduleUpdateChecks()
         scheduleBoundedRelayWake()
+        // Local Room notification work must not depend on the core service being allowed to start.
+        runCatching { com.vladimir.messenger.worker.IncomingNotificationRecoveryWorker.schedule(applicationContext) }
+            .onFailure { Log.w("MessengerApp", "Local notification recovery scheduling deferred", it) }
         scheduleServiceWatchdog()
         scheduleGroupInfoResync()
         runCatching { com.vladimir.messenger.data.maintenance.AutomaticMaintenance.schedule(this) }

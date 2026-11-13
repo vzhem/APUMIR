@@ -226,6 +226,7 @@ if python3 scripts/ci/check-chat-startup.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-rust-pinning.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-emergency-keepalive.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-notification-arrival.py >>"$LOG" 2>&1 && \
+   python3 scripts/ci/check-local-notification-sql.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-outbox-fairness.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-mirror-pending.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-outbox-recipient-sql.py >>"$LOG" 2>&1 && \
