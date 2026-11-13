@@ -14,7 +14,7 @@ spec.loader.exec_module(checker)
 
 
 class NotificationResultsTest(unittest.TestCase):
-    def run_report(self, cases, status=0):
+    def run_report(self, cases, status=0, groups=None, strict=False):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             xml = "<testsuite>" + "".join(
@@ -24,7 +24,8 @@ class NotificationResultsTest(unittest.TestCase):
             (root / "result.xml").write_text(xml)
             (root / "gradle.log").write_text("e: example compiler error\n")
             with contextlib.redirect_stdout(io.StringIO()):
-                return checker.check(root, root / "gradle.log", status)
+                return checker.check(root, root / "gradle.log", status,
+                                     checker.EXPECTED if groups is None else groups, strict)
 
     def all_cases(self):
         return [(classname, name, "") for classname, names in checker.EXPECTED.items() for name in names]
@@ -100,10 +101,12 @@ class NotificationResultsTest(unittest.TestCase):
 
     def test_local_notification_cases_are_required_and_cannot_be_skipped(self):
         root = Path(__file__).resolve().parents[2] / 'android-app/app/src/androidTest/java'
-        expected_counts = {'IncomingNotificationRecoveryInstrumentedTest': 13,
-                           'NotificationManagerRecoveryInstrumentedTest': 5,
+        expected_counts = {'BackupNotificationRestoreInstrumentedTest': 4,
+                           'IncomingNotificationRecoveryInstrumentedTest': 13,
+                           'NotificationManagerRecoveryInstrumentedTest': 4,
+                           'NotificationPermissionRecoveryInstrumentedTest': 3,
                            'NotificationRecoveryWorkManagerInstrumentedTest': 3}
-        self.assertEqual(3, len(checker.LOCAL_NOTIFICATION_EXPECTED))
+        self.assertEqual(5, len(checker.LOCAL_NOTIFICATION_EXPECTED))
         for classname, names in checker.LOCAL_NOTIFICATION_EXPECTED.items():
             self.assertEqual(expected_counts[classname.rsplit('.', 1)[-1]], len(names))
             source = (root / (classname.replace('.', '/') + '.kt')).read_text(encoding='utf-8')
@@ -134,7 +137,36 @@ class NotificationResultsTest(unittest.TestCase):
         selected = re.search(r"-Pandroid\.testInstrumentationRunnerArguments\.class=([^\s]+)", runner)
         self.assertIsNotNone(selected)
         for classname in checker.EXPECTED:
-            self.assertIn(classname, selected.group(1).split(","))
+            if classname == checker.PERMISSION_CLASS:
+                self.assertIn("permission_class=" + classname, runner)
+                for method in checker.EXPECTED[classname]:
+                    self.assertIn("run_permission_phase " + method, runner)
+            else:
+                self.assertIn(classname, selected.group(1).split(","))
+        guard = runner.index('if [ "$permission_isolated" -eq 1 ] && run_permission_phase disposableProfileStartsWithPermissionGranted')
+        revoke = runner.index("adb shell pm revoke com.vladimir.messenger android.permission.POST_NOTIFICATIONS")
+        blocked = runner.index("run_permission_phase revokedPermissionLeavesTheCommittedNotificationPending")
+        grant = runner.index("if restore_test_permission; then", blocked)
+        restored = runner.index("run_permission_phase grantingPermissionLetsTheReopenedPendingRowPostOnce")
+        self.assertLess(guard, revoke)
+        self.assertLess(revoke, blocked)
+        self.assertLess(blocked, grant)
+        self.assertLess(grant, restored)
+        self.assertIn("trap restore_test_permission EXIT", runner)
+        self.assertIn("trap 'restore_test_permission; restore_metrics' EXIT", runner)
+
+    def test_permission_phase_gate_rejects_wrong_skipped_or_missing_tests(self):
+        method = 'disposableProfileStartsWithPermissionGranted'
+        groups = {checker.PERMISSION_CLASS: {method}}
+        good = (checker.PERMISSION_CLASS, method, '')
+        self.assertEqual(0, self.run_report([good], groups=groups, strict=True))
+        self.assertEqual(1, self.run_report([], groups=groups, strict=True))
+        self.assertEqual(1, self.run_report([good], status=1, groups=groups, strict=True))
+        for bad in ('<skipped/>', '<failure/>', '<error/>'):
+            self.assertEqual(1, self.run_report([(checker.PERMISSION_CLASS, method, bad)], groups=groups, strict=True))
+        self.assertEqual(1, self.run_report([good, good], groups=groups, strict=True))
+        self.assertEqual(1, self.run_report([good, (checker.PERMISSION_CLASS, 'anotherPhase', '')], groups=groups, strict=True))
+        self.assertEqual(1, self.run_report([good, ('another.Class', 'unselected', '')], groups=groups, strict=True))
 
     def test_every_mailbox_room_case_is_required(self):
         names = checker.EXPECTED[checker.MAILBOX_ROOM_CLASS]

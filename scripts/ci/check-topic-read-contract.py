@@ -66,6 +66,21 @@ class TopicReadContractTest(unittest.TestCase):
         vm_marks = self.vm.count("groupRepository.markRead(")
         self.assertEqual(1, vm_marks, "прочтение темы должно быть в одном месте")
 
+    def test_notification_tap_does_not_cancel_an_entire_group(self):
+        navigation = read(ROOT / "android-app/app/src/main/java/com/vladimir/messenger/ui/navigation/NavGraph.kt")
+        tap = navigation.split("LaunchedEffect(pendingChatLink)", 1)[1].split("// Входящий звонок", 1)[0]
+        self.assertIn("Screen.GroupChat.createTopicRoute(chatId, topicId)", tap)
+        self.assertIn("navController.navigate(route)", tap)
+        self.assertNotIn("cancelChatNotifications(", tap)
+        self.assertNotIn("LocalMessageNotifications.cancelChat(", tap)
+        helper = read(ROOT / "android-app/app/src/main/java/com/vladimir/messenger/service/NotificationHelper.kt")
+        ordinary = helper.split("internal suspend fun showMessageNotification(", 1)[1].split("internal suspend fun showSosNotification(", 1)[0]
+        sos = helper.split("internal suspend fun showSosNotification(", 1)[1].split("private suspend fun isMuted(", 1)[0]
+        self.assertIn(".setAutoCancel(true)", ordinary)
+        self.assertIn(".setAutoCancel(true)", sos)
+        self.assertIn("putString(LocalMessageNotifications.EXTRA_TOPIC, topicId)", ordinary)
+        self.assertIn("putString(LocalMessageNotifications.EXTRA_TOPIC, topicId)", sos)
+
     def test_the_rule_has_a_unit_test(self):
         test = read(
             ROOT

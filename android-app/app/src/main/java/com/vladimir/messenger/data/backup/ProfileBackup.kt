@@ -690,20 +690,13 @@ class ProfileBackup @Inject constructor(
             val dbFile = app.getDatabasePath("messenger_database")
             val stagedDb = File(root, BackupLayout.DB)
             val outcome = if (replaceProfile) {
-                replaceDatabase(app, root, dbFile, stagedDb)
+                replaceDatabase(app, dbFile, stagedDb)
             } else {
                 BackupRestoreMerge.merge(dbFile, stagedDb)
             }
-            // Копия со старого Android (без VACUUM INTO) несёт хвост WAL.
-            // Он нужен только тогда, когда база взята целиком: при слиянии
-            // WAL живой базы трогать нельзя.
-            if (outcome.placedCopyAsDatabase) {
-                val stagedWal = File(root, BackupLayout.DB_WAL)
-                if (stagedWal.isFile && stagedWal.length() > 0L) {
-                    runCatching { stagedWal.copyTo(File(dbFile.path + "-wal"), overwrite = true) }
-                        .onFailure { Log.w(TAG, "restore: WAL из копии не перенесён: " + it.javaClass.simpleName) }
-                }
-            }
+            // clearFromStaged already checkpointed and verified the copied WAL
+            // before any live state was touched. Never copy an old sidecar onto
+            // the newly placed file, and never touch the live WAL during merge.
             outcome.perTable.take(12).forEach { (table, rows) ->
                 Log.i(TAG, "restore merge: " + table + " +" + rows)
             }
@@ -885,7 +878,6 @@ class ProfileBackup @Inject constructor(
          */
         private fun replaceDatabase(
             app: Context,
-            root: File,
             dbFile: File,
             stagedDb: File,
         ): BackupRestoreMerge.Outcome {
@@ -909,9 +901,9 @@ class ProfileBackup @Inject constructor(
             }
             app.deleteDatabase("messenger_database")
             return try {
+                // The staged WAL was checkpointed before replacement began;
+                // moving an old sidecar after the database could undo that work.
                 moveFile(stagedDb, dbFile)
-                val wal = File(root, BackupLayout.DB_WAL)
-                if (wal.isFile) moveFile(wal, File(dbFile.path + "-wal"))
                 failInFlightTransfers(dbFile)
                 BackupRestoreMerge.Outcome(placedCopyAsDatabase = true, reason = "профиль заменён копией")
             } catch (error: Exception) {

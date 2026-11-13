@@ -286,7 +286,7 @@ fun MessengerNavGraph(
     }
 
     // Тап по уведомлению: по базам решаем, что это (личный чат или группа/
-    // канал), ведём в место сообщения и снимаем уведомление.
+    // канал), и ведём в место сообщения. Android снимает нажатое уведомление.
     val navLinkContext = LocalContext.current.applicationContext
     LaunchedEffect(pendingChatLink) {
         val link = pendingChatLink ?: return@LaunchedEffect
@@ -318,8 +318,10 @@ fun MessengerNavGraph(
                 contactId = chat.contactId,
             )
         }
-        // Снять уведомление ДО consume: после него эффект отменяется.
-        runCatching { entry.notificationHelper().cancelChatNotifications(chatId) }
+        // Do not cancel the entire chat here: the tapped post auto-cancels,
+        // while the visible screen marks its actual chat/topic read under the
+        // notification gate. This keeps other topics' alerts and avoids an
+        // unsynchronized cancel racing a post or clearing before navigation.
         navController.navigate(route) { launchSingleTop = true }
         // Раунд 140: сброс был ПЕРВОЙ строкой - он обнулял ключ этого
         // LaunchedEffect, корутина отменялась на первом же запросе к базе,

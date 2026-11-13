@@ -30,6 +30,7 @@ PUSH_WORK_CLASS = "com.vladimir.messenger.data.push.PushWakeWorkManagerInstrumen
 FIREBASE_CLASS = "com.vladimir.messenger.data.push.FirebaseClientConfigurationInstrumentedTest"
 CORE_LIFECYCLE_CLASS = "com.vladimir.messenger.data.CoreLifecycleOwnershipInstrumentedTest"
 HEARTBEAT_CLASS = "com.vladimir.messenger.service.DeliveryHeartbeatInstrumentedTest"
+PERMISSION_CLASS = "com.vladimir.messenger.service.NotificationPermissionRecoveryInstrumentedTest"
 EXPECTED_NOTIFICATION = {
     "migrationFortyToFortyOnePreservesHistoryAndRoomValidatesSchema",
     "migrationFortyOneToFortyTwoPreservesRowsAndIndexesSentRetries",
@@ -270,6 +271,12 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
 
 # Real Room, NotificationManager and WorkManager adapters on an empty emulator.
 LOCAL_NOTIFICATION_EXPECTED = {
+    'com.vladimir.messenger.data.backup.BackupNotificationRestoreInstrumentedTest': {
+        'replaceConsumesWalBeforeMovingDatabaseAndNeverRearmsHistory',
+        'populatedMergeImportsWalHistoryButKeepsLiveNotificationWork',
+        'firstInstallMergeCopiesCheckpointedWalHistoryWithoutPendingWork',
+        'sanitizerFailureStopsBeforeAnyLiveDatabaseOrIdentityMutation',
+    },
     'com.vladimir.messenger.service.IncomingNotificationRecoveryInstrumentedTest': {
         'snapshotCompletionDoesNotClearChangedOrForeignRows',
         'postBeforeCompletionSurvivesReopenAndActivePostAvoidsSecondAlert',
@@ -289,8 +296,12 @@ LOCAL_NOTIFICATION_EXPECTED = {
         'collidingChatIdsKeepSeparatePostsAndTapIntents',
         'readingOneTopicCancelsOnlyItsPostsIncludingSos',
         'disabledOrMissingAndroidChannelIsNotReportedAsPostable',
-        'androidAppOpsBlockLeavesThePostBlockedUntilRestored',
         'appMuteIsAnIntentionalSuppressionRatherThanASystemPost',
+    },
+    PERMISSION_CLASS: {
+        'disposableProfileStartsWithPermissionGranted',
+        'revokedPermissionLeavesTheCommittedNotificationPending',
+        'grantingPermissionLetsTheReopenedPendingRowPostOnce',
     },
     'com.vladimir.messenger.worker.NotificationRecoveryWorkManagerInstrumentedTest': {
         'arrivalAfterFinalCheckStartsIndependentSuccessorBeforeOlderFailure',
@@ -301,7 +312,7 @@ LOCAL_NOTIFICATION_EXPECTED = {
 EXPECTED.update(LOCAL_NOTIFICATION_EXPECTED)
 
 
-def check(results: Path, log: Path, status: int) -> int:
+def check(results: Path, log: Path, status: int, groups=EXPECTED, strict=False) -> int:
     seen = set()
     errors = []
     for report in sorted(results.rglob("*.xml")):
@@ -312,11 +323,16 @@ def check(results: Path, log: Path, status: int) -> int:
             continue
         for case in root.iter("testcase"):
             classname = case.get("classname", "").split("$")[0]
-            if classname not in EXPECTED:
-                continue
             name = case.get("name", "")
+            if classname not in groups:
+                if strict:
+                    errors.append(f"Unexpected test in permission phase: {classname}.{name}")
+                continue
+            if strict and name not in groups[classname]:
+                errors.append(f"Unexpected test in permission phase: {classname}.{name}")
+                continue
             key = (classname, name)
-            if key in seen and name in EXPECTED[classname]:
+            if key in seen and name in groups[classname]:
                 errors.append(f"Duplicate expected test: {classname}.{name}")
             seen.add(key)
             for tag in ("failure", "error", "skipped"):
@@ -327,7 +343,7 @@ def check(results: Path, log: Path, status: int) -> int:
         lines = log.read_text(encoding="utf-8", errors="replace").splitlines() if log.exists() else []
         important = [line for line in lines if line.startswith("e: ")]
         errors.insert(0, f"Gradle exited {status}: " + " | ".join((important[-10:] + lines[-10:]))[:2000])
-    expected = {(classname, name) for classname, names in EXPECTED.items() for name in names}
+    expected = {(classname, name) for classname, names in groups.items() for name in names}
     errors += [f"Expected test did not execute: {classname}.{name}" for classname, name in sorted(expected - seen)]
     for error in errors:
         safe = error.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
@@ -337,10 +353,16 @@ def check(results: Path, log: Path, status: int) -> int:
 
 
 def main() -> int:
-    if len(sys.argv) != 4:
-        print("usage: check-android-notification-results.py RESULT_DIR GRADLE_LOG GRADLE_STATUS", file=sys.stderr)
+    if len(sys.argv) not in (4, 6):
+        print("usage: check-android-notification-results.py RESULT_DIR GRADLE_LOG GRADLE_STATUS [--phase METHOD]", file=sys.stderr)
         return 2
-    return check(Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3]))
+    groups, strict = EXPECTED, False
+    if len(sys.argv) == 6:
+        if sys.argv[4] != "--phase" or sys.argv[5] not in EXPECTED[PERMISSION_CLASS]:
+            print("Unknown permission test phase", file=sys.stderr)
+            return 2
+        groups, strict = {PERMISSION_CLASS: {sys.argv[5]}}, True
+    return check(Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3]), groups, strict)
 
 
 if __name__ == "__main__":

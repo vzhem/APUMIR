@@ -146,6 +146,13 @@ class NotificationArrivalContract(unittest.TestCase):
         sanitizer = source('data/backup/BackupNotificationState.kt')
         self.assertIn('PRAGMA table_info', sanitizer)
         self.assertIn('UPDATE messages SET notificationPending = 0', sanitizer)
+        self.assertIn('PRAGMA wal_checkpoint(TRUNCATE)', sanitizer)
+        self.assertIn('Staged WAL checkpoint incomplete', sanitizer)
+        self.assertIn('wal.length() == 0L', sanitizer)
+        self.assertNotIn('stagedWal.copyTo', backup)
+        self.assertNotIn('moveFile(wal, File(dbFile.path + "-wal"))', backup)
+        runner = (ROOT / 'scripts/ci/run-android-navigation-tests.sh').read_text()
+        self.assertIn('BackupNotificationRestoreInstrumentedTest', runner)
 
     def test_honest_settings_and_legacy_tcp_millisecond_timestamp(self):
         for path, truth in ((MAIN / 'res/values/strings.xml', 'Системного push в APU нет'),

@@ -1,12 +1,11 @@
 package com.vladimir.messenger.service
 
 import android.Manifest
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
-import android.os.ParcelFileDescriptor
 import androidx.test.core.app.ApplicationProvider
-import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
 import androidx.test.rule.GrantPermissionRule
@@ -125,6 +124,18 @@ class NotificationManagerRecoveryInstrumentedTest {
         assertEquals(IncomingNotificationPost.POSTED,
             helper.showMessageNotification(otherChat, "friend", "other group", true, topicA, messageId = otherGroup, snapshot = "other"))
         waitFor(otherTopic, true); waitFor(sos, true); waitFor(otherGroup, true)
+        val posts = manager.activeNotifications.associateBy {
+            it.notification.extras.getString(LocalMessageNotifications.EXTRA_MESSAGE)
+        }
+        // Navigation no longer clears the whole chat. Both notification kinds
+        // must therefore ask Android to dismiss only the post actually tapped.
+        for ((id, topic) in listOf(otherTopic to topicB, sos to topicA)) {
+            val notification = requireNotNull(posts[id]).notification
+            assertTrue(notification.flags and Notification.FLAG_AUTO_CANCEL != 0)
+            assertEquals(chat, notification.extras.getString(LocalMessageNotifications.EXTRA_CHAT))
+            assertEquals(topic, notification.extras.getString(LocalMessageNotifications.EXTRA_TOPIC))
+            assertTrue(notification.contentIntent != null)
+        }
         LocalMessageNotifications.cancelTopic(context, chat, topicA)
         waitFor(sos, false)
         assertTrue(helper.isMessageNotificationActive(otherTopic, "b"))
@@ -138,35 +149,6 @@ class NotificationManagerRecoveryInstrumentedTest {
         manager.createNotificationChannel(NotificationChannel(blocked, "Test blocked", NotificationManager.IMPORTANCE_NONE))
         assertFalse(helper.canPost(manager, blocked))
         assertFalse(helper.canPost(manager, "missing-${UUID.randomUUID()}"))
-    }
-
-    @Test fun androidAppOpsBlockLeavesThePostBlockedUntilRestored() = runBlocking {
-        val chat = "test-system-blocked-${UUID.randomUUID()}"
-        val message = UUID.randomUUID().toString()
-        chats += chat
-        fun appOps(mode: String) {
-            val output = InstrumentationRegistry.getInstrumentation().uiAutomation
-                .executeShellCommand("appops set ${context.packageName} POST_NOTIFICATION $mode")
-            ParcelFileDescriptor.AutoCloseInputStream(output).use { it.readBytes() }
-        }
-        assertTrue(manager.areNotificationsEnabled())
-        try {
-            appOps("ignore")
-            assertFalse(manager.areNotificationsEnabled())
-            assertFalse(helper.canPost(manager, MessengerApplication.CHANNEL_ID))
-            assertEquals(IncomingNotificationPost.BLOCKED,
-                helper.showMessageNotification(chat, "friend", "text", true, null, messageId = message, snapshot = "blocked"))
-            assertFalse(manager.activeNotifications.any {
-                it.notification.extras.getString(LocalMessageNotifications.EXTRA_MESSAGE) == message
-            })
-        } finally {
-            // The permission rule already granted the operation in this clean emulator.
-            appOps("allow")
-        }
-        assertTrue(manager.areNotificationsEnabled())
-        assertEquals(IncomingNotificationPost.POSTED,
-            helper.showMessageNotification(chat, "friend", "text", true, null, messageId = message, snapshot = "blocked"))
-        waitFor(message, true)
     }
 
     @Test fun appMuteIsAnIntentionalSuppressionRatherThanASystemPost() = runBlocking {
