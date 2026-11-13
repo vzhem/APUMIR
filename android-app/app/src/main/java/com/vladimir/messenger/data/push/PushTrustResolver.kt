@@ -32,6 +32,8 @@ internal class PushTrustResolver(
     private val localSecret: () -> ByteArray?,
     private val pinnedPeer: suspend (peerId: String) -> ByteArray?,
     private val registration: (PushRegistrationStore.Participants) -> PushRegistrationStore.Result,
+    /** Only used by [Pass.derive]; resolving itself never derives anything. */
+    private val crypto: PushWakeCrypto,
     private val recordFailure: () -> Unit = {},
 ) {
     /**
@@ -45,11 +47,7 @@ internal class PushTrustResolver(
         internal val localSecret: ByteArray,
         internal val pinnedPeerBinding: ByteArray,
         val registration: PushRegistrationState.State?,
-        /**
-         * Resolving never derives: the caller supplies its own [PushWakeCrypto]
-         * so the FFI seam stays out of the trust path entirely.
-         */
-        private val crypto: PushWakeCrypto = PushWakeCrypto(recordFailure = {}),
+        private val crypto: PushWakeCrypto,
     ) : AutoCloseable {
         private var closed = false
 
@@ -133,7 +131,7 @@ internal class PushTrustResolver(
             val usable = state.phase == PushRegistrationState.Phase.ACTIVE && state.epochHex.isNotEmpty() &&
                 (!requireRegistered || state.registeredAtMs > 0)
             if (!usable) return null
-            Pass(nodeId, peerId, local, secret, pin, state).also { keep = true }
+            Pass(nodeId, peerId, local, secret, pin, state, crypto).also { keep = true }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -164,6 +162,7 @@ internal class PushTrustResolver(
             context: android.content.Context,
             pins: com.vladimir.messenger.data.file.FileExchangePeerStore,
             registrations: PushRegistrationStore,
+            crypto: PushWakeCrypto,
         ): PushTrustResolver {
             val app = context.applicationContext
             return PushTrustResolver(
@@ -183,6 +182,7 @@ internal class PushTrustResolver(
                 },
                 pinnedPeer = { peer -> pins.bindingFor(peer) },
                 registration = { participants -> registrations.read(participants) },
+                crypto = crypto,
             )
         }
     }

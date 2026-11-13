@@ -77,7 +77,7 @@ internal object PushServiceLocator {
             val journals = PushJournals.of(app)
             val pins = deps(app).pins()
             val crypto = PushWakeCrypto(recordFailure = { log("Push crypto failure") })
-            val resolver = PushTrustResolver.of(app, pins, journals.registrations)
+            val resolver = PushTrustResolver.of(app, pins, journals.registrations, crypto)
             val schedulingGate = PushWakeScheduleGate(
                 enqueue = { onFailure -> enqueueDrain(app, onFailure) },
                 recordFailure = { diag("Wake scheduling failed") },

@@ -28,6 +28,7 @@ class PushTrustResolverTest {
         pinned: ByteArray? = peerBinding,
         secretValue: ByteArray? = secret,
         local: ByteArray? = localBinding,
+        crypto: PushWakeCrypto = testCrypto(),
     ) = PushTrustResolver(
         localNodeId = { nodeId },
         localBinding = { local?.copyOf() },
@@ -36,6 +37,14 @@ class PushTrustResolverTest {
         registration = {
             if (state == null) PushRegistrationStore.Result.Missing else PushRegistrationStore.Result.Ready(state)
         },
+        crypto = crypto,
+    )
+
+    /** Tests only need the seam to exist here; derivation is covered separately. */
+    private fun testCrypto(): PushWakeCrypto = PushWakeCrypto(
+        derive = { _, _, _, _, _ -> ByteArray(64) },
+        sign = { _, _, _, _, _, _, _ -> error("not used") },
+        recordFailure = {},
     )
 
     @Test fun aLivePairYieldsAPassBoundToTheCurrentValues() = runBlocking {
@@ -77,6 +86,7 @@ class PushTrustResolverTest {
             localSecret = { secret.copyOf() },
             pinnedPeer = { peerBinding.copyOf() },
             registration = { PushRegistrationStore.Result.Unavailable },
+            crypto = testCrypto(),
         )
         assertNull(unavailable.resolve(peerId))
     }
@@ -89,15 +99,34 @@ class PushTrustResolverTest {
             localSecret = { secret.copyOf() },
             pinnedPeer = { peerBinding.copyOf() },
             registration = { PushRegistrationStore.Result.Ready(state()) },
+            crypto = PushWakeCrypto(
+                derive = { _, _, _, _, _ -> throw IllegalStateException("ffi") },
+                sign = { _, _, _, _, _, _, _ -> error("not used") },
+                recordFailure = {},
+            ),
         ).resolve(peerId)!!
         failing.use { pass ->
             assertNull(pass.derive("ab".repeat(16)))
-            // A malformed or empty epoch is rejected before the FFI is reached.
+        }
+
+        // A malformed or empty epoch never reaches the FFI at all.
+        val withMaterial = PushTrustResolver(
+            localNodeId = { nodeId },
+            localBinding = { localBinding.copyOf() },
+            localSecret = { secret.copyOf() },
+            pinnedPeer = { peerBinding.copyOf() },
+            registration = { PushRegistrationStore.Result.Ready(state()) },
+            crypto = PushWakeCrypto(
+                derive = { _, _, _, _, _ -> error("must not be called") },
+                sign = { _, _, _, _, _, _, _ -> error("not used") },
+                recordFailure = {},
+            ),
+        ).resolve(peerId)!!
+        withMaterial.use { pass ->
             assertNull(pass.derive(""))
             assertNull(pass.derive("00"))
             assertNull(pass.derive("0A".repeat(16)))
         }
-        assertNotNull(failing)
     }
 
     @Test fun aSnapshotIsTheSameLiveReadsWithoutDerivation() = runBlocking {
@@ -120,6 +149,7 @@ class PushTrustResolverTest {
                 localSecret = { null },
                 pinnedPeer = { null },
                 registration = { PushRegistrationStore.Result.Missing },
+                crypto = testCrypto(),
             ).resolve(peerId)
         } catch (_: CancellationException) {
             cancelled = true
