@@ -47,27 +47,30 @@ internal class PushTokenRegistrar(
         object Failed : Outcome
     }
 
-    suspend fun run(): Outcome = try {
-        if (!enabled()) return Outcome.Disabled
-        val provider = token()
-        val value = when (provider) {
-            is PushFirebaseSignals.Outcome.Token -> provider.value
-            PushFirebaseSignals.Outcome.NotConfigured -> return Outcome.NotConfigured
-            PushFirebaseSignals.Outcome.NoPlayServices -> return Outcome.NoPlayServices
-            PushFirebaseSignals.Outcome.Failed -> return Outcome.Failed
+    suspend fun run(): Outcome = runSafely()
+
+    private suspend fun runSafely(): Outcome {
+        return try {
+            if (!enabled()) Outcome.Disabled else {
+                when (val provider = token()) {
+                    is PushFirebaseSignals.Outcome.Token ->
+                        when (coordinator({ issued -> registerAll(issued) }, { false }).onToken(provider.value, nowMs())) {
+                            PushRuntimeCoordinator.TokenOutcome.Disabled -> Outcome.Disabled
+                            PushRuntimeCoordinator.TokenOutcome.AlreadyCurrent -> Outcome.AlreadyCurrent
+                            is PushRuntimeCoordinator.TokenOutcome.Registered -> Outcome.Registered
+                            PushRuntimeCoordinator.TokenOutcome.Failed -> Outcome.Failed
+                        }
+                    PushFirebaseSignals.Outcome.NotConfigured -> Outcome.NotConfigured
+                    PushFirebaseSignals.Outcome.NoPlayServices -> Outcome.NoPlayServices
+                    PushFirebaseSignals.Outcome.Failed -> Outcome.Failed
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            diag()
+            Outcome.Failed
         }
-        val coordinatorInstance = coordinator({ issued -> registerAll(issued) }, { false })
-        when (coordinatorInstance.onToken(value, nowMs())) {
-            PushRuntimeCoordinator.TokenOutcome.Disabled -> Outcome.Disabled
-            PushRuntimeCoordinator.TokenOutcome.AlreadyCurrent -> Outcome.AlreadyCurrent
-            is PushRuntimeCoordinator.TokenOutcome.Registered -> Outcome.Registered
-            PushRuntimeCoordinator.TokenOutcome.Failed -> Outcome.Failed
-        }
-    } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (_: Exception) {
-        diag()
-        Outcome.Failed
     }
 
     /**

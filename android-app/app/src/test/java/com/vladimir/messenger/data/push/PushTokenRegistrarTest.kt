@@ -26,7 +26,9 @@ class PushTokenRegistrarTest {
             token = { provider },
             coordinator = { register, record ->
                 PushRuntimeCoordinator(
-                    gate = PushRuntimeCoordinator.Gate { enabledValue },
+                    gate = object : PushRuntimeCoordinator.Gate {
+                        override fun enabled() = enabledValue
+                    },
                     journal = object : PushRuntimeCoordinator.TokenJournal {
                         override fun record(token: String, nowMs: Long) = journal.also { calls += "journal" }
                         override fun forget(): Boolean = true

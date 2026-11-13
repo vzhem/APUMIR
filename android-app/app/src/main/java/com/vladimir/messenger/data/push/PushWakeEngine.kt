@@ -25,6 +25,8 @@ import java.util.logging.Logger
 internal class PushWakeEngine(
     private val dispatcher: PushWakeDispatcher,
     private val inbox: PushWakeQueue,
+    /** Durable generic marker; [PushWakeQueue] is read/claim-only by design. */
+    private val enqueueRecovery: (Long) -> PushWakeInbox.EnqueueResult,
     private val inspector: PushWakeInspector,
     private val sync: PushWakeSync,
     private val nowMs: () -> Long = System::currentTimeMillis,
@@ -54,7 +56,7 @@ internal class PushWakeEngine(
     suspend fun runRecovery(admission: suspend () -> PushWakePeriodicRecovery.Admission): PushWakePeriodicRecovery.Result =
         PushWakePeriodicRecovery(
             admission = admission,
-            ensureMarker = { now -> inbox.enqueueRecovery(now) },
+            ensureMarker = { now -> enqueueRecovery(now) },
             runDrain = { runOnce() },
             nowMs = nowMs,
             recordFailure = recordFailure,
@@ -66,52 +68,55 @@ internal class PushWakeEngine(
          * feature is disabled in this build. Never throws: a diagnostics
          * failure of the locator must not crash a worker.
          */
-        fun create(context: android.content.Context): PushWakeEngine? = try {
-            val app = context.applicationContext
-            if (!PushServiceLocator.enabled(app)) {
-                null
-            } else {
-                val shared = PushServiceLocator.shared(app)
-                val receiver = PushServiceLocator.receiver(app) ?: return null
-                val registrations = shared.journals.registrations
-                val sync = PushWakeSync(
-                    gate = { PushServiceLocator.enabled(app) },
-                    inspect = { route -> shared.inspector.inspect(route) },
-                    receive = { route ->
-                        // A null route is the generic marker: the full scan below
-                        // handles it, so this branch is never taken for it.
-                        val peer = route?.let { hint ->
-                            when (val found = registrations.findRoute(hint)) {
-                                is PushRegistrationStore.RouteResult.Found -> found.peerId
-                                else -> null
+        fun create(context: android.content.Context): PushWakeEngine? {
+            return try {
+                val app = context.applicationContext
+                if (!PushServiceLocator.enabled(app)) {
+                    null
+                } else {
+                    val shared = PushServiceLocator.shared(app)
+                    val receiver = PushServiceLocator.receiver(app) ?: return null
+                    val registrations = shared.journals.registrations
+                    val sync = PushWakeSync(
+                        gate = { PushServiceLocator.enabled(app) },
+                        inspect = { route -> shared.inspector.inspect(route) },
+                        receive = { route ->
+                            // A null route is the generic marker: the full scan below
+                            // handles it, so this branch is never taken for it.
+                            val peer = route?.let { hint ->
+                                when (val found = registrations.findRoute(hint)) {
+                                    is PushRegistrationStore.RouteResult.Found -> found.peerId
+                                    else -> null
+                                }
                             }
-                        }
-                        if (route == null || peer == null) {
-                            PushReceiveWindow.Outcome.RETRY
-                        } else {
-                            receiver.receive(route, peer)
-                        }
-                    },
-                    fullScan = {
-                        PushServiceLocator.fullScan(app)?.run() == PushFullScan.Outcome.COMPLETED
-                    },
-                    recordFailure = { PushServiceLocator.log("Wake sync failure") },
-                )
-                PushWakeEngine(
-                    dispatcher = shared.dispatcher,
-                    inbox = shared.journals.inbox,
-                    inspector = shared.inspector,
-                    sync = sync,
-                    recordFailure = {
-                        Logger.getLogger("PushWakeEngine").warning("Wake pass diagnostics")
-                    },
-                )
+                            if (route == null || peer == null) {
+                                PushReceiveWindow.Outcome.RETRY
+                            } else {
+                                receiver.receive(route, peer)
+                            }
+                        },
+                        fullScan = {
+                            PushServiceLocator.fullScan(app)?.run() == PushFullScan.Outcome.COMPLETED
+                        },
+                        recordFailure = { PushServiceLocator.log("Wake sync failure") },
+                    )
+                    PushWakeEngine(
+                        dispatcher = shared.dispatcher,
+                        inbox = shared.journals.inbox,
+                        inspector = shared.inspector,
+                        enqueueRecovery = { now -> shared.journals.inbox.enqueueRecovery(now) },
+                        sync = sync,
+                        recordFailure = {
+                            Logger.getLogger("PushWakeEngine").warning("Wake pass diagnostics")
+                        },
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                Logger.getLogger("PushWakeEngine").warning("Wake engine construction failed")
+                null
             }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            Logger.getLogger("PushWakeEngine").warning("Wake engine construction failed")
-            null
         }
     }
 }

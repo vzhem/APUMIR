@@ -52,31 +52,32 @@ internal object PushFirebaseSignals {
         url = BuildConfig.APU_PUSH_ENDPOINT.takeIf { it.isNotEmpty() },
     )
 
-    suspend fun currentToken(context: Context): Outcome = try {
-        val app = context.applicationContext
-        if (FirebaseClientConfiguration.inspect(app) != FirebaseClientConfiguration.Status.CONFIGURED) {
-            Outcome.NotConfigured
-        } else if (GoogleApiAvailability.getInstance()
-                .isGooglePlayServicesAvailable(app) != ConnectionResult.SUCCESS
-        ) {
-            Outcome.NoPlayServices
-        } else {
-            FirebaseApp.getApps(app)
-                .firstOrNull { it.name == FirebaseApp.DEFAULT_APP_NAME }
-                ?: return Outcome.NotConfigured
-            val token = com.google.android.gms.tasks.Tasks.await(FirebaseMessaging.getInstance().token)
-            if (token.isNullOrBlank() || token.length > MAX_TOKEN_CHARS) {
-                Outcome.Failed
-            } else {
-                Outcome.Token(token)
+    suspend fun currentToken(context: Context): Outcome {
+        return try {
+            val app = context.applicationContext
+            when {
+                FirebaseClientConfiguration.inspect(app) != FirebaseClientConfiguration.Status.CONFIGURED ->
+                    Outcome.NotConfigured
+                GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(app) != ConnectionResult.SUCCESS ->
+                    Outcome.NoPlayServices
+                FirebaseApp.getApps(app).none { it.name == FirebaseApp.DEFAULT_APP_NAME } ->
+                    Outcome.NotConfigured
+                else -> {
+                    val token = com.google.android.gms.tasks.Tasks.await(FirebaseMessaging.getInstance().token)
+                    if (token.isNullOrBlank() || token.length > MAX_TOKEN_CHARS) {
+                        Outcome.Failed
+                    } else {
+                        Outcome.Token(token)
+                    }
+                }
             }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // Never log the token, identifiers or the exception text.
+            Log.w(TAG, "token request failed")
+            Outcome.Failed
         }
-    } catch (cancelled: kotlinx.coroutines.CancellationException) {
-        throw cancelled
-    } catch (_: Exception) {
-        // Never log the token, identifiers or the exception text.
-        Log.w(TAG, "token request failed")
-        Outcome.Failed
     }
 
     /** Ask the SDK to rotate/drop the registration; no mailbox call is made here. */

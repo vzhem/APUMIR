@@ -78,9 +78,10 @@ internal object PushServiceLocator {
             val pins = deps(app).pins()
             val crypto = PushWakeCrypto(recordFailure = { log("Push crypto failure") })
             val resolver = PushTrustResolver.of(app, pins, journals.registrations, crypto)
-            val schedulingGate = PushWakeScheduleGate({ onFailure -> enqueueDrain(app, onFailure) }) {
-                onFailure()
-            }
+            val schedulingGate = PushWakeScheduleGate(
+                enqueue = { onFailure -> enqueueDrain(app, onFailure) },
+                recordFailure = { diag("Wake scheduling failed") },
+            )
             val dispatcher = PushWakeDispatcher(
                 gate = schedulingGate,
                 lookup = { route ->
@@ -93,7 +94,7 @@ internal object PushServiceLocator {
                 enqueueRoute = { route, now -> journals.inbox.enqueueRoute(route, now) },
                 enqueueRecovery = { now -> journals.inbox.enqueueRecovery(now) },
                 pending = { now -> journals.inbox.pending(now) },
-                recordFailure = { onFailure() },
+                recordFailure = { diag("Wake intake failure") },
             )
             val inspector = PushWakeInspector(
                 journal = journals.registrations,
@@ -172,48 +173,52 @@ internal object PushServiceLocator {
     }
 
     /** The real registrar, or null while disabled. */
-    fun registrar(context: Context): PushTokenRegistrar? = try {
-        val app = context.applicationContext
-        if (!enabled(app)) {
+    fun registrar(context: Context): PushTokenRegistrar? {
+        return try {
+            val app = context.applicationContext
+            if (!enabled(app)) {
+                null
+            } else {
+                val endpoint = endpoint(app) ?: return null
+                val shared = shared(app)
+                val http = PushHttpClient(endpoint, recordFailure = { log("Registration transport failure") })
+                val runner = PushRegistrationRunner(
+                    resolver = shared.resolver,
+                    flow = { participants -> PushRegistrationFlow.of(shared.journals.registrations, http) },
+                    recordFailure = { log("Registration failure") },
+                )
+                PushTokenRegistrar(
+                    enabled = { enabled(app) },
+                    token = { PushFirebaseSignals.currentToken(app) },
+                    coordinator = { register, _ ->
+                        PushRuntimeCoordinator(
+                            gate = object : PushRuntimeCoordinator.Gate {
+                                override fun enabled() = enabled(app)
+                            },
+                            journal = object : PushRuntimeCoordinator.TokenJournal {
+                                override fun record(token: String, nowMs: Long) = shared.journals.tokens.record(token, nowMs)
+                                override fun forget(): Boolean = shared.journals.tokens.forget()
+                            },
+                            register = register,
+                            enqueueCheck = { now ->
+                                shared.journals.inbox.enqueueRecovery(now) == PushWakeInbox.EnqueueResult.RECOVERY_QUEUED
+                            },
+                            recordFailure = { log("Token coordinator failure") },
+                        )
+                    },
+                    peers = targets(app),
+                    register = { peerId, token -> runner.register(peerId, token) },
+                    revoke = { peerId -> runner.revoke(peerId) },
+                    forgetToken = { shared.journals.tokens.forget() },
+                    recordFailure = { log("Registration attempt failure") },
+                )
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            diag("Registration wiring failed")
             null
-        } else {
-            val endpoint = endpoint(app) ?: return null
-            val shared = shared(app)
-            val http = PushHttpClient(endpoint, recordFailure = { log("Registration transport failure") })
-            val runner = PushRegistrationRunner(
-                resolver = shared.resolver,
-                flow = { participants -> PushRegistrationFlow.of(shared.journals.registrations, http) },
-                recordFailure = { log("Registration failure") },
-            )
-            PushTokenRegistrar(
-                enabled = { enabled(app) },
-                token = { PushFirebaseSignals.currentToken(app) },
-                coordinator = { register, _ ->
-                    PushRuntimeCoordinator(
-                        gate = PushRuntimeCoordinator.Gate { enabled(app) },
-                        journal = object : PushRuntimeCoordinator.TokenJournal {
-                            override fun record(token: String, nowMs: Long) = shared.journals.tokens.record(token, nowMs)
-                            override fun forget(): Boolean = shared.journals.tokens.forget()
-                        },
-                        register = register,
-                        enqueueCheck = { now ->
-                            shared.journals.inbox.enqueueRecovery(now) == PushWakeInbox.EnqueueResult.RECOVERY_QUEUED
-                        },
-                        recordFailure = { log("Token coordinator failure") },
-                    )
-                },
-                peers = targets(app),
-                register = { peerId, token -> runner.register(peerId, token) },
-                revoke = { peerId -> runner.revoke(peerId) },
-                forgetToken = { shared.journals.tokens.forget() },
-                recordFailure = { log("Registration attempt failure") },
-            )
         }
-    } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (_: Exception) {
-        diag("Registration wiring failed")
-        null
     }
 
     /** Derive the receiver route from the live pin/registration, then wipe. */
@@ -276,8 +281,13 @@ internal object PushServiceLocator {
         true
     }
 
+    /**
+     * Enqueues the drain worker. The failure callback belongs to the scheduling
+     * gate: the worker manager invokes it exactly when the request itself fails,
+     * including asynchronously, so this function never calls it a second time.
+     */
     private fun enqueueDrain(context: Context, onFailure: () -> Unit) {
-        val accepted = try {
+        try {
             shared(context).workManager.enqueue(onFailure)
         } catch (cancelled: CoroutineCancellation) {
             throw cancelled
@@ -286,9 +296,7 @@ internal object PushServiceLocator {
         } catch (_: Exception) {
             diag("Wake request not scheduled")
             onFailure()
-            false
         }
-        if (!accepted) onFailure()
     }
 
     /**

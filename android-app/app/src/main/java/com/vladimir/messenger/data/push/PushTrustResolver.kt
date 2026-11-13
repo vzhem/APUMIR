@@ -75,23 +75,25 @@ internal class PushTrustResolver(
     suspend fun resolveForRegistration(peerId: String): Pass? = base(peerId, requireRegistered = false)
 
     /** Fresh snapshot of the same values for the drain trust gate. */
-    suspend fun snapshot(localId: String, peerId: String): PushDrainTrustGate.Snapshot? = try {
-        val local = localBinding() ?: return null
-        val pin = pinnedPeer(peerId) ?: run {
-            local.fill(0)
-            return null
+    suspend fun snapshot(localId: String, peerId: String): PushDrainTrustGate.Snapshot? {
+        return try {
+            val local = localBinding() ?: return null
+            val pin = pinnedPeer(peerId) ?: run {
+                local.fill(0)
+                return null
+            }
+            val secret = localSecret() ?: run {
+                local.fill(0)
+                pin.fill(0)
+                return null
+            }
+            PushDrainTrustGate.Snapshot(localId, peerId, local, pin, secret)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            diag()
+            null
         }
-        val secret = localSecret() ?: run {
-            local.fill(0)
-            pin.fill(0)
-            return null
-        }
-        PushDrainTrustGate.Snapshot(localId, peerId, local, pin, secret)
-    } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (_: Exception) {
-        diag()
-        null
     }
 
     private suspend fun base(peerId: String, requireRegistered: Boolean): Pass? {
