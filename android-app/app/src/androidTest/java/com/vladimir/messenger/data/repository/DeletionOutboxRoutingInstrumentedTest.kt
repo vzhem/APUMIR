@@ -29,6 +29,8 @@ class DeletionOutboxRoutingInstrumentedTest {
             db.messageDao(), db.chatDao(), db.messageReactionDao(), outbox,
             ChatClearDelivery(context, db.chatDao(), db), db.groupDao(),
             DirectPollRepository(db.directPollDao(), db.chatDao()),
+            // The tombstone writer needs the app context; the test uses the real one.
+            context,
         )
 
     @Test fun legacyAckRouteRemovesOnlyTheNamedPeerRequest() = runBlocking {
