@@ -411,12 +411,20 @@ class ProviderGuardTest(unittest.TestCase):
             def __init__(self, response):
                 self.response = response
             def open(self, request, timeout):
-                self.url, self.timeout = request.full_url, timeout
+                self.request, self.url, self.timeout = request, request.full_url, timeout
+                # Model workers.dev Browser Integrity Check, which can block
+                # generic library clients before the Worker sees the request.
+                if request.get_header("User-agent") != "APU-Push-Disabled-Health/1.0 (+https://github.com/vzhem/APUMIR)":
+                    raise urllib.error.HTTPError(request.full_url, 403, "blocked by test proxy", {}, io.BytesIO(b"private"))
                 return self.response
         good = Opener(Response(b'{"ok":false,"service":"apu-push-wake","experimental":true}'))
-        with patch.object(d.urllib.request, "build_opener", return_value=good):
+        with patch.object(d.urllib.request, "build_opener", return_value=good) as build:
             d.disabled_health(FAKE_HOST)
             self.assertEqual(good.url, "https://" + FAKE_HOST + "/health")
+            self.assertEqual(good.request.get_method(), "GET")
+            self.assertIsNone(good.request.get_header("Authorization"))
+            self.assertEqual(good.request.get_header("Cache-control"), "no-cache")
+            self.assertTrue(any(isinstance(arg, d.preflight.NoRedirect) for arg in build.call_args.args))
         for payload in (b'{"ok":true,"service":"apu-push-wake","experimental":true}',
                         b'{"ok":0,"service":"apu-push-wake","experimental":1}',
                         b'{"ok":false,"ok":false,"service":"apu-push-wake","experimental":true}', b'not json', b'x' * 1025):
@@ -445,8 +453,9 @@ class CompleteFakeProviderTest(unittest.TestCase):
                 url = urlsplit(req.full_url)
                 self.calls.append((req.get_method(), url.hostname, url.path, url.query))
                 if url.hostname == FAKE_HOST:
-                    assert req.get_method() == "GET" and url.path == "/health"
+                    assert req.get_method() == "GET" and url.path == "/health" and url.query == ""
                     assert req.get_header("Authorization") is None
+                    assert req.get_header("User-agent") == "APU-Push-Disabled-Health/1.0 (+https://github.com/vzhem/APUMIR)"
                     return Response({"ok": False, "service": "apu-push-wake", "experimental": True}, 503)
                 assert url.hostname == "api.cloudflare.com"
                 assert req.get_header("Authorization") == "Bearer " + FAKE_TOKEN

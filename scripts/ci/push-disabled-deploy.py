@@ -355,7 +355,12 @@ def disabled_health(host):
     if not re.fullmatch(r"apu-push-[0-9a-f]{20}\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.workers\.dev", host):
         raise DeployError("health")
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), preflight.NoRedirect())
-    req = urllib.request.Request("https://" + host + "/health", headers={"Cache-Control": "no-cache"})
+    # workers.dev Browser Integrity Check can block a generic Python user agent
+    # before our Worker runs. This is a public, non-identifying application name,
+    # not a credential; the check can still be blocked by provider policy.
+    req = urllib.request.Request("https://" + host + "/health", headers={
+        "Cache-Control": "no-cache", "User-Agent": "APU-Push-Disabled-Health/1.0 (+https://github.com/vzhem/APUMIR)",
+    })
     try:
         try:
             response = opener.open(req, timeout=15)
