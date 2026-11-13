@@ -76,8 +76,12 @@ class DeletionOutbox internal constructor(private val root: File) {
 
     @Synchronized
     fun markTried(entry: Entry, now: Long, peer: String? = null) {
-        // Keep the objects read from this snapshot: rereading the file after
-        // mutation would discard the updated retry time, count and group peers.
+        // The group pump currently retires its request after every member was
+        // merely attempted, even if all sends failed. Persisting its tried list
+        // would introduce premature loss; preserve its previous retry behaviour
+        // until group fanout has a separately reviewed redelivery policy.
+        if (entry.kind != KIND_DIRECT) return
+        // Rereading after mutation would discard the updated retry time/count.
         val entries = all()
         val current = entries.firstOrNull {
             it.kind == entry.kind && it.chatId == entry.chatId && it.targetId == entry.targetId &&

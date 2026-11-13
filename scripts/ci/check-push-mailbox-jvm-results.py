@@ -303,11 +303,11 @@ EXPECTED[REPLY_OUTBOX_CLASS] = REPLY_OUTBOX_EXPECTED
 DELETION_OUTBOX_CLASS = "com.vladimir.messenger.data.repository.DeletionOutboxTest"
 DELETION_OUTBOX_EXPECTED = {
     "retryUpdatesPersistAndRespectTheNextInterval",
-    "groupRetryPersistsDistinctTargetsAndDoesNotChangeOtherEntries",
+    "groupAttemptsDoNotRetireMembersWithoutDeliveryAcknowledgement",
     "staleAttemptCannotModifyAReplacedRequestWithDifferentIdentity",
     "directAcknowledgementOnlyRemovesTheMatchingPeerAndLeavesGroups",
     "ambiguousDirectAcknowledgementDoesNotGuessBetweenChats",
-    "concurrentRetriesOnOneInstanceDoNotLoseCountsOrGroupTargets",
+    "concurrentDirectRetriesOnOneInstanceDoNotLoseCounts",
     "failedRewriteDoesNotReportAcknowledgementOrEraseTheOldFile",
     "missingAttemptAndAcknowledgementDoNotCreateAnOutbox",
 }

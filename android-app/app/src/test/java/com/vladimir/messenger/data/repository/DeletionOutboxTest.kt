@@ -42,17 +42,18 @@ class DeletionOutboxTest {
             reopened.due(1_200L, 100L, 10_000L))
     }
 
-    @Test fun groupRetryPersistsDistinctTargetsAndDoesNotChangeOtherEntries() {
+    @Test fun groupAttemptsDoNotRetireMembersWithoutDeliveryAcknowledgement() {
         val outbox = DeletionOutbox(root())
         val group = entry(kind = DeletionOutbox.KIND_GROUP, peer = "", deleter = "pk_author")
         val other = entry(chat = "personal", id = "other")
         outbox.add(group)
         outbox.add(other)
         outbox.markTried(group, 2_000L, "pk_a")
-        outbox.markTried(group, 2_100L, "pk_a")
-        outbox.markTried(group, 2_200L, "pk_b")
-        assertEquals(listOf(group.copy(lastTryMs = 2_200L, attempts = 4, tried = listOf("pk_a", "pk_b")), other),
-            DeletionOutbox(root()).all())
+        outbox.markTried(group, 2_100L, "pk_b")
+        // The group pump ignores its DeliveryReport. An attempted send is not
+        // evidence of delivery, so its retry candidates must remain unchanged.
+        assertEquals(listOf(group, other), DeletionOutbox(root()).all())
+        assertEquals(listOf(group, other), DeletionOutbox(root()).due(2_200L, 100L, 10_000L))
     }
 
     @Test fun staleAttemptCannotModifyAReplacedRequestWithDifferentIdentity() {
@@ -96,17 +97,17 @@ class DeletionOutboxTest {
         assertEquals(listOf(first, second), DeletionOutbox(root()).all())
     }
 
-    @Test fun concurrentRetriesOnOneInstanceDoNotLoseCountsOrGroupTargets() {
+    @Test fun concurrentDirectRetriesOnOneInstanceDoNotLoseCounts() {
         val outbox = DeletionOutbox(root())
-        val group = entry(kind = DeletionOutbox.KIND_GROUP, peer = "", deleter = "pk_author")
-        outbox.add(group)
+        val direct = entry()
+        outbox.add(direct)
         val start = CountDownLatch(1)
         val executor = Executors.newFixedThreadPool(8)
         try {
-            val futures = (1..32).map { number ->
+            val futures = (1..32).map {
                 executor.submit {
                     start.await()
-                    outbox.markTried(group, 2_000L, "pk_$number")
+                    outbox.markTried(direct, 2_000L)
                 }
             }
             start.countDown()
@@ -117,8 +118,7 @@ class DeletionOutboxTest {
         val stored = DeletionOutbox(root()).all().single()
         assertEquals(33, stored.attempts)
         assertEquals(2_000L, stored.lastTryMs)
-        assertEquals((1..32).map { "pk_$it" }.toSet(), stored.tried.toSet())
-        assertEquals(32, stored.tried.size)
+        assertTrue(stored.tried.isEmpty())
     }
 
     @Test fun failedRewriteDoesNotReportAcknowledgementOrEraseTheOldFile() {
