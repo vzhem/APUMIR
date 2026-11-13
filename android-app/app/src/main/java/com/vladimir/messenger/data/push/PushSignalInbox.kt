@@ -37,7 +37,6 @@ internal class PushSignalInbox(
         object Unavailable : Result
         /** Local clock or payload is unusable; nothing is written. */
         object Rejected : Result
-        override fun toString(): String = "PushSignalInboxResult"
     }
 
     fun onSignal(data: Map<String, String>?, hasNotificationBlock: Boolean): Result =

@@ -67,7 +67,6 @@ internal class PushRegistrationFlow(
         object Throttled : Result
         /** Network or storage failure; a later attempt must re-reserve. */
         object Unavailable : Result
-        override fun toString(): String = "PushRegistrationResult"
     }
 
     /**
