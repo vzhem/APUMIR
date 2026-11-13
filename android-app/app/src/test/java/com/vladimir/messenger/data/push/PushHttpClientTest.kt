@@ -1,10 +1,18 @@
 package com.vladimir.messenger.data.push
 
 import java.io.IOException
+import java.util.concurrent.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.launch
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.coroutines.runBlocking
 
 class PushHttpClientTest {
     private val owner = "8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394"
@@ -18,7 +26,7 @@ class PushHttpClientTest {
         token: String = this.token, signature: String = this.signature) =
         PushRegistrationRequest(action, owner, cap, device, sequence, time, token, signature)
 
-    @Test fun configRequiresAnExactAllowedHttpsHostAndForbidsPathsAndRedirects() {
+    @Test fun configRequiresAnExactAllowedHttpsHostAndForbidsPathsAndRedirects() = runBlocking {
         val allowed = setOf("wake.example.workers.dev")
         assertEquals("https://wake.example.workers.dev/v1/wake", endpoint().url("/v1/wake").toString())
         assertTrue(PushEndpoint.approved("https://wake.example.workers.dev:443/", allowed) != null)
@@ -38,7 +46,7 @@ class PushHttpClientTest {
         assertEquals(PushHttpClient.WakeResult.UNAVAILABLE, client.wake(PushWakeRequest(owner, cap)))
     }
 
-    @Test fun registrationMatchesWorkerVectorAndRequestBytesAreCleared() {
+    @Test fun registrationMatchesWorkerVectorAndRequestBytesAreCleared() = runBlocking {
         var path = ""
         var json = ""
         var bodyReference = byteArrayOf()
@@ -54,7 +62,7 @@ class PushHttpClientTest {
         assertFalse(request.toString().contains(token))
     }
 
-    @Test fun wakeHasOnlyOpaqueRouteFieldsAndAcceptedIsNotADeliveryReceipt() {
+    @Test fun wakeHasOnlyOpaqueRouteFieldsAndAcceptedIsNotADeliveryReceipt() = runBlocking {
         var json = ""
         val client = PushHttpClient(endpoint(), PushPost { _, path, body ->
             assertEquals("/v1/wake", path); json = body.toString(Charsets.US_ASCII); 202
@@ -65,7 +73,7 @@ class PushHttpClientTest {
         assertFalse(request.toString().contains(cap))
     }
 
-    @Test fun invalidFieldsNeverReachTheNetwork() {
+    @Test fun invalidFieldsNeverReachTheNetwork() = runBlocking {
         var calls = 0
         val client = PushHttpClient(endpoint(), PushPost { _, _, _ -> calls++; 204 }, { error("unexpected error") })
         val invalid = listOf(
@@ -83,7 +91,7 @@ class PushHttpClientTest {
         assertEquals(1, calls)
     }
 
-    @Test fun cancellationPropagatesAndStillClearsTheRequestBody() {
+    @Test fun cancellationPropagatesAndStillClearsTheRequestBody() = runBlocking {
         var reference = byteArrayOf()
         val client = PushHttpClient(endpoint(), PushPost { _, _, body ->
             reference = body
@@ -94,7 +102,60 @@ class PushHttpClientTest {
         assertTrue(reference.isNotEmpty() && reference.all { it == 0.toByte() })
     }
 
-    @Test fun statusMappingAndFailuresNeverPretendToDeliver() {
+    @Test fun cancellationRacingAResultOrErrorCannotBecomeSuccessOrFailure() = runBlocking {
+        for (throws in listOf(false, true)) {
+            for (register in listOf(false, true)) {
+                var requestBody = byteArrayOf()
+                var diagnostics = 0
+                val result = CompletableDeferred<Throwable?>()
+                val client = PushHttpClient(endpoint(), PushPost { _, _, body ->
+                    requestBody = body
+                    currentCoroutineContext().cancel()
+                    if (throws) throw IOException("private")
+                    if (register) 204 else 202
+                }, { diagnostics++ })
+                val job = launch {
+                    result.complete(runCatching {
+                        if (register) client.register(registration()) else client.wake(PushWakeRequest(owner, cap))
+                    }.exceptionOrNull())
+                }
+                job.join()
+                assertTrue(result.await() is CancellationException)
+                assertTrue(requestBody.isNotEmpty() && requestBody.all { it == 0.toByte() })
+                assertEquals(0, diagnostics)
+            }
+        }
+    }
+
+    @Test fun brokenDiagnosticsCannotMaskCancellationOrPretendSuccess() = runBlocking {
+        for (register in listOf(false, true)) {
+            var requestBody = byteArrayOf()
+            val transport = PushPost { _, _, body -> requestBody = body; throw IOException("private") }
+            val failing = PushHttpClient(endpoint(), transport, { throw IllegalStateException("private diagnostic") })
+            if (register) assertEquals(PushHttpClient.RegistrationResult.UNAVAILABLE, failing.register(registration()))
+            else assertEquals(PushHttpClient.WakeResult.UNAVAILABLE, failing.wake(PushWakeRequest(owner, cap)))
+            assertTrue(requestBody.isNotEmpty() && requestBody.all { it == 0.toByte() })
+            for (throws in listOf(false, true)) {
+                lateinit var child: Job
+                val result = CompletableDeferred<Throwable?>()
+                val cancelled = PushHttpClient(endpoint(), transport, {
+                    child.cancel()
+                    if (throws) throw IllegalStateException("private diagnostic")
+                })
+                child = launch(start = CoroutineStart.LAZY) {
+                    result.complete(runCatching {
+                        if (register) cancelled.register(registration()) else cancelled.wake(PushWakeRequest(owner, cap))
+                    }.exceptionOrNull())
+                }
+                child.start()
+                child.join()
+                assertTrue(result.await() is CancellationException)
+                assertTrue(requestBody.isNotEmpty() && requestBody.all { it == 0.toByte() })
+            }
+        }
+    }
+
+    @Test fun statusMappingAndFailuresNeverPretendToDeliver() = runBlocking {
         var status = 409
         var failures = 0
         val client = PushHttpClient(endpoint(), PushPost { _, _, _ -> if (status == -1) throw IOException("sensitive content") else status }, { failures++ })

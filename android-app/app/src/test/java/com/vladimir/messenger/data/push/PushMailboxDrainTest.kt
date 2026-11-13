@@ -3,6 +3,10 @@ package com.vladimir.messenger.data.push
 import com.vladimir.messenger.data.security.SealedWire
 import java.io.IOException
 import java.util.concurrent.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -298,6 +302,89 @@ class PushMailboxDrainTest {
         assertEquals(PushMailboxDrain.Result.Restart, drain.run(second.checkpoint))
         assertEquals(2, pulls)
         assertEquals(2, commits)
+    }
+
+    @Test fun cancellationAtAnyCallbackBoundaryCannotStartAnotherEffectOrReportSuccess() = runBlocking {
+        for (stage in listOf("current", "pull", "commit", "ack")) {
+            for (throws in listOf(false, true)) {
+                lateinit var child: Job
+                val result = CompletableDeferred<Throwable?>()
+                var checks = 0
+                var pulls = 0
+                var commits = 0
+                var acks = 0
+                var diagnostics = 0
+                fun stop(at: String) {
+                    if (stage == at) {
+                        child.cancel()
+                        if (throws) throw IOException("private")
+                    }
+                }
+                val drain = PushMailboxDrain(
+                    current = { checks++; stop("current"); true },
+                    pull = { pulls++; stop("pull"); page(item(1), item(2)) },
+                    commit = { commits++; stop("commit"); PushMailboxDrain.Commit.COMMITTED },
+                    ack = { acks++; stop("ack"); accepted },
+                    recordFailure = { diagnostics++ },
+                )
+                child = launch(start = CoroutineStart.LAZY) {
+                    result.complete(runCatching { drain.run() }.exceptionOrNull())
+                }
+                child.start()
+                child.join()
+                assertTrue("$stage/$throws", result.await() is CancellationException)
+                assertEquals(0, diagnostics)
+                when (stage) {
+                    "current" -> { assertEquals(1, checks); assertEquals(0, pulls); assertEquals(0, commits); assertEquals(0, acks) }
+                    "pull" -> { assertEquals(1, pulls); assertEquals(0, commits); assertEquals(0, acks) }
+                    "commit" -> { assertEquals(1, pulls); assertEquals(1, commits); assertEquals(0, acks) }
+                    "ack" -> { assertEquals(1, pulls); assertEquals(2, commits); assertEquals(1, acks) }
+                }
+            }
+        }
+    }
+
+    @Test fun brokenDiagnosticsCannotDropLaterItemsOrConvertFailureToSuccess() = runBlocking {
+        val one = item(1)
+        val two = item(2)
+        val processed = mutableListOf<String>()
+        val acknowledged = mutableListOf<String>()
+        val drain = PushMailboxDrain(
+            pull = { if (it == "-") page(one, two) else page() },
+            commit = { wire ->
+                processed.add(wire)
+                if (wire == one.envelope) throw IOException("private")
+                PushMailboxDrain.Commit.COMMITTED
+            },
+            ack = { receipts -> acknowledged.addAll(receipts.map { it.id }); accepted },
+            current = { true }, recordFailure = { throw IllegalStateException("broken counter") },
+        )
+        assertEquals(PushMailboxDrain.Result.Unprocessed, drain.run())
+        assertEquals(listOf(one.envelope, two.envelope), processed)
+        assertEquals(listOf(two.id), acknowledged)
+    }
+
+    @Test fun cancellationInsideBrokenDiagnosticsStopsTheRemainingPage() = runBlocking {
+        for (throws in listOf(false, true)) {
+            lateinit var child: Job
+            val result = CompletableDeferred<Throwable?>()
+            var commits = 0
+            var acks = 0
+            val drain = PushMailboxDrain(
+                pull = { page(item(1), item(2)) },
+                commit = { commits++; throw IOException("private") },
+                ack = { acks++; accepted }, current = { true },
+                recordFailure = { child.cancel(); if (throws) throw IOException("private diagnostics") },
+            )
+            child = launch(start = CoroutineStart.LAZY) {
+                result.complete(runCatching { drain.run() }.exceptionOrNull())
+            }
+            child.start()
+            child.join()
+            assertTrue(result.await() is CancellationException)
+            assertEquals(1, commits)
+            assertEquals(0, acks)
+        }
     }
 
     @Test fun transportFailuresAndCancellationNeverTurnIntoCompletedScans() = runBlocking {

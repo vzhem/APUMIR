@@ -1,6 +1,9 @@
 package com.vladimir.messenger.data.push
 
 import java.util.concurrent.CancellationException
+import java.util.logging.Logger
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 /**
  * Bounded mailbox traversal, deliberately disconnected from Firebase, storage,
@@ -29,6 +32,9 @@ import java.util.concurrent.CancellationException
  * cause already committed messages to be read again, so commit must be
  * idempotent across the ordinary transport and mailbox. [current] is only a
  * quick preflight, not an ABA-resistant lifecycle lock or cancellation of IO.
+ * Cancellation is checked at callback boundaries, but an already committed
+ * transaction or a request that reached the server cannot be undone. Callbacks
+ * must be bounded, cancellation-aware, and must not detach later effects.
  */
 internal class PushMailboxDrain(
     private val pull: suspend (String) -> PushMailboxHttpClient.PullResult,
@@ -87,18 +93,21 @@ internal class PushMailboxDrain(
     }
 
     suspend fun run(checkpoint: Checkpoint = Checkpoint.first()): Result = try {
-        scan(checkpoint)
+        currentCoroutineContext().ensureActive()
+        val result = scan(checkpoint)
+        currentCoroutineContext().ensureActive()
+        result
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: Exception) {
         // Never expose the route, ciphertext, original id, receipt or exception.
-        recordFailure()
+        diag()
         Result.Retry
     }
 
     private suspend fun scan(checkpoint: Checkpoint): Result {
         if (checkpoint.after != "-" && !PushMailboxProtocol.validId(checkpoint.after)) return Result.Restart
-        if (!current()) return Result.Retry
+        if (!live()) return Result.Retry
         var after = checkpoint.after
         var unprocessed = checkpoint.unprocessed
         var pages = checkpoint.pages
@@ -107,15 +116,18 @@ internal class PushMailboxDrain(
         // from the checkpoint. Only the recent suffix is persisted.
         val seen = HashSet(checkpoint.recent)
         repeat(maxPages) {
+            currentCoroutineContext().ensureActive()
             if (pages >= maxScanPages) return Result.Restart
-            if (!current()) return Result.Retry
-            val page = when (val result = pull(after)) {
-                is PushMailboxHttpClient.PullResult.Page -> result
+            if (!live()) return Result.Retry
+            val pulled = pull(after)
+            currentCoroutineContext().ensureActive()
+            val page = when (pulled) {
+                is PushMailboxHttpClient.PullResult.Page -> pulled
                 PushMailboxHttpClient.PullResult.CursorExpired -> return Result.Restart
                 PushMailboxHttpClient.PullResult.Throttled, PushMailboxHttpClient.PullResult.Rejected,
                 PushMailboxHttpClient.PullResult.Unavailable -> return Result.Retry
             }
-            if (!current()) return Result.Retry
+            if (!live()) return Result.Retry
             // Defensive bounded snapshot even though the HTTP codec validates
             // this already; a mutable callback list cannot grow this allocation.
             val items = ArrayList<PushMailboxItem>(PushMailboxProtocol.MAX_PAGE_ITEMS)
@@ -136,27 +148,30 @@ internal class PushMailboxDrain(
 
             val receipts = ArrayList<PushMailboxReceipt>(items.size)
             for (item in items) {
-                if (!current()) return Result.Retry
+                if (!live()) return Result.Retry
                 val result = try {
                     commit(item.envelope)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {
-                    recordFailure()
+                    diag()
                     Commit.RETRY
                 }
-                if (!current()) return Result.Retry
+                currentCoroutineContext().ensureActive()
+                if (!live()) return Result.Retry
                 when (result) {
                     Commit.COMMITTED, Commit.ALREADY_COMMITTED -> receipts.add(PushMailboxReceipt(item.id, item.receipt))
                     Commit.RETRY -> unprocessed = true
                 }
             }
             if (receipts.isNotEmpty()) {
-                if (!current()) return Result.Retry
+                if (!live()) return Result.Retry
                 // The restricted signer/Worker require sorted unique ids.
                 val sorted = receipts.sortedBy { it.id }
-                if (ack(sorted) != PushMailboxHttpClient.AckResult.ACCEPTED) return Result.Retry
-                if (!current()) return Result.Retry
+                val acknowledged = ack(sorted)
+                currentCoroutineContext().ensureActive()
+                if (acknowledged != PushMailboxHttpClient.AckResult.ACCEPTED) return Result.Retry
+                if (!live()) return Result.Retry
             }
             after = page.next!!
             for (item in items) {
@@ -166,6 +181,27 @@ internal class PushMailboxDrain(
             pages++
         }
         return Result.Continue(Checkpoint.resume(after, unprocessed, pages, recent.toList()) ?: return Result.Restart)
+    }
+
+    private suspend fun live(): Boolean {
+        currentCoroutineContext().ensureActive()
+        val result = current()
+        currentCoroutineContext().ensureActive()
+        return result
+    }
+
+    private suspend fun diag() {
+        currentCoroutineContext().ensureActive()
+        try {
+            recordFailure()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // A broken counter cannot mask cancellation or mark work as done.
+            currentCoroutineContext().ensureActive()
+            Logger.getLogger("PushMailboxDrain").warning("Mailbox diagnostics unavailable")
+        }
+        currentCoroutineContext().ensureActive()
     }
 
     companion object {

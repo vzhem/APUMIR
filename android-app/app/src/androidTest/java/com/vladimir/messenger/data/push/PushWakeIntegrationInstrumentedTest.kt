@@ -162,7 +162,7 @@ class PushWakeIntegrationInstrumentedTest {
                         204
                     }, { error("unexpected fake HTTP failure") },
                 )
-                assertEquals(PushHttpClient.RegistrationResult.STORED, http.register(request))
+                assertEquals(PushHttpClient.RegistrationResult.STORED, runBlocking { http.register(request) })
                 assertEquals("{\"action\":\"register\",\"owner\":\"$owner\",\"capability\":\"$capability\",\"device\":\"$device\",\"sequence\":17,\"issuedAt\":1700000000,\"token\":\"$token\",\"signature\":\"$signature\"}", registrationBody)
             } finally { receiver.close() }
             val confirmed = (journal.registered(

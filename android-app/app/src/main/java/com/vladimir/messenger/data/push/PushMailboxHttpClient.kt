@@ -1,17 +1,15 @@
 package com.vladimir.messenger.data.push
 
-import com.vladimir.messenger.util.readBytesAtMost
-import java.io.IOException
-import java.net.URL
-import java.util.Locale
 import java.util.concurrent.CancellationException
-import javax.net.ssl.HttpsURLConnection
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 /**
  * Disabled mailbox transport seam; no production sender, Firebase, scheduler
- * or receive router invokes it yet. Call off the UI thread with a fixed reviewed
- * endpoint. A stored/handled/accepted response is NOT proof of user delivery.
- * An ACK must only be created after authenticated opening and durable handling.
+ * or receive router invokes it yet. Use a fixed reviewed endpoint. A
+ * stored/handled/accepted response is NOT proof of user delivery. An ACK must
+ * only be created after authenticated opening and durable handling. Cancellation
+ * cannot undo a request already accepted by the server; retries must be idempotent.
  */
 internal class PushMailboxHttpClient(
     private val endpoint: PushEndpoint,
@@ -40,17 +38,20 @@ internal class PushMailboxHttpClient(
 
     enum class AckResult { ACCEPTED, THROTTLED, REJECTED, UNAVAILABLE }
 
-    fun put(request: PushMailboxPutRequest): PutResult {
+    suspend fun put(request: PushMailboxPutRequest): PutResult {
+        currentCoroutineContext().ensureActive()
         if (!request.isValid()) return PutResult.Rejected
         val body = request.toJsonBytes()
         return try {
+            currentCoroutineContext().ensureActive()
             val response = transport.post(endpoint, "/v1/mailbox/put", body)
             try {
-                when (response.status) {
+                currentCoroutineContext().ensureActive()
+                val outcome = when (response.status) {
                     200, 201 -> {
-                        val parsed = PushMailboxResponseCodec.put(response.body) ?: return PutResult.Unavailable
+                        val parsed = PushMailboxResponseCodec.put(response.body)
                         when {
-                            parsed.expiresAt != request.expiresAt -> PutResult.Unavailable
+                            parsed == null || parsed.expiresAt != request.expiresAt -> PutResult.Unavailable
                             response.status == 201 && (parsed.state != "stored" || !parsed.wakeQueued) -> PutResult.Unavailable
                             parsed.state == "stored" -> PutResult.Stored(parsed.expiresAt, parsed.wakeQueued)
                             parsed.state == "handled" -> PutResult.Handled(parsed.expiresAt)
@@ -63,60 +64,73 @@ internal class PushMailboxHttpClient(
                     400, 403 -> PutResult.Rejected
                     else -> PutResult.Unavailable
                 }
+                currentCoroutineContext().ensureActive()
+                outcome
             } finally { response.body.fill(0) }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
             // Only a generic counter; never include request or response data.
-            recordFailure()
+            diag(recordFailure)
             PutResult.Unavailable
         } finally { body.fill(0) }
     }
 
-    fun pull(request: PushMailboxPullRequest): PullResult {
+    suspend fun pull(request: PushMailboxPullRequest): PullResult {
+        currentCoroutineContext().ensureActive()
         if (!request.isValid()) return PullResult.Rejected
         val body = request.toJsonBytes()
         return try {
+            currentCoroutineContext().ensureActive()
             val response = transport.post(endpoint, "/v1/mailbox/pull", body)
             try {
-                when (response.status) {
+                currentCoroutineContext().ensureActive()
+                val outcome = when (response.status) {
                     200 -> {
-                        val page = PushMailboxResponseCodec.page(response.body) ?: return PullResult.Unavailable
-                        if (request.after != "-" && page.items.any { it.id == request.after }) return PullResult.Unavailable
-                        PullResult.Page(page.items, page.next)
+                        val page = PushMailboxResponseCodec.page(response.body)
+                        if (page == null || request.after != "-" && page.items.any { it.id == request.after }) {
+                            PullResult.Unavailable
+                        } else PullResult.Page(page.items, page.next)
                     }
                     409 -> PullResult.CursorExpired
                     429 -> PullResult.Throttled
                     400, 403 -> PullResult.Rejected
                     else -> PullResult.Unavailable
                 }
+                currentCoroutineContext().ensureActive()
+                outcome
             } finally { response.body.fill(0) }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            recordFailure()
+            diag(recordFailure)
             PullResult.Unavailable
         } finally { body.fill(0) }
     }
 
     /** 204 is an idempotent operation acceptance, not proof any row matched. */
-    fun ack(request: PushMailboxAckRequest): AckResult {
+    suspend fun ack(request: PushMailboxAckRequest): AckResult {
+        currentCoroutineContext().ensureActive()
         if (!request.isValid()) return AckResult.REJECTED
         val body = request.toJsonBytes()
         return try {
+            currentCoroutineContext().ensureActive()
             val response = transport.post(endpoint, "/v1/mailbox/ack", body)
             try {
-                when (response.status) {
+                currentCoroutineContext().ensureActive()
+                val outcome = when (response.status) {
                     204 -> if (response.body.isEmpty()) AckResult.ACCEPTED else AckResult.UNAVAILABLE
                     429 -> AckResult.THROTTLED
                     400, 403 -> AckResult.REJECTED
                     else -> AckResult.UNAVAILABLE
                 }
+                currentCoroutineContext().ensureActive()
+                outcome
             } finally { response.body.fill(0) }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            recordFailure()
+            diag(recordFailure)
             AckResult.UNAVAILABLE
         } finally { body.fill(0) }
     }
@@ -128,54 +142,11 @@ internal class PushMailboxHttpResponse(val status: Int, val body: ByteArray) {
 
 /** Injectable for tests without Google or Cloudflare. */
 internal fun interface PushMailboxPost {
-    fun post(endpoint: PushEndpoint, path: String, body: ByteArray): PushMailboxHttpResponse
+    suspend fun post(endpoint: PushEndpoint, path: String, body: ByteArray): PushMailboxHttpResponse
 }
 
-/**
- * System TLS, exact allowlisted host, no redirects and bounded response bytes.
- * Connect/read socket timeouts are per operation, not an overall deadline or a
- * write timeout; this synchronous transport is not bounded or cancellable by
- * itself and must not be mistaken for a bounded worker.
- */
+/** Shares the bounded, cancellable HTTPS transport with registration and wake. */
 internal object HttpsPushMailboxPost : PushMailboxPost {
-    override fun post(endpoint: PushEndpoint, path: String, body: ByteArray): PushMailboxHttpResponse =
-        postWithConnection(endpoint, path, body) { it.openConnection() as HttpsURLConnection }
-
-    /** Test seam for exercising the actual connection policy without external network. */
-    internal fun postWithConnection(
-        endpoint: PushEndpoint, path: String, body: ByteArray, open: (URL) -> HttpsURLConnection,
-    ): PushMailboxHttpResponse {
-        val connection = open(endpoint.url(path))
-        try {
-            connection.requestMethod = "POST"
-            connection.instanceFollowRedirects = false
-            connection.connectTimeout = 5_000
-            connection.readTimeout = 5_000
-            connection.useCaches = false
-            connection.doOutput = true
-            connection.setRequestProperty("Content-Type", "application/json")
-            connection.setRequestProperty("Accept", "application/json")
-            connection.setRequestProperty("Accept-Encoding", "identity")
-            connection.setFixedLengthStreamingMode(body.size)
-            connection.outputStream.use { it.write(body) }
-            val status = connection.responseCode
-            if (status != 200 && status != 201) {
-                if (status >= 400) connection.errorStream?.close() else connection.inputStream?.close()
-                return PushMailboxHttpResponse(status, byteArrayOf())
-            }
-            val contentType = connection.contentType?.split(';')?.firstOrNull()?.trim()?.lowercase(Locale.ROOT)
-            val encoding = connection.getHeaderField("Content-Encoding")?.trim()?.lowercase(Locale.ROOT)
-            if (contentType != "application/json" || encoding != null && encoding != "identity") throw IOException("invalid mailbox response")
-            val declared = connection.getHeaderField("Content-Length")
-            if (declared != null && (!declared.matches(Regex("^[0-9]+$")) ||
-                    (declared.toLongOrNull() ?: Long.MAX_VALUE) > PushMailboxProtocol.MAX_RESPONSE_BYTES)
-            ) throw IOException("oversized mailbox response")
-            val bytes = connection.inputStream.use { it.readBytesAtMost(PushMailboxProtocol.MAX_RESPONSE_BYTES.toLong()) }
-            if (declared != null && declared.toLong() != bytes.size.toLong()) {
-                bytes.fill(0)
-                throw IOException("invalid mailbox response length")
-            }
-            return PushMailboxHttpResponse(status, bytes)
-        } finally { connection.disconnect() }
-    }
+    override suspend fun post(endpoint: PushEndpoint, path: String, body: ByteArray): PushMailboxHttpResponse =
+        SharedPushHttpTransport.post(endpoint, path, body, json = true)
 }

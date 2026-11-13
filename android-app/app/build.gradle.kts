@@ -272,6 +272,8 @@ dependencies {
 
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.core)
+    // Explicit rather than relying on Coil's transitive HTTP client version.
+    implementation(libs.okhttp)
 
     implementation(libs.hilt.android)
     implementation(libs.androidx.hilt.navigation.compose)

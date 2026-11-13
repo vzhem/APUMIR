@@ -16,6 +16,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -177,7 +178,7 @@ class PushMailboxOutboxInstrumentedTest {
                 },
                 { failures.incrementAndGet() },
             )
-            assertEquals(PushMailboxHttpClient.PutResult.Unavailable, http.put(request(initial.entry)))
+            assertEquals(PushMailboxHttpClient.PutResult.Unavailable, runBlocking { http.put(request(initial.entry)) })
             val reopened = store()
             val repeated = result(reopened, draft(cutoff = now + 2 * 86_400_000L))
             assertFalse(repeated.created)
@@ -185,7 +186,7 @@ class PushMailboxOutboxInstrumentedTest {
             assertEquals(initial.entry.expiresAt, repeated.entry.expiresAt)
             assertEquals(initial.entry.envelope, repeated.entry.envelope)
             assertEquals(1, seals.get())
-            assertTrue(http.put(request(repeated.entry)) is PushMailboxHttpClient.PutResult.Stored)
+            assertTrue(runBlocking { http.put(request(repeated.entry)) } is PushMailboxHttpClient.PutResult.Stored)
             assertEquals(sent[0], sent[1])
             // Server acceptance cannot retire the local record.
             assertFalse(result(reopened).created)

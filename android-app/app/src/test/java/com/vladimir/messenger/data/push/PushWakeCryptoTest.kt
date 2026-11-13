@@ -9,6 +9,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.coroutines.runBlocking
 
 /** Tests only the Kotlin adapter with fake FFI and HTTP, not a real provider. */
 class PushWakeCryptoTest {
@@ -28,7 +29,7 @@ class PushWakeCryptoTest {
         PushRegistrationState.fresh(PushEpochProtocol.bindingHash(local), PushEpochProtocol.bindingHash(peer), 1000, epoch, device)!!
     private fun endpoint() = PushEndpoint.approved("https://wake.example.workers.dev", setOf("wake.example.workers.dev"))!!
 
-    @Test fun matchingSenderAndReceiverProduceTheWorkerRouteAndWipeFfiBuffers() {
+    @Test fun matchingSenderAndReceiverProduceTheWorkerRouteAndWipeFfiBuffers() = runBlocking {
         val borrowed = mutableListOf<ByteArray>()
         val output = mutableListOf<ByteArray>()
         val crypto = PushWakeCrypto(derive = { a, b, s, e, _ ->
@@ -60,7 +61,7 @@ class PushWakeCryptoTest {
         assertNull(receiver.routeHex())
     }
 
-    @Test fun receiverSignsOnlyReservedMatchingStateAndHttpUsesTheSameVector() {
+    @Test fun receiverSignsOnlyReservedMatchingStateAndHttpUsesTheSameVector() = runBlocking {
         val borrowed = mutableListOf<ByteArray>()
         lateinit var returned: ByteArray
         var calls = 0

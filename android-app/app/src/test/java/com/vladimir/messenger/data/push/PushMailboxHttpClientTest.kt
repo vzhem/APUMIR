@@ -3,10 +3,17 @@ package com.vladimir.messenger.data.push
 import java.io.IOException
 import java.util.Base64
 import java.util.concurrent.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.launch
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.coroutines.runBlocking
 
 class PushMailboxHttpClientTest {
     private val owner = "8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394"
@@ -39,7 +46,7 @@ class PushMailboxHttpClientTest {
     private fun page(items: String = item(), next: String? = id) =
         "{\"items\":[$items],\"next\":" + (next?.let { "\"$it\"" } ?: "null") + "}"
 
-    @Test fun putStoresOnlyWithAValidServerReceiptAndClearsTransientBytes() {
+    @Test fun putStoresOnlyWithAValidServerReceiptAndClearsTransientBytes() = runBlocking {
         var sent = ""
         var sentRef = byteArrayOf()
         var responseRef = byteArrayOf()
@@ -63,7 +70,7 @@ class PushMailboxHttpClientTest {
         assertFalse(request.toString().contains(envelope()))
     }
 
-    @Test fun serverAcceptanceAndRetryStatesAreNotDelivery() {
+    @Test fun serverAcceptanceAndRetryStatesAreNotDelivery() = runBlocking {
         var status = 200
         var json = stored("handled", false)
         val client = PushMailboxHttpClient(endpoint(), PushMailboxPost { _, _, _ -> response(status, json) }, {})
@@ -94,7 +101,7 @@ class PushMailboxHttpClientTest {
         }
     }
 
-    @Test fun pullMatchesSignedWorkerVectorAndReturnsOnlyABoundedCheckedPage() {
+    @Test fun pullMatchesSignedWorkerVectorAndReturnsOnlyABoundedCheckedPage() = runBlocking {
         var sent = ""
         var sentRef = byteArrayOf()
         var responseRef = byteArrayOf()
@@ -118,7 +125,7 @@ class PushMailboxHttpClientTest {
         assertFalse(request.toString().contains(cap))
     }
 
-    @Test fun acknowledgementsAreSortedSnapshotAndOnlyMeanServerAcceptedAnOperation() {
+    @Test fun acknowledgementsAreSortedSnapshotAndOnlyMeanServerAcceptedAnOperation() = runBlocking {
         val secondId = "33".repeat(16)
         val secondReceipt = "44".repeat(16)
         val original = mutableListOf(PushMailboxReceipt(id, receipt), PushMailboxReceipt(secondId, secondReceipt))
@@ -141,7 +148,7 @@ class PushMailboxHttpClientTest {
         assertFalse(PushMailboxReceipt(id, receipt).toString().contains(receipt))
     }
 
-    @Test fun invalidRequestsNeverReachTheNetworkAndInputIsBounded() {
+    @Test fun invalidRequestsNeverReachTheNetworkAndInputIsBounded() = runBlocking {
         var calls = 0
         val client = PushMailboxHttpClient(endpoint(), PushMailboxPost { _, _, _ -> calls++; response(204) }, {})
         val bad = listOf(
@@ -164,7 +171,7 @@ class PushMailboxHttpClientTest {
         assertEquals(0, calls)
     }
 
-    @Test fun putIdBindsCiphertextAndImmutableCutoffToTheIndependentWorkerVector() {
+    @Test fun putIdBindsCiphertextAndImmutableCutoffToTheIndependentWorkerVector() = runBlocking {
         val wire = envelope()
         val expected = "bbdfc6257694ab5da289e92b67093da1"
         assertEquals(expected, PushMailboxProtocol.putId(expiry, wire))
@@ -176,7 +183,7 @@ class PushMailboxHttpClientTest {
         assertFalse(put().toString().contains(expected))
     }
 
-    @Test fun envelopeRequiresCanonicalBase64AndExactSeparators() {
+    @Test fun envelopeRequiresCanonicalBase64AndExactSeparators() = runBlocking {
         val wire = envelope()
         val parts = wire.split('|')
         val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
@@ -193,7 +200,7 @@ class PushMailboxHttpClientTest {
         assertFalse(PushMailboxProtocol.validEnvelope(wire.replace("APUSEAL1|", "APUSEAL1|\\n")))
     }
 
-    @Test fun malformedDuplicateOversizedAndAmbiguousResponsesFailClosed() {
+    @Test fun malformedDuplicateOversizedAndAmbiguousResponsesFailClosed() = runBlocking {
         var json = ""
         val client = PushMailboxHttpClient(endpoint(), PushMailboxPost { _, _, _ -> response(200, json) }, {})
         val badPages = listOf(
@@ -225,7 +232,79 @@ class PushMailboxHttpClientTest {
         assertTrue("field order is not significant", client.put(put()) is PushMailboxHttpClient.PutResult.Handled)
     }
 
-    @Test fun failureAndCancellationDoNotLeakOrTurnIntoSuccess() {
+    @Test fun cancellationRacingAnyMailboxResultOrErrorClearsBuffersAndPropagates() = runBlocking {
+        for (throws in listOf(false, true)) {
+            for (method in listOf("put", "pull", "ack")) {
+                var requestBody = byteArrayOf()
+                var responseBody = byteArrayOf()
+                var diagnostics = 0
+                val result = CompletableDeferred<Throwable?>()
+                val client = PushMailboxHttpClient(endpoint(), PushMailboxPost { _, _, body ->
+                    requestBody = body
+                    val response = response(if (method == "ack") 204 else 200, if (method == "put") stored() else page())
+                    responseBody = response.body
+                    currentCoroutineContext().cancel()
+                    if (throws) {
+                        // A throwing transport retains ownership of any response it created.
+                        responseBody.fill(0)
+                        throw IOException("private")
+                    }
+                    response
+                }, { diagnostics++ })
+                val job = launch {
+                    result.complete(runCatching {
+                        when (method) {
+                            "put" -> client.put(put())
+                            "pull" -> client.pull(pull())
+                            else -> client.ack(ack())
+                        }
+                    }.exceptionOrNull())
+                }
+                job.join()
+                assertTrue(result.await() is CancellationException)
+                assertTrue(requestBody.isNotEmpty() && requestBody.all { it == 0.toByte() })
+                assertTrue(responseBody.isNotEmpty() && responseBody.all { it == 0.toByte() })
+                assertEquals(0, diagnostics)
+            }
+        }
+    }
+
+    @Test fun brokenDiagnosticsCannotMaskCancellationOrPretendMailboxSuccess() = runBlocking {
+        for (method in listOf("put", "pull", "ack")) {
+            var requestBody = byteArrayOf()
+            val transport = PushMailboxPost { _, _, body -> requestBody = body; throw IOException("private") }
+            val failing = PushMailboxHttpClient(endpoint(), transport, { throw IllegalStateException("private diagnostic") })
+            when (method) {
+                "put" -> assertEquals(PushMailboxHttpClient.PutResult.Unavailable, failing.put(put()))
+                "pull" -> assertEquals(PushMailboxHttpClient.PullResult.Unavailable, failing.pull(pull()))
+                else -> assertEquals(PushMailboxHttpClient.AckResult.UNAVAILABLE, failing.ack(ack()))
+            }
+            assertTrue(requestBody.isNotEmpty() && requestBody.all { it == 0.toByte() })
+            for (throws in listOf(false, true)) {
+                lateinit var child: Job
+                val result = CompletableDeferred<Throwable?>()
+                val cancelled = PushMailboxHttpClient(endpoint(), transport, {
+                    child.cancel()
+                    if (throws) throw IllegalStateException("private diagnostic")
+                })
+                child = launch(start = CoroutineStart.LAZY) {
+                    result.complete(runCatching {
+                        when (method) {
+                            "put" -> cancelled.put(put())
+                            "pull" -> cancelled.pull(pull())
+                            else -> cancelled.ack(ack())
+                        }
+                    }.exceptionOrNull())
+                }
+                child.start()
+                child.join()
+                assertTrue(result.await() is CancellationException)
+                assertTrue(requestBody.isNotEmpty() && requestBody.all { it == 0.toByte() })
+            }
+        }
+    }
+
+    @Test fun failureAndCancellationDoNotLeakOrTurnIntoSuccess() = runBlocking {
         var sent = byteArrayOf()
         var failures = 0
         var cancel = false

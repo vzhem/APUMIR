@@ -72,11 +72,32 @@ class MailboxResultsTest(unittest.TestCase):
                                ("PushWakePeriodicRecoveryTest", checker.PERIODIC_EXPECTED),
                                ("PushWakeDrainTest", checker.DRAIN_EXPECTED),
                                ("PushWakeRecoveryScanTest", checker.RECOVERY_SCAN_EXPECTED),
-                               ("PushMailboxHttpsTransportTest", checker.EXPECTED[checker.PREFIX + "PushMailboxHttpsTransportTest"])):
+                               *((name, checker.EXPECTED[checker.PREFIX + name]) for name in (
+                                   "PushHttpClientTest", "PushWakeCryptoTest", "PushMailboxHttpClientTest",
+                                   "PushMailboxHttpsTransportTest", "PushHttpLoopbackTlsTest", "PushMailboxDrainTest",
+                               ))):
             source = (tests / (name + ".kt")).read_text(encoding="utf-8")
             methods = re.findall(r"@Test\s+fun\s+([A-Za-z_]\w*)\s*\(", source)
             self.assertEqual(len(methods), len(set(methods)))
             self.assertEqual(expected, set(methods))
+
+    def test_filtered_android_compile_selects_every_required_class(self):
+        script = Path(__file__).with_name("check-android-compile.sh").read_text(encoding="utf-8")
+        selected = set(re.findall(r"--tests '\*(\w+)\*'", script))
+        for classname in checker.EXPECTED:
+            self.assertIn(classname.rsplit(".", 1)[-1], selected)
+
+    def test_each_transport_and_mailbox_drain_case_is_required(self):
+        for name, count in (("PushHttpClientTest", 8), ("PushMailboxHttpClientTest", 11),
+                            ("PushMailboxHttpsTransportTest", 10), ("PushHttpLoopbackTlsTest", 5),
+                            ("PushMailboxDrainTest", 16)):
+            classname = checker.PREFIX + name
+            self.assertEqual(count, len(checker.EXPECTED[classname]))
+            for method in checker.EXPECTED[classname]:
+                key = (classname, method)
+                self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[:2] != key]))
+                skipped = [(*case[:2], "<skipped/>") if case[:2] == key else case for case in self.all_cases()]
+                self.assertEqual(1, self.run_report(skipped))
 
     def test_each_recovery_scan_case_is_required_and_cannot_be_skipped(self):
         self.assertEqual(21, len(checker.RECOVERY_SCAN_EXPECTED))

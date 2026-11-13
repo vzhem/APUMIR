@@ -3,7 +3,8 @@
 
 The full Gradle test task normally discovers these automatically. This gate
 also detects a missing/renamed class or a test accidentally filtered out. It is
-not evidence of real TLS, Android Room/Keystore, UniFFI, a provider, or delivery.
+not evidence of Android Room/Keystore, UniFFI, provider TLS, or delivery.
+The transport tests include real TLS only against a disposable loopback server.
 """
 import sys
 import xml.etree.ElementTree as ET
@@ -92,6 +93,27 @@ EXPECTED = {
     RUN_LOOP_CLASS: RUN_LOOP_EXPECTED,
     DRAIN_CLASS: DRAIN_EXPECTED,
     RECOVERY_SCAN_CLASS: RECOVERY_SCAN_EXPECTED,
+    PREFIX + "PushHttpClientTest": {
+        "configRequiresAnExactAllowedHttpsHostAndForbidsPathsAndRedirects",
+        "registrationMatchesWorkerVectorAndRequestBytesAreCleared",
+        "wakeHasOnlyOpaqueRouteFieldsAndAcceptedIsNotADeliveryReceipt",
+        "invalidFieldsNeverReachTheNetwork",
+        "cancellationPropagatesAndStillClearsTheRequestBody",
+        "cancellationRacingAResultOrErrorCannotBecomeSuccessOrFailure",
+        "brokenDiagnosticsCannotMaskCancellationOrPretendSuccess",
+        "statusMappingAndFailuresNeverPretendToDeliver",
+    },
+    PREFIX + "PushWakeCryptoTest": {
+        "matchingSenderAndReceiverProduceTheWorkerRouteAndWipeFfiBuffers",
+        "receiverSignsOnlyReservedMatchingStateAndHttpUsesTheSameVector",
+        "mismatchedEpochBindingsDirectionAndUnreservedStatesNeverSign",
+        "revocationRequiresItsOwnReservationAndEmptyToken",
+        "invalidInputAndMalformedFfiOutputFailClosedWithoutLeaks",
+        "failureAndCancellationClearBorrowedArraysWithoutLoggingInputs",
+        "modifiedDerivationInputsAreRejectedAndTemporaryBuffersAreWiped",
+        "modifiedSigningInputsNeverProduceARegistration",
+        "badSignerOutputCannotProduceARequest",
+    },
     PREFIX + "PushMailboxHttpClientTest": {
         "putStoresOnlyWithAValidServerReceiptAndClearsTransientBytes",
         "serverAcceptanceAndRetryStatesAreNotDelivery",
@@ -101,6 +123,8 @@ EXPECTED = {
         "putIdBindsCiphertextAndImmutableCutoffToTheIndependentWorkerVector",
         "envelopeRequiresCanonicalBase64AndExactSeparators",
         "malformedDuplicateOversizedAndAmbiguousResponsesFailClosed",
+        "cancellationRacingAnyMailboxResultOrErrorClearsBuffersAndPropagates",
+        "brokenDiagnosticsCannotMaskCancellationOrPretendMailboxSuccess",
         "failureAndCancellationDoNotLeakOrTurnIntoSuccess",
     },
     PREFIX + "PushMailboxAccessSignerTest": {
@@ -113,12 +137,23 @@ EXPECTED = {
         "failuresAndCancellationAreGenericAndClearInputs",
     },
     PREFIX + "PushMailboxHttpsTransportTest": {
-        "postsOnlyToTheReviewedHttpsHostWithRedirectsDisabledAndSocketTimeouts",
-        "redirectsAndErrorBodiesAreNeverReturnedAsSuccessData",
-        "malformedContentTypeEncodingAndDeclaredLengthsFailClosed",
-        "identityEncodingAndExactlyTheResponseCapRemainAcceptable",
-        "streamingCapAndDeclaredLengthAreBothEnforcedAndStreamsClosed",
-        "pathsOutsideTheEndpointAllowlistCannotOpenAConnection",
+        "clientPolicyHasTotalAndSocketTimeoutsAndDoesNotFollowRedirects",
+        "approvedHttpsPathAndHeadersReachTheFactoryWithAnIsolatedBody",
+        "redirectsAndErrorBodiesAreClosedWithoutBeingReadOrReturned",
+        "malformedOrAmbiguousHeadersFailBeforeReadingTheBody",
+        "streamingCapAndDeclaredLengthAreBothEnforced",
+        "unapprovedPathsAndOversizedRequestsNeverCreateACall",
+        "cancellationCancelsTheCallAndLateResponsesAreClosedWithoutReading",
+        "timedOutCallsKeepTheirSlotUntilTheirRealCallbackFinishes",
+        "parentCancellationIsNotConvertedIntoAnInternalDeadlineFailure",
+        "enqueueFailureReturnsItsSlotAndClearsTheRequestCopy",
+    },
+    PREFIX + "PushHttpLoopbackTlsTest": {
+        "localTlsRoundTripUsesTheExpectedRequestAndClosesTheResponse",
+        "untrustedTlsCertificateFailsAndRedirectIsNeverFollowed",
+        "parentCancellationClosesARealTlsCallWaitingForAResponse",
+        "deadlineAlsoClosesARealTlsCallStalledMidResponseBody",
+        "overallDeadlineCancelsARealTlsCallAfterRequestWrite",
     },
     PREFIX + "PushEpochEnvelopeTest": {
         "offerAndRevokeUseTheExistingEncryptedWireAndClearFfiInputs",
@@ -170,6 +205,9 @@ EXPECTED = {
         "recentIdsDetectCyclesAcrossDurableContinuationBoundaries",
         "longerCycleIsBoundedEvenAfterOldIdsLeaveTheCheckpoint",
         "checkpointValidationAndTotalPageBudgetFailClosedWithoutMoreEffects",
+        "cancellationAtAnyCallbackBoundaryCannotStartAnotherEffectOrReportSuccess",
+        "brokenDiagnosticsCannotDropLaterItemsOrConvertFailureToSuccess",
+        "cancellationInsideBrokenDiagnosticsStopsTheRemainingPage",
         "transportFailuresAndCancellationNeverTurnIntoCompletedScans",
     },
 }

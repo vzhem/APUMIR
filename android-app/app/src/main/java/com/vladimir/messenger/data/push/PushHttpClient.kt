@@ -3,13 +3,16 @@ package com.vladimir.messenger.data.push
 import java.net.URI
 import java.net.URISyntaxException
 import java.util.concurrent.CancellationException
-import javax.net.ssl.HttpsURLConnection
+import java.util.logging.Logger
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 /**
  * Experimental client for the disabled wake Worker; not connected to Android,
- * not an FCM client, and never an acknowledgment of message delivery. Call
- * away from the UI thread. The endpoint allowlist must come from a reviewed,
- * immutable application configuration, not from received messages or URLs.
+ * not an FCM client, and never an acknowledgment of message delivery. The
+ * endpoint allowlist must come from a reviewed, immutable application
+ * configuration, not from received messages or URLs. A cancelled operation may
+ * already have reached the server; retries must be idempotent.
  */
 internal class PushHttpClient(
     private val endpoint: PushEndpoint,
@@ -20,11 +23,15 @@ internal class PushHttpClient(
     enum class WakeResult { ACCEPTED, THROTTLED, REJECTED, UNAVAILABLE }
 
     /** [request] holds an FCM token and capability; never log, back up, or print it. */
-    fun register(request: PushRegistrationRequest): RegistrationResult {
+    suspend fun register(request: PushRegistrationRequest): RegistrationResult {
+        currentCoroutineContext().ensureActive()
         if (!request.isValid()) return RegistrationResult.REJECTED
         val body = request.toJsonBytes()
         return try {
-            when (transport.post(endpoint, "/v1/registration", body)) {
+            currentCoroutineContext().ensureActive()
+            val status = transport.post(endpoint, "/v1/registration", body)
+            currentCoroutineContext().ensureActive()
+            when (status) {
                 204 -> RegistrationResult.STORED
                 409 -> RegistrationResult.STALE
                 429 -> RegistrationResult.THROTTLED
@@ -35,17 +42,21 @@ internal class PushHttpClient(
             throw cancelled
         } catch (_: Exception) {
             // Report only a generic counter/log; exception text may contain secrets.
-            recordFailure()
+            diag(recordFailure)
             RegistrationResult.UNAVAILABLE
         } finally { body.fill(0) }
     }
 
     /** ACCEPTED means only that the Worker accepted the request, not delivery. */
-    fun wake(request: PushWakeRequest): WakeResult {
+    suspend fun wake(request: PushWakeRequest): WakeResult {
+        currentCoroutineContext().ensureActive()
         if (!request.isValid()) return WakeResult.REJECTED
         val body = request.toJsonBytes()
         return try {
-            when (transport.post(endpoint, "/v1/wake", body)) {
+            currentCoroutineContext().ensureActive()
+            val status = transport.post(endpoint, "/v1/wake", body)
+            currentCoroutineContext().ensureActive()
+            when (status) {
                 202 -> WakeResult.ACCEPTED
                 429 -> WakeResult.THROTTLED
                 400, 403 -> WakeResult.REJECTED
@@ -55,10 +66,24 @@ internal class PushHttpClient(
             throw cancelled
         } catch (_: Exception) {
             // Report only a generic counter/log, never capabilities or tokens.
-            recordFailure()
+            diag(recordFailure)
             WakeResult.UNAVAILABLE
         } finally { body.fill(0) }
     }
+}
+
+/** A broken diagnostic counter must not mask cancellation or disclose HTTP data. */
+internal suspend fun diag(recordFailure: () -> Unit) {
+    currentCoroutineContext().ensureActive()
+    try {
+        recordFailure()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        currentCoroutineContext().ensureActive()
+        Logger.getLogger("PushHttpClient").warning("Push diagnostics unavailable")
+    }
+    currentCoroutineContext().ensureActive()
 }
 
 /** An exact hostname allowlist plus strict HTTPS; redirects are never followed. */
@@ -92,34 +117,13 @@ internal class PushEndpoint private constructor(private val authority: String) {
 
 /** Injectable to test requests without contacting Google or Cloudflare. */
 internal fun interface PushPost {
-    fun post(endpoint: PushEndpoint, path: String, body: ByteArray): Int
+    suspend fun post(endpoint: PushEndpoint, path: String, body: ByteArray): Int
 }
 
-/**
- * System TLS validation, fixed HTTPS host and no redirects. Connect/read socket
- * timeouts are per operation, not an overall deadline or a write timeout; this
- * synchronous transport is not a bounded or cancellable worker by itself.
- */
+/** No response body or provider details are needed for registration or wake. */
 internal object HttpsPushPost : PushPost {
-    override fun post(endpoint: PushEndpoint, path: String, body: ByteArray): Int {
-        val connection = endpoint.url(path).openConnection() as HttpsURLConnection
-        try {
-            connection.requestMethod = "POST"
-            connection.instanceFollowRedirects = false
-            connection.connectTimeout = 5_000
-            connection.readTimeout = 5_000
-            connection.useCaches = false
-            connection.doOutput = true
-            connection.setRequestProperty("Content-Type", "application/json")
-            connection.setRequestProperty("Accept", "application/json")
-            connection.setFixedLengthStreamingMode(body.size)
-            connection.outputStream.use { it.write(body) }
-            val status = connection.responseCode
-            // Nothing in the response is needed. Never parse or log a provider body.
-            if (status >= 400) connection.errorStream?.close() else connection.inputStream?.close()
-            return status
-        } finally { connection.disconnect() }
-    }
+    override suspend fun post(endpoint: PushEndpoint, path: String, body: ByteArray): Int =
+        SharedPushHttpTransport.post(endpoint, path, body, json = false).status
 }
 
 private const val MAX_SAFE_INTEGER = 9_007_199_254_740_991L
