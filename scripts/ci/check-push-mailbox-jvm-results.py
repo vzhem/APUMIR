@@ -258,7 +258,7 @@ EXPECTED = {
         "everyLivePeerIsRegisteredWithTheSameToken",
         "anUnreadableIndexOrAnEmptyOneIsNeverReportedAsRegistered",
         "oneRefusalFailsTheAttemptInsteadOfPretendingSuccess",
-        "onlyUnreadyPeersStillFailsBecauseNothingWasRegistered",
+        "aPeerWithoutAUsableRecordIsNotCountedButDoesNotBlockOthers",
         "forgetRevokesEveryLiveRoute",
         "cancellationFromTheProviderIsNotConvertedIntoAnOutcome",
     },

@@ -97,12 +97,22 @@ class PushTokenRegistrarTest {
         assertEquals(1, harness.calls.count { it == "journal" })
     }
 
-    @Test fun onlyUnreadyPeersStillFailsBecauseNothingWasRegistered() = runBlocking {
-        val harness = Harness(
+    @Test fun aPeerWithoutAUsableRecordIsNotCountedButDoesNotBlockOthers() = runBlocking {
+        // Nothing was registered, so nothing may be reported as registered.
+        val onlyNotReady = Harness(
             targets = PushTargets.Outcome.COMPLETED to listOf(peer(peerA)),
             registerOutcome = { PushRegistrationRunner.Outcome.NotReady },
         )
-        assertEquals(PushTokenRegistrar.Outcome.Failed, harness.build().run())
+        assertEquals(PushTokenRegistrar.Outcome.Failed, onlyNotReady.build().run())
+
+        // One real registration next to an unready peer is still a registration.
+        val mixed = Harness(
+            targets = PushTargets.Outcome.COMPLETED to listOf(peer(peerA), peer(peerB)),
+            registerOutcome = {
+                if (it == peerB) PushRegistrationRunner.Outcome.NotReady else PushRegistrationRunner.Outcome.Registered
+            },
+        )
+        assertEquals(PushTokenRegistrar.Outcome.Registered, mixed.build().run())
     }
 
     @Test fun forgetRevokesEveryLiveRoute() = runBlocking {

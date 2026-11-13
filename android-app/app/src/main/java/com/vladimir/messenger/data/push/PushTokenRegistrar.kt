@@ -91,20 +91,24 @@ internal class PushTokenRegistrar(
         if (state != PushTargets.Outcome.COMPLETED) return false
         if (list.isEmpty()) return false
         var registered = 0
-        var notReady = 0
         for (peer in list) {
             when (register(peer.peerId, token)) {
                 PushRegistrationRunner.Outcome.Registered -> registered++
-                PushRegistrationRunner.Outcome.NotReady -> notReady++
+                // No usable local record for this peer: nothing was sent, and
+                // nothing may be counted. Other peers still get their attempt.
+                PushRegistrationRunner.Outcome.NotReady -> Unit
                 PushRegistrationRunner.Outcome.Failed -> {
                     diag()
                     return false
                 }
             }
         }
-        // NotReady peers have no usable registration record; they must not be
-        // counted as registered, but they also must not block others forever.
-        return registered > 0 || notReady == list.size
+        // NotReady peers have no usable registration record. They must not be
+        // counted as registered, and a pass that registered nobody is not a
+        // success either: the caller retries with backoff instead of believing
+        // this device is reachable.
+        if (registered == 0) diag()
+        return registered > 0
     }
 
     /** Out of the app: forget the token and revoke every live route locally. */

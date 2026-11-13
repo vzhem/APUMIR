@@ -53,7 +53,10 @@ class PushTrustResolverTest {
         pass!!.use {
             assertEquals(nodeId, it.localId)
             assertEquals(peerId, it.peerId)
-            assertEquals(state(), it.registration)
+            // State has no equality: compare the fields the pass is bound to.
+            assertEquals(state().phase, it.registration?.phase)
+            assertEquals(state().epochHex, it.registration?.epochHex)
+            assertEquals(state().registeredAtMs, it.registration?.registeredAtMs)
             assertTrue(it.localBinding.contentEquals(localBinding))
             assertTrue(it.pinnedPeerBinding.contentEquals(peerBinding))
         }
