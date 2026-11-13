@@ -14,11 +14,35 @@ internal fun siteApkMatchesLatest(
     latestSha256: String?,
 ): Boolean {
     if (!ApkUpdate.isSame(siteVersion, latestVersion)) return false
+    val siteSha = normalizedUpdateSha256(siteSha256)
+    if (!siteSha256.isNullOrBlank() && siteSha == null) return false
     val expectedSha = normalizedUpdateSha256(latestSha256) ?: return latestSha256.isNullOrBlank()
-    return normalizedUpdateSha256(siteSha256) == expectedSha
+    return siteSha == expectedSha
 }
 
-private fun normalizedUpdateSha256(value: String?): String? {
+/**
+ * The deployed relay may predate the JSON marker, but already reports an
+ * unconfirmed KV fallback as X-Apu-Cache: stale. Either signal must reject it.
+ */
+internal fun canUseRelayMetadata(metadataStale: Boolean, cacheHeader: String? = null): Boolean =
+    !metadataStale && !cacheHeader?.trim().equals("stale", ignoreCase = true)
+
+/**
+ * A displayed card is only a snapshot. On every explicit download tap, obtain
+ * a fresh official release and use its complete metadata, not the snapshot's
+ * URL/hash. If verification failed or regressed, never pin an older APK.
+ */
+internal suspend fun <T> confirmOfficialDownloadRelease(
+    displayed: T,
+    versionOf: (T) -> String,
+    refresh: suspend () -> T?,
+): T? {
+    val latest = refresh() ?: return null
+    val comparison = ApkUpdate.compareVersions(versionOf(latest), versionOf(displayed)) ?: return null
+    return latest.takeIf { comparison >= 0 }
+}
+
+internal fun normalizedUpdateSha256(value: String?): String? {
     val raw = value?.trim().orEmpty()
     val digest = (if (raw.startsWith("sha256:", ignoreCase = true)) raw.substringAfter(':') else raw)
         .lowercase()

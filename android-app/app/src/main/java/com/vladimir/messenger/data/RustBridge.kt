@@ -2,9 +2,12 @@ package com.vladimir.messenger.data
 
 import android.content.Context
 import android.util.Log
+import com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics
+import com.vladimir.messenger.data.diagnostics.ServiceStartupProgress.EnginePhase
 import com.vladimir.messenger.data.receipt.DeliveryAckWire
 import com.vladimir.messenger.data.security.MessageSealer
 import com.vladimir.messenger.data.security.OutgoingPayloadPolicy
+import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import kotlinx.coroutines.launch
 import uniffi.p2p_core.ChatFfi
 import uniffi.p2p_core.CoreEventFfi
@@ -15,18 +18,18 @@ import uniffi.p2p_core.createEngineDurable
 import uniffi.p2p_core.createEngineWithKeys
 import uniffi.p2p_core.getVersion
 import uniffi.p2p_core.initializeCore
-import java.util.concurrent.Callable
-import java.util.concurrent.ExecutionException
-import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicReference
 
 object RustBridge {
 
     private const val TAG = "RustBridge"
     private const val MAX_RELAY_WAKE_WINDOW_MILLIS = 30_000L
 
-    @Volatile
-    private var engine: P2pCoreHandle? = null
+    private val engineSlot = CoreEngineSlot<P2pCoreHandle>(
+        publicationLock = IdentitySigningKeyStore,
+        stop = { it.stop() },
+        recordFailure = { Log.e(TAG, "Native engine cleanup failed; a second engine is refused", it) },
+    )
+    private val engine: P2pCoreHandle? get() = engineSlot.active()
 
     /** Запомненная политика пути доставки (см. `setNetworkPathPolicy`). */
     @Volatile
@@ -34,6 +37,11 @@ object RustBridge {
 
     @Volatile
     private var engineRunning: Boolean = false
+
+    // Captured from this engine before publication. Unlike cachedNodeId, this is
+    // never changed by the mirror shadow; identity checks fail closed if absent.
+    @Volatile
+    private var signingEngineNodeId: String? = null
 
     @Volatile
     private var cachedNodeId: String? = null
@@ -50,16 +58,8 @@ object RustBridge {
     @Volatile
     private var coreInitialized: Boolean = false
 
-    // Engine start/stop operations share one FIFO executor. In particular, a new service
-    // start is queued after the previous service's asynchronous shutdown, so lifecycle work
-    // can never race into two native engines or accidentally cancel a required stop.
-    private val lifecycleThread = AtomicReference<Thread?>()
-    private val lifecycleExecutor = Executors.newSingleThreadExecutor { task ->
-        Thread(task, "apu-core-lifecycle").also { thread ->
-            thread.isDaemon = true
-            lifecycleThread.set(thread)
-        }
-    }
+    private val lifecycle = CoreLifecycleQueue { message, error -> Log.e(TAG, message, error) }
+    private val relayWakeYield = RelayWakeYield()
 
     private fun isMainThread(): Boolean {
         val mainLooper = android.os.Looper.getMainLooper() ?: return false
@@ -72,39 +72,9 @@ object RustBridge {
         return true
     }
 
-    private fun <T> onLifecycleThread(block: () -> T): T {
-        if (Thread.currentThread() === lifecycleThread.get()) return block()
-        val future = lifecycleExecutor.submit(Callable<T> { block() })
-        try {
-            return future.get()
-        } catch (e: InterruptedException) {
-            // In particular, cancelling a WorkManager relay wake interrupts its bounded sleep,
-            // whose finally block stops the worker-owned engine before the queue advances.
-            future.cancel(true)
-            Thread.currentThread().interrupt()
-            throw e
-        } catch (e: ExecutionException) {
-            when (val cause = e.cause) {
-                is RuntimeException -> throw cause
-                is Error -> throw cause
-                else -> throw IllegalStateException("Core lifecycle task failed", cause)
-            }
-        }
-    }
+    private fun <T> onLifecycleThread(block: () -> T): T = lifecycle.call(block)
 
-    private fun enqueueLifecycle(block: () -> Unit) {
-        try {
-            lifecycleExecutor.execute {
-                try {
-                    block()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Asynchronous core lifecycle task failed", e)
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Could not queue core lifecycle task", e)
-        }
-    }
+    private fun enqueueLifecycle(block: () -> Unit) = lifecycle.enqueue(block)
 
     /**
      * Контекст приложения для шифрования переписки. Точка отправки не suspend
@@ -203,106 +173,164 @@ object RustBridge {
         existingPublicKey: String? = null,
         existingPrivateKey: String? = null,
         relayDbPath: String? = null,
+        serviceStartupToken: Any? = null, serviceOwner: Any? = null, startupAllowed: (() -> Boolean)? = null,
     ): Boolean {
         if (rejectMainThreadCall("initialize")) return false
+        // Signal before joining the serialized queue. Never interrupt native lifecycle calls.
+        requestRelayWakeYield()
+        val ticket = serviceStartupToken?.let { ServiceStartupDiagnostics.progress.lifecycleQueued(it) }
         return try {
-            onLifecycleThread {
-                initializeLocked(displayName, existingPublicKey, existingPrivateKey, relayDbPath)
+            lifecycle.start(serviceOwner, startupAllowed) {
+                ServiceStartupDiagnostics.progress.lifecycleEntered(ticket)
+                val previous = engine
+                val started = try {
+                    initializeLocked(displayName, existingPublicKey, existingPrivateKey, relayDbPath, ticket)
+                } finally { ServiceStartupDiagnostics.progress.engineReturned(ticket) }
+                CoreLifecycleQueue.StartResult(started, engine !== previous, engine != null)
             }
         } catch (ex: Exception) {
-            Log.e(TAG, "Failed to initialize engine", ex)
-            false
-        }
-    }
-
-    /** Must run on [lifecycleExecutor], so engine startup is serialized with shutdown. */
-    private fun initializeLocked(
-        displayName: String,
-        existingPublicKey: String?,
-        existingPrivateKey: String?,
-        relayDbPath: String?,
-    ): Boolean {
-        val current = engine
-        if (current != null) {
-            if (runCatching { current.isRunning() }.getOrDefault(false)) {
-                engineRunning = true
-                Log.w(TAG, "Engine already initialized")
-                return true
-            }
-            engine = null
-            engineRunning = false
-        }
-
-        return try {
-            if (!coreInitialized) {
-                val initResult = initializeCore()
-                Log.i(TAG, "initializeCore(): $initResult")
-                coreInitialized = true
-            }
-
-            Log.i(TAG, "Rust version: ${getVersion()}")
-            // The device key id is published in mDNS when the engine starts (P3 pairing).
-            com.vladimir.messenger.data.pairing.DevicePairingController.prepareLocal()
-
-            val e = if (!relayDbPath.isNullOrBlank()) {
-                // M8-C: durable-режим. Пустые строки ключей = «сгенерировать новые».
-                Log.i(TAG, "Creating durable engine, relayDbPath=$relayDbPath")
-                createEngineDurable(
-                    displayName,
-                    existingPublicKey ?: "",
-                    existingPrivateKey ?: "",
-                    relayDbPath,
-                )
-            } else if (!existingPublicKey.isNullOrEmpty()) {
-                Log.i(TAG, "Restoring engine with key: ${existingPublicKey.take(16)}")
-                createEngineWithKeys(displayName, existingPublicKey, existingPrivateKey ?: "")
-            } else {
-                Log.i(TAG, "Creating engine without existing keys")
-                createEngine(displayName)
-            }
-
-            // Apply saved consent before the first inbound packet, including worker wakeups.
-            applyOnlineHelperPolicy(e)
-            // Настройки пути доставки и kill-switch IPv6 — до `start()`: сокеты
-            // привязываются там, и выключенный IPv6 обязан быть выключен уже к
-            // этому моменту.
-            applyPathPolicy(e)
-            val ok = e.start()
-            if (ok) {
-                engine = e
-                shadowNodeId = null
-                engineRunning = true
-                cachedNetworkStatus = "offline"
-                cachedConnectedPeers = 0L
-                cachedNodeId = runCatching { e.nodeId() }.getOrNull()
-                cachedPublicKey = runCatching { e.publicKey() }.getOrNull()
-                Log.i(TAG, "Engine started. NodeId: $cachedNodeId")
-                // Diagnostics must not turn a successfully-started engine into a failed startup.
-                val custodyMode = runCatching { e.relayCustodyMode() }.getOrDefault("unknown")
-                val quarantined = runCatching { e.relayQuarantineCount() }.getOrDefault(0uL)
-                Log.i(TAG, "Relay custody mode: $custodyMode, quarantined: $quarantined")
-            } else {
-                engine = null
-                engineRunning = false
-                Log.e(TAG, "Engine.start() returned false")
-            }
-            ok
-        } catch (ex: Exception) {
-            engineRunning = false
             Log.e(TAG, "Failed to initialize engine", ex)
             false
         }
     }
 
     /**
+     * A sidecar change and engine publication share this monitor. The route is
+     * captured during startup, so this check never waits for native code while
+     * holding it. An unavailable route on a live handle fails closed.
+     */
+    internal fun signingRouteCompatible(expected: String): Boolean = synchronized(IdentitySigningKeyStore) {
+        if (expected.isBlank() || engineSlot.unsettled()) return@synchronized false
+        if (engine == null) return@synchronized true
+        expected == signingEngineNodeId
+    }
+
+    /** Lifecycle is serialized; the slot reserves against sidecar changes without holding its lock over FFI. */
+    private fun initializeLocked(
+        displayName: String,
+        existingPublicKey: String?,
+        existingPrivateKey: String?,
+        relayDbPath: String?,
+        startupTicket: Any? = null,
+    ): Boolean {
+        fun note(stage: EnginePhase) = ServiceStartupDiagnostics.progress.engineStage(startupTicket, stage)
+        if (engineSlot.unsettled()) {
+            // A previous failure may have left an inaccessible handle without
+            // a service owner. Retry once on the lifecycle queue before startup.
+            note(EnginePhase.CLEANING_PREVIOUS)
+            Log.w(TAG, "Retrying unresolved native engine cleanup")
+            if (!engineSlot.stop()) return false
+            note(EnginePhase.CHECKING_EXISTING)
+        }
+        val current = engine
+        if (current != null) {
+            val running = try { current.isRunning() } catch (error: Exception) {
+                Log.e(TAG, "Cannot determine existing engine state; refusing a second engine", error)
+                return false
+            }
+            if (running) {
+                engineRunning = true
+                val actual = runCatching { current.nodeId() }.getOrNull()
+                if (!com.vladimir.messenger.data.security.ExistingRoutingIdentity.matchesRunning(existingPublicKey, actual)) {
+                    Log.e(TAG, "Running engine has a different routing identity; refusing to reuse it")
+                    return false
+                }
+                Log.w(TAG, "Engine already initialized")
+                return true
+            }
+            engineRunning = false
+            note(EnginePhase.CLEANING_PREVIOUS)
+            if (!engineSlot.stop()) return false
+        }
+        engineRunning = false
+        var startedNodeId: String? = null
+        note(EnginePhase.RESERVING_SLOT)
+        return engineSlot.startNew(
+            allow = {
+                val matches = IdentitySigningKeyStore.matchesInstalledRoute(existingPublicKey)
+                if (!matches) Log.e(TAG, "Installed signing sidecar does not match the requested routing identity")
+                matches
+            },
+            create = {
+                note(EnginePhase.PREPARING_CORE)
+                if (!coreInitialized) {
+                    val initResult = initializeCore()
+                    Log.i(TAG, "initializeCore(): $initResult")
+                    coreInitialized = true
+                }
+                Log.i(TAG, "Rust version: ${getVersion()}")
+                com.vladimir.messenger.data.pairing.DevicePairingController.prepareLocal()
+                note(EnginePhase.CREATING_ENGINE)
+                if (!relayDbPath.isNullOrBlank()) {
+                    Log.i(TAG, "Creating durable engine, relayDbPath=$relayDbPath")
+                    createEngineDurable(displayName, existingPublicKey ?: "", existingPrivateKey ?: "", relayDbPath)
+                } else if (!existingPublicKey.isNullOrEmpty()) {
+                    Log.i(TAG, "Restoring engine with key: ${existingPublicKey.take(16)}")
+                    createEngineWithKeys(displayName, existingPublicKey, existingPrivateKey ?: "")
+                } else {
+                    Log.i(TAG, "Creating engine without existing keys")
+                    createEngine(displayName)
+                }
+            },
+            prepareAndStart = { e ->
+                // Consent and path policy must precede native start/binding sockets.
+                note(EnginePhase.APPLYING_POLICY)
+                applyOnlineHelperPolicy(e)
+                applyPathPolicy(e)
+                note(EnginePhase.STARTING_ENGINE)
+                if (!e.start()) {
+                    note(EnginePhase.ABORTING)
+                    Log.e(TAG, "Engine.start() returned false")
+                    false
+                } else {
+                    note(EnginePhase.READING_NODE)
+                    startedNodeId = runCatching { e.nodeId() }.getOrNull()
+                    val matches = com.vladimir.messenger.data.security.ExistingRoutingIdentity
+                        .matchesRunning(existingPublicKey, startedNodeId)
+                    if (!matches) {
+                        note(EnginePhase.ABORTING)
+                        Log.e(TAG, "Started engine has a different routing identity; stopping it")
+                    }
+                    matches
+                }
+            },
+            beforePublish = { e ->
+                // Complete the potentially blocking FFI read before changing
+                // any caches; the provisional handle is still unavailable.
+                note(EnginePhase.READING_PUBLIC_KEY)
+                val publicKey = runCatching { e.publicKey() }.getOrNull()
+                Log.i(TAG, "Engine started. NodeId: $startedNodeId")
+                shadowNodeId = null
+                cachedNetworkStatus = "offline"
+                cachedConnectedPeers = 0L
+                cachedNodeId = startedNodeId
+                cachedPublicKey = publicKey
+                signingEngineNodeId = startedNodeId
+                engineRunning = true
+                // Optional custody/SQLite diagnostics are queried by the report,
+                // not synchronously on the critical startup path.
+            },
+            recordFailure = { error ->
+                note(EnginePhase.ABORTING)
+                engineRunning = false
+                Log.e(TAG, "Failed to initialize engine", error)
+            },
+        )
+    }
+
+    /**
      * A service stop is requested on the Android main thread. Queue the actual native stop so
      * onDestroy never waits for a QUIC/relay call holding the engine's internal mutex.
      */
+    /** End a worker-owned wait early; engine ownership stays on the lifecycle executor. */
+    internal fun requestRelayWakeYield() = relayWakeYield.request()
+
     fun shutdown() {
         if (isMainThread()) {
             shutdownAsync()
             return
         }
+        requestRelayWakeYield()
         try {
             onLifecycleThread { shutdownLocked() }
         } catch (ex: Exception) {
@@ -311,28 +339,21 @@ object RustBridge {
     }
 
     fun shutdownAsync() {
+        requestRelayWakeYield()
         enqueueLifecycle { shutdownLocked() }
     }
 
+    internal fun shutdownServiceAsync(owner: Any) {
+        requestRelayWakeYield()
+        lifecycle.stopIfOwned(owner) { shutdownLocked() }
+    }
+
     private fun shutdownLocked() {
-        val current = engine
-        if (current == null) {
-            engineRunning = false
-            cachedNetworkStatus = "offline"
-            cachedConnectedPeers = 0L
-            return
-        }
-        try {
-            current.stop()
-            Log.i(TAG, "Engine stopped")
-        } catch (ex: Exception) {
-            Log.e(TAG, "Error stopping engine", ex)
-        } finally {
-            if (engine === current) engine = null
-            engineRunning = false
-            cachedNetworkStatus = "offline"
-            cachedConnectedPeers = 0L
-        }
+        lifecycle.clearOwner()
+        engineRunning = false
+        cachedNetworkStatus = "offline"
+        cachedConnectedPeers = 0L
+        if (engineSlot.stop()) Log.i(TAG, "Engine cleanup completed")
     }
 
     /** Результат одного ограниченного M8-E wake-окна. */
@@ -346,8 +367,9 @@ object RustBridge {
     /**
      * M8-E slice 1: одно bounded receive-only окно для WorkManager.
      *
-     * The entire wake window is one serialized lifecycle task: a foreground service cannot
-     * create another native engine while this worker owns the bounded engine instance.
+     * The wake remains one serialized lifecycle task. Service startup/stop can
+     * shorten only the optional waiting window; worker-owned shutdown still
+     * completes before the next lifecycle task can use an engine.
      */
     fun runBoundedRelayWake(
         displayName: String,
@@ -363,17 +385,26 @@ object RustBridge {
             return RelayWakeResult(false, false, "disabled", 0L)
         }
 
+        val yieldToken = relayWakeYield.snapshot()
         return try {
             onLifecycleThread {
                 val current = engine
-                if (current != null && runCatching { current.isRunning() }.getOrDefault(false)) {
+                if (relayWakeYield.requestedSince(yieldToken)) {
+                    RelayWakeResult(false, false, "yielded", 0L)
+                } else if (current != null && runCatching { current.isRunning() }.getOrDefault(false)) {
                     engineRunning = true
-                    RelayWakeResult(
-                        engineStartedByWorker = false,
-                        gossipTriggered = triggerGossipDiscovery(),
-                        custodyMode = relayCustodyMode(),
-                        quarantineCount = relayQuarantineCount(),
-                    )
+                    val actual = runCatching { current.nodeId() }.getOrNull()
+                    if (!com.vladimir.messenger.data.security.ExistingRoutingIdentity.matchesRunning(existingPublicKey, actual)) {
+                        Log.e(TAG, "Relay wake rejected a running engine with a different routing identity")
+                        RelayWakeResult(false, false, "identity_mismatch", 0L)
+                    } else {
+                        RelayWakeResult(
+                            engineStartedByWorker = false,
+                            gossipTriggered = triggerGossipDiscovery(),
+                            custodyMode = relayCustodyMode(),
+                            quarantineCount = relayQuarantineCount(),
+                        )
+                    }
                 } else if (!initializeLocked(
                         displayName,
                         existingPublicKey,
@@ -384,13 +415,15 @@ object RustBridge {
                     RelayWakeResult(false, false, "disabled", 0L)
                 } else {
                     try {
+                        if (relayWakeYield.requestedSince(yieldToken)) return@onLifecycleThread RelayWakeResult(true, false, "yielded", 0L)
                         val gossipTriggered = triggerGossipDiscovery()
-                        Thread.sleep(activeWindowMillis)
+                        val yielded = relayWakeYield.await(yieldToken, activeWindowMillis)
+                        if (yielded) Log.i(TAG, "Relay wake yielded its wait to a lifecycle request")
                         RelayWakeResult(
                             engineStartedByWorker = true,
                             gossipTriggered = gossipTriggered,
-                            custodyMode = relayCustodyMode(),
-                            quarantineCount = relayQuarantineCount(),
+                            custodyMode = if (yielded) "yielded" else relayCustodyMode(),
+                            quarantineCount = if (yielded) 0L else relayQuarantineCount(),
                         )
                     } finally {
                         shutdownLocked()
@@ -398,22 +431,34 @@ object RustBridge {
                 }
             }
         } catch (ex: Exception) {
+            if (ex is InterruptedException) throw ex
             Log.e(TAG, "Bounded relay wake failed", ex)
             RelayWakeResult(false, false, "disabled", 0L)
         }
     }
 
-    /** Main-thread reads are cache-only; a native state check can wait on the engine mutex. */
-    fun isRunning(): Boolean {
-        if (isMainThread()) return engineRunning
-        val current = engine
-        if (current == null) {
-            engineRunning = false
-            return false
+    /** Event consumers must not wait for an unrelated native lifecycle or network call. */
+    fun isRunningCached(): Boolean = engineRunning && engine != null
+
+    /** Diagnostics must distinguish an unreadable native state from a confirmed stop. */
+    internal fun runningForDiagnostics(): Boolean? {
+        val current = engine ?: return if (engineSlot.unsettled()) null else false
+        return try { current.isRunning() } catch (error: Exception) {
+            Log.w(TAG, "Native engine state is unavailable for diagnostics", error)
+            null
         }
+    }
+
+    /** Main-thread reads are cache-only; a native state check can wait on the engine lock. */
+    fun isRunning(): Boolean {
+        if (isMainThread()) return isRunningCached()
+        val current = engine
+        if (current == null) return false
         val running = runCatching { current.isRunning() }.getOrDefault(false)
-        engineRunning = running
-        return running
+        // A late check of an old handle must not overwrite a replacement's
+        // status. Publication and this short cache update use the same lock.
+        if (!engineSlot.ifActive(current) { engineRunning = running }) return false
+        return running && engine === current
     }
 
     /**
@@ -638,6 +683,13 @@ object RustBridge {
         }
     }
 
+    fun onForegroundRecovery(): Boolean = try {
+        engine?.onForegroundRecovery() ?: false
+    } catch (e: Exception) {
+        Log.w(TAG, "onForegroundRecovery failed: ${e.message}")
+        false
+    }
+
     /**
      * K4-1 / docs/ADDRESS_BOOK.md: «свои» для личного presence. Движок в
      * первую же минуту стучит этим узлам сохранённым адресам, а
@@ -645,16 +697,19 @@ object RustBridge {
      * актуализируется. Возвращает сколько движок реально удержал (лимит
      * 256); ошибка или отсутствие движка — 0.
      */
-    fun setPresenceAudience(ids: List<String>): UInt {
-        if (ids.isEmpty()) return 0u
-        return try {
-            val taken = engine?.setPresenceAudience(ids) ?: 0u
-            android.util.Log.i(TAG, "Presence audience: ${ids.size} passed, $taken kept")
-            taken
-        } catch (e: Exception) {
-            android.util.Log.w(TAG, "setPresenceAudience failed: ${e.message}")
-            0u
-        }
+    fun setPresenceAudience(ids: List<String>): UInt = try {
+        setPresenceAudienceOrThrow(ids)
+    } catch (e: Exception) {
+        android.util.Log.w(TAG, "setPresenceAudience failed: ${e.message}")
+        0u
+    }
+
+    /** The service's retry loop must distinguish a real empty audience from failure. */
+    internal fun setPresenceAudienceOrThrow(ids: List<String>): UInt {
+        val current = checkNotNull(engine) { "engine is unavailable" }
+        val taken = current.setPresenceAudience(ids)
+        android.util.Log.i(TAG, "Presence audience: ${ids.size} passed, $taken kept")
+        return taken
     }
 
     /** Owner-decrypted backup enters the live core without racing its disk writer. */
@@ -848,6 +903,22 @@ object RustBridge {
         }
     }
 
+    // The event pump catches and logs native failures itself; do not turn an
+    // immediate FFI error into a busy loop. Each poll removes just one event.
+    fun awaitMainEvent(timeoutMs: Long): Boolean {
+        if (rejectMainThreadCall("awaitMainEvent")) return false
+        return engine?.awaitMainEvent(timeoutMs.coerceAtLeast(0L).toULong()) ?: false
+    }
+
+    fun pollMainEvent(preferInteractive: Boolean): CoreEventFfi? = engine?.pollMainEvent(preferInteractive)
+
+    fun awaitFileEvent(timeoutMs: Long): Boolean {
+        if (rejectMainThreadCall("awaitFileEvent")) return false
+        return engine?.awaitFileEvent(timeoutMs.coerceAtLeast(0L).toULong()) ?: false
+    }
+
+    fun pollFileEvent(): CoreEventFfi? = engine?.pollFileEvent()
+
     /** M8-C: честный режим relay custody ("durable-encrypted" / "ram-only" / "disabled"). */
     fun relayCustodyMode(): String = try {
         engine?.relayCustodyMode() ?: "disabled"
@@ -1039,31 +1110,55 @@ object RustBridge {
      * показывал «Приложение не отвечает» и грелся. Отправителю всё равно, на
      * какой миллисекунде ушло подтверждение, поэтому ждать здесь нечего.
      */
-    fun sendDeliveryAck(messageId: String, recipientId: String): Boolean {
+    /** Snapshot and cleanup are bound to the same engine lifetime. */
+    internal fun relayCustodySnapshot(): com.vladimir.messenger.data.repository.CustodySnapshot? {
+        val captured = engine ?: return null
+        return try {
+            com.vladimir.messenger.data.repository.CustodySnapshot(captured.ownRelayMessageIds()) { id ->
+                scheduleRelayConfirmation(captured, id)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Relay reconciliation snapshot failed: ${e.javaClass.simpleName}")
+            null
+        }
+    }
+
+    /** Room has committed an outgoing delivery ACK; release native relay custody off the UI thread. */
+    fun confirmMessageDelivered(messageId: String) {
+        val captured = engine ?: return
+        scheduleRelayConfirmation(captured, messageId)
+    }
+
+    private fun scheduleRelayConfirmation(captured: P2pCoreHandle, messageId: String) {
         ackScope.launch {
             try {
-                // р243: ДВА пути, а не один.
-                //
-                // Раньше подтверждение уходило только через брокера (MQTT),
-                // а сообщения едут прямым каналом. Если брокер недоступен -
-                // сообщение доходило, а вторая галочка не появлялась никогда:
-                // ровно жалоба владельца «дошло, а двух синих галочек нет».
-                //
-                // Прямой канал брокера не требует, поэтому сначала он.
-                val payload = "ack|$messageId"
-                // sendDirectPayload seals this ACK when the sender pin is known
-                // and falls back to the reserved raw form only when bootstrap
-                // is still missing; ordinary payloads never get that fallback.
-                val direct = runCatching { sendDirectPayload(recipientId, payload) }
-                    .getOrDefault(false)
-                if (direct) {
-                    Log.i(TAG, "direct delivery ACK sent for $messageId")
-                }
-                // Очередь брокера - запасной путь: она хранит подтверждение
-                // до востребования, поэтому дубликат безвреден.
-                engine?.sendMessageMqtt(recipientId, payload)
+                if (engine === captured) captured.confirmMessageDelivered(messageId)
             } catch (e: Exception) {
-                android.util.Log.w("RustBridge", "sendDeliveryAck failed: ${e.message}")
+                Log.w(TAG, "Confirmed relay cleanup failed: ${e.javaClass.simpleName}")
+            }
+        }
+    }
+
+    fun sendDeliveryAck(messageId: String, recipientId: String, roomCommitted: Boolean = false): Boolean {
+        // Direct QUIC and the persistent MQTT command run independently: a
+        // slow direct dial must not delay an already connected broker. Both
+        // use the existing compatible ACK; duplicate ACKs are idempotent.
+        val payload = "ack|$messageId"
+        ackScope.launch {
+            try {
+                if (sendDirectPayload(recipientId, payload)) Log.i(TAG, "direct delivery ACK sent for $messageId")
+            } catch (e: Exception) {
+                Log.w(TAG, "direct delivery ACK failed: ${e.message}")
+            }
+        }
+        ackScope.launch {
+            try {
+                // The marker is internal to Rust; the legacy on-wire ACK stays
+                // unchanged. Its caller must have stored the row and matched
+                // the opened sender node; that is not a verified contact pin.
+                engine?.sendMessageMqtt(recipientId, if (roomCommitted) "ack-room|$messageId" else payload)
+            } catch (e: Exception) {
+                Log.w(TAG, "MQTT delivery ACK failed: ${e.message}")
             }
         }
         return true

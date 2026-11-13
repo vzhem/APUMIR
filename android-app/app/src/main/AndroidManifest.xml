@@ -95,6 +95,11 @@
         android:theme="@style/Theme.P2PMessenger"
         tools:targetApi="31">
 
+        <!-- Configuring the SDK alone must not create tokens or start remote
+             push. Explicit opt-in will only be added with the verified client. -->
+        <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />
+        <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />
+
         <!-- Hilt workers must use the application's factory, not WorkManager's reflection factory. -->
         <provider
             android:name="androidx.startup.InitializationProvider"
@@ -250,14 +255,6 @@
             android:exported="false" />
 
 
-        <receiver
-            android:name=".service.NetworkChangeReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.net.conn.CONNECTIVITY_CHANGE" />
-            </intent-filter>
-        </receiver>
-
         <!-- Каркас доставки «как в Telegram»: будильник поднимает службу, если
              её убили, а приёмник возвращает цепочку после перезагрузки и
              обновления приложения. exported=true обязателен: системные
@@ -276,6 +273,16 @@
                 <!-- После обновления приложения будильники сбрасываются: без
                      этого действия доставка молчала бы до первого открытия. -->
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- DownloadManager is a separate system app. The receiver only accepts
+             our tracked download id and verifies its actual status in a worker. -->
+        <receiver
+            android:name=".worker.OfficialUpdateDownloadReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.DOWNLOAD_COMPLETE" />
             </intent-filter>
         </receiver>
 

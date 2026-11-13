@@ -71,6 +71,7 @@ object MirrorAccountSnapshot {
     private val SNAPSHOT_EXCLUDED_COLUMNS = mapOf(
         "contacts" to setOf("isOnline", "lastSeen", "lastSeenAtMs"),
         "groups" to setOf("sosLastSentAtMs"),
+        "messages" to setOf("notificationPending"),
     )
 
     private data class Column(val name: String, val primaryKeyOrder: Int)
@@ -296,7 +297,7 @@ object MirrorAccountSnapshot {
 
         val values = ContentValues()
         columns.forEach { column ->
-            if (source.has(column.name)) {
+            if (source.has(column.name) && column.name !in SNAPSHOT_EXCLUDED_COLUMNS[table].orEmpty()) {
                 putContentValue(values, column.name, source.opt(column.name))
             }
         }

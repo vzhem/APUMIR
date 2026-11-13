@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.groups
 
+import com.vladimir.messenger.ui.components.ApuBackButton
+
 // Группа: горизонтальные темы под шапкой, переписка на всю ширину.
 
 import com.vladimir.messenger.ui.components.ApuPremiumSpinner
@@ -26,7 +28,6 @@ import androidx.compose.material.icons.filled.BarChart
 import com.vladimir.messenger.ui.components.ApuSettingsDangerColor
 import com.vladimir.messenger.ui.components.PeerProfileSheet
 import com.vladimir.messenger.ui.components.apuBubbleSurface
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Person
@@ -832,14 +833,7 @@ fun GroupChatScreen(
                         }
                     }
                 },
-                navigationIcon = {
-                    ApuHeaderButton(
-                        icon = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = stringResource(R.string.action_back),
-                        onClick = { if (hasTopics && showFeed) showFeed = false else onBackClick() },
-                        modifier = Modifier.padding(start = 4.dp),
-                    )
-                },
+                navigationIcon = { ApuBackButton(onClick = { if (hasTopics && showFeed) showFeed = false else onBackClick() }) },
                 actions = {
                     if (!showTopicsList) {
                         ApuHeaderButton(

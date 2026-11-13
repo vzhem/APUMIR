@@ -92,6 +92,31 @@ GROUP_WIRE_UPDATE_TEST="$BASE/test/java/com/vladimir/messenger/data/group/GroupW
 # компилируются и проверяются на runner, то есть формат отчёта ловится до
 # выпуска, а не по скриншоту с телефона владельца (2026-10-06).
 DIAG_REPORT="$BASE/main/java/com/vladimir/messenger/data/diagnostics/DiagnosticsReport.kt"
+CORE_DIAG_STAGE="$BASE/main/java/com/vladimir/messenger/data/diagnostics/CoreDiagnosticStage.kt"
+STARTUP_PROGRESS="$BASE/main/java/com/vladimir/messenger/data/diagnostics/ServiceStartupProgress.kt"
+STARTUP_PROGRESS_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/ServiceStartupProgressTest.kt"
+APP_STARTUP_PROGRESS="$BASE/main/java/com/vladimir/messenger/data/diagnostics/ApplicationStartupProgress.kt"
+APP_STARTUP_PROGRESS_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/ApplicationStartupProgressTest.kt"
+RELAY_WAKE_YIELD="$BASE/main/java/com/vladimir/messenger/data/RelayWakeYield.kt"
+RELAY_WAKE_YIELD_TEST="$BASE/test/java/com/vladimir/messenger/data/RelayWakeYieldTest.kt"
+CORE_LIFECYCLE_QUEUE="$BASE/main/java/com/vladimir/messenger/data/CoreLifecycleQueue.kt"
+CORE_LIFECYCLE_QUEUE_TEST="$BASE/test/java/com/vladimir/messenger/data/CoreLifecycleQueueTest.kt"
+CORE_ENGINE_SLOT="$BASE/main/java/com/vladimir/messenger/data/CoreEngineSlot.kt"
+CORE_ENGINE_SLOT_TEST="$BASE/test/java/com/vladimir/messenger/data/CoreEngineSlotTest.kt"
+PUSH_SCHEDULE_GATE="$BASE/main/java/com/vladimir/messenger/data/push/PushWakeScheduleGate.kt"
+PUSH_SCHEDULE_GATE_TEST="$BASE/test/java/com/vladimir/messenger/data/push/PushWakeScheduleGateTest.kt"
+PUSH_SOURCE="$BASE/main/java/com/vladimir/messenger/data/push"
+PUSH_TESTS="$BASE/test/java/com/vladimir/messenger/data/push"
+PUSH_INBOX_MODEL="$OUT/stubs/com/vladimir/messenger/data/push/PushWakeInbox.kt"
+# Extract only result types from the real Android inbox. The implementation is
+# SQLite-dependent; the tests below use fake queues and do not exercise storage.
+python3 "$ROOT/scripts/ci/generate-push-inbox-model.py" "$PUSH_SOURCE/PushWakeInbox.kt" "$PUSH_INBOX_MODEL"
+CORE_SERVICE_GATE="$BASE/main/java/com/vladimir/messenger/service/CoreServiceGate.kt"
+CORE_SERVICE_GATE_TEST="$BASE/test/java/com/vladimir/messenger/service/CoreServiceGateTest.kt"
+PROCESS_HEARTBEAT="$BASE/main/java/com/vladimir/messenger/service/ProcessHeartbeat.kt"
+PROCESS_HEARTBEAT_TEST="$BASE/test/java/com/vladimir/messenger/service/ProcessHeartbeatTest.kt"
+DELIVERY_WAKE_POLICY="$BASE/main/java/com/vladimir/messenger/service/DeliveryWakePolicy.kt"
+DELIVERY_WAKE_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/service/DeliveryWakePolicyTest.kt"
 UPDATE_DIAG_REPORT="$BASE/main/java/com/vladimir/messenger/data/diagnostics/UpdateDiagnosticsReport.kt"
 RELAY_STORAGE="$BASE/main/java/com/vladimir/messenger/data/diagnostics/RelayStorageDiagnostics.kt"
 RELAY_STORAGE_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/RelayStorageDiagnosticsTest.kt"
@@ -119,6 +144,11 @@ DIAG_MQTT_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/MqttLink
 APK_UPDATE="$BASE/main/java/com/vladimir/messenger/data/update/ApkUpdate.kt"
 UPDATE_POLICY="$BASE/main/java/com/vladimir/messenger/service/UpdateCheckPolicy.kt"
 UPDATE_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/service/UpdateCheckerTest.kt"
+# Порядок источников и обработка повторных/отложенных событий загрузки.
+OFFICIAL_UPDATE_POLICY="$BASE/main/java/com/vladimir/messenger/service/OfficialUpdatePolicy.kt"
+OFFICIAL_UPDATE_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/service/OfficialUpdatePolicyTest.kt"
+COMPLETED_APK_ADOPTION="$BASE/main/java/com/vladimir/messenger/data/update/CompletedApkAdoption.kt"
+COMPLETED_APK_ADOPTION_TEST="$BASE/test/java/com/vladimir/messenger/data/update/CompletedApkAdoptionTest.kt"
 # Fail-closed личных сообщений и безопасный cooldown тяжёлого самосева:
 # чистые Kotlin-правила проверяются тем же runner без Android SDK.
 CALL_WIRE="$BASE/main/java/com/vladimir/messenger/data/call/CallWire.kt"
@@ -207,10 +237,15 @@ PYGEN
     -no-stdlib -no-reflect -jvm-target 17 -classpath "$CP" -d "$OUT/classes" \
     "$STORY_VIDEO_DRAFT" "$STORY_VIDEO_DRAFT_TEST" "$VIDEO_AVATAR_POLICY" "$VIDEO_AVATAR_POLICY_TEST" "$AVATAR_VIDEO_WIRE" "$AVATAR_VIDEO_WIRE_TEST" "$MODEL/Message.kt" "$MODEL/MessageStatus.kt" "$MODEL/MessageChannel.kt" "$OBSERVER" "$TEST" "$PIN_POLICY" "$PIN_TEST" "$SPLASH_MATH" "$SPLASH_TEST" "$SETTINGS_LAYOUT" "$SETTINGS_TEST" "$HEART_WIRE" "$HEART_TEST" "$GROUP_PERMS" "$GROUP_PERMS_TEST" \
     "$SLOW_MODE" "$SLOW_MODE_TEST" "$QUIET_HOURS" "$QUIET_HOURS_TEST" "$POST_MANIFEST" "$BASE/main/java/com/vladimir/messenger/data/group/GroupWallpaper.kt" "$BASE/test/java/com/vladimir/messenger/data/group/GroupWallpaperTest.kt" "$GROUP_WIRE" "$GROUP_SOS" "$SOS_MESSAGE" "$TEXT_COLOR_WIRE" "$STUB_DIR/TextColorPalette.kt" "$GROUP_WIRE_TEST" "$GROUP_WIRE_UPDATE_TEST" \
-    "$OP_HEALTH" "$OP_BOUNDED_READ" "$OP_CLEANUP" "$OP_HEALTH_TEST" "$STORY_QUEUE" "$STORY_QUEUE_TEST" "$RUNTIME_HEALTH" "$RUNTIME_HEALTH_TEST" "$DIAG_REPORT" "$UPDATE_DIAG_REPORT" "$RELAY_STORAGE" "$RELAY_STORAGE_TEST" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
+    "$OP_HEALTH" "$OP_BOUNDED_READ" "$OP_CLEANUP" "$OP_HEALTH_TEST" "$STORY_QUEUE" "$STORY_QUEUE_TEST" "$RUNTIME_HEALTH" "$RUNTIME_HEALTH_TEST" "$DIAG_REPORT" "$CORE_DIAG_STAGE" "$STARTUP_PROGRESS" "$STARTUP_PROGRESS_TEST" "$APP_STARTUP_PROGRESS" "$APP_STARTUP_PROGRESS_TEST" "$RELAY_WAKE_YIELD" "$RELAY_WAKE_YIELD_TEST" "$CORE_LIFECYCLE_QUEUE" "$CORE_LIFECYCLE_QUEUE_TEST" "$CORE_ENGINE_SLOT" "$CORE_ENGINE_SLOT_TEST" "$PUSH_SCHEDULE_GATE" "$PUSH_SCHEDULE_GATE_TEST" "$CORE_SERVICE_GATE" "$CORE_SERVICE_GATE_TEST" "$PROCESS_HEARTBEAT" "$PROCESS_HEARTBEAT_TEST" "$DELIVERY_WAKE_POLICY" "$DELIVERY_WAKE_POLICY_TEST" "$UPDATE_DIAG_REPORT" "$RELAY_STORAGE" "$RELAY_STORAGE_TEST" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
+    "$PUSH_INBOX_MODEL" "$PUSH_SOURCE/PushWakeQueue.kt" "$PUSH_SOURCE/PushWakeDrain.kt" "$PUSH_TESTS/PushWakeDrainTest.kt" \
+    "$PUSH_SOURCE/PushEpochProtocol.kt" "$PUSH_SOURCE/PushRegistrationState.kt" "$PUSH_SOURCE/PushWakeAdmission.kt" "$PUSH_TESTS/PushWakeAdmissionTest.kt" \
+    "$PUSH_SOURCE/PushWakeIntake.kt" "$PUSH_TESTS/PushWakeIntakeTest.kt" "$PUSH_SOURCE/PushWakeDispatcher.kt" "$PUSH_TESTS/PushWakeDispatcherTest.kt" \
+    "$PUSH_SOURCE/PushWakeRunLoop.kt" "$PUSH_TESTS/PushWakeRunLoopTest.kt" \
+    "$PUSH_SOURCE/PushWakePeriodicRecovery.kt" "$PUSH_TESTS/PushWakePeriodicRecoveryTest.kt" \
     "$STORY_FEEDBACK_WIRE" "$STORY_FEEDBACK_LEDGER" "$STORY_FEEDBACK_OUTBOX" \
     "$STORY_FEEDBACK_WIRE_TEST" "$STORY_FEEDBACK_LEDGER_TEST" "$STORY_FEEDBACK_OUTBOX_TEST" \
-    "$APK_UPDATE" "$UPDATE_POLICY" "$UPDATE_POLICY_TEST" \
+    "$APK_UPDATE" "$UPDATE_POLICY" "$UPDATE_POLICY_TEST" "$OFFICIAL_UPDATE_POLICY" "$OFFICIAL_UPDATE_POLICY_TEST" "$COMPLETED_APK_ADOPTION" "$COMPLETED_APK_ADOPTION_TEST" \
     "$CALL_WIRE" "$FILE_CODEC" "$FILE_WIRE" "$FILE_UDP" "$SEALED_WIRE" "$OUTGOING_POLICY" "$OUTGOING_POLICY_TEST" "$CONTACT_RESET_WIRE" \
     "$DEFERRED_WIRE" "$DEFERRED_POLICY" "$DEFERRED_WIRE_TEST" "$DEFERRED_POLICY_TEST" \
     "$SELF_SEED_POLICY" "$SELF_SEED_POLICY_TEST" "$SEND_TIME_POLICY" "$SEND_TIME_TEST" \
@@ -240,6 +275,21 @@ PYGEN
     com.vladimir.messenger.data.group.GroupWireTest \
     com.vladimir.messenger.data.group.GroupWireUpdateTest \
     com.vladimir.messenger.data.diagnostics.DiagnosticsReportTest \
+    com.vladimir.messenger.data.diagnostics.ServiceStartupProgressTest \
+    com.vladimir.messenger.data.diagnostics.ApplicationStartupProgressTest \
+    com.vladimir.messenger.data.RelayWakeYieldTest \
+    com.vladimir.messenger.data.CoreLifecycleQueueTest \
+    com.vladimir.messenger.data.CoreEngineSlotTest \
+    com.vladimir.messenger.data.push.PushWakeScheduleGateTest \
+    com.vladimir.messenger.data.push.PushWakeAdmissionTest \
+    com.vladimir.messenger.data.push.PushWakeIntakeTest \
+    com.vladimir.messenger.data.push.PushWakeDispatcherTest \
+    com.vladimir.messenger.data.push.PushWakeDrainTest \
+    com.vladimir.messenger.data.push.PushWakeRunLoopTest \
+    com.vladimir.messenger.data.push.PushWakePeriodicRecoveryTest \
+    com.vladimir.messenger.service.CoreServiceGateTest \
+    com.vladimir.messenger.service.ProcessHeartbeatTest \
+    com.vladimir.messenger.service.DeliveryWakePolicyTest \
     com.vladimir.messenger.data.diagnostics.RelayStorageDiagnosticsTest \
     com.vladimir.messenger.data.diagnostics.RuntimeHealthTest \
     com.vladimir.messenger.data.diagnostics.OperationalHealthTest \
@@ -249,6 +299,8 @@ PYGEN
     com.vladimir.messenger.data.story.StoryFeedbackOutboxTest \
     com.vladimir.messenger.data.diagnostics.MqttLinkTextTest \
     com.vladimir.messenger.service.UpdateCheckerTest \
+    com.vladimir.messenger.service.OfficialUpdatePolicyTest \
+    com.vladimir.messenger.data.update.CompletedApkAdoptionTest \
     com.vladimir.messenger.data.security.OutgoingPayloadPolicyTest \
     com.vladimir.messenger.data.update.SelfSeedRetryPolicyTest \
     com.vladimir.messenger.data.schedule.DeferredWireTest \
@@ -258,3 +310,7 @@ PYGEN
     com.vladimir.messenger.data.notification.FlashlightAlertPolicyTest \
     com.vladimir.messenger.data.swarm.Ipv6NetworkProxyTest \
     com.vladimir.messenger.data.security.ProfileCallsignAndDeviceAnchorTest
+
+# Изолированные симуляции компилируются в отдельных classpath со своими заглушками.
+bash "$ROOT/scripts/ci/check-update-download-sim.sh" "$JAVA" "$CP" "$OUT" "$KOTLIN"
+bash "$ROOT/scripts/ci/check-update-check-sim.sh" "$JAVA" "$CP" "$OUT" "$KOTLIN"

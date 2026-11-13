@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.contacts
 
+import com.vladimir.messenger.ui.components.ApuBackButton
+
 import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.ui.components.ApuHeaderIconBubble
@@ -23,7 +25,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
@@ -116,11 +117,7 @@ fun ContactsScreen(
                     scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
                 ),
                 title = { Text(stringResource(R.string.contacts_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                    }
-                },
+                navigationIcon = { ApuBackButton(onClick = onNavigateBack) },
                 actions = {
                     // Адресная книга может быть длинной: выбор порядка всегда
                     // под рукой, а текущий вариант отмечен компактным chip-пузырём.

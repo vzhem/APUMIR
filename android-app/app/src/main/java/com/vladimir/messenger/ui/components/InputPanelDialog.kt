@@ -44,6 +44,8 @@ import androidx.compose.foundation.lazy.grid.items as gridEntries
 import androidx.compose.foundation.lazy.items as rowItems
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -160,6 +162,15 @@ fun InputPanelDialog(
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                // Закрыть можно и без системного жеста, в том числе в лаунчере.
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    ApuHeaderButton(
+                        icon = Icons.Default.Close,
+                        contentDescription = stringResource(R.string.action_close),
+                        onClick = onDismiss,
+                        size = 48.dp,
+                    )
+                }
                 // ── Главный ряд: три пузыря разделов ──
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     SectionPill(

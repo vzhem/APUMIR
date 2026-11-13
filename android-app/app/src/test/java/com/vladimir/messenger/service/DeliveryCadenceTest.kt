@@ -104,6 +104,15 @@ class DeliveryCadenceTest {
     }
 
     @Test
+    fun `unfinished scan continues promptly without escalating the failure ladder`() {
+        assertEquals(2_000L, OutboxCadence.nextDelayMs(true, 0, 20, onScreen = true, moreToScan = true))
+        assertEquals(5_000L, OutboxCadence.nextDelayMs(true, 0, 20, onScreen = false, moreToScan = true))
+        assertEquals(3, OutboxCadence.nextFailures(3, sent = 0, moreToScan = true))
+        assertEquals(4, OutboxCadence.nextFailures(3, sent = 0, moreToScan = false))
+        assertEquals(0, OutboxCadence.nextFailures(3, sent = 1, moreToScan = true))
+    }
+
+    @Test
     fun `success resets the ladder and failure advances it`() {
         assertEquals(0, OutboxCadence.nextFailures(3, sent = 1))
         assertEquals(4, OutboxCadence.nextFailures(3, sent = 0))

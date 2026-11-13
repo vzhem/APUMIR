@@ -4,6 +4,9 @@ import com.vladimir.messenger.data.diagnostics.Counters
 import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import java.io.File
 import java.security.MessageDigest
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
@@ -703,6 +706,30 @@ class FileTransferReceiverTest {
         deliver(receiver, offerTexts())
         assertEquals(1L, sentAckContiguous().last())
 
+        for (index in 1L until 3L) {
+            binaryChunk(receiver, index, 0, FakeFileCryptoGateway.fakeEncrypt(chunkPlaintext(index)))
+        }
+        assertEquals("COMPLETE", dao.getTransfer(transferIdHex)!!.state)
+    }
+
+    @Test
+    fun simultaneousBinaryChunkAndOfferCompleteWithoutLosingData() = runTest {
+        val receiver = receiver()
+        val cipher = FakeFileCryptoGateway.fakeEncrypt(chunkPlaintext(0))
+        val offer = offerTexts()
+        val start = CompletableDeferred<Unit>()
+        val offerJob = async(Dispatchers.Default) {
+            start.await()
+            deliver(receiver, offer)
+        }
+        val chunkJob = async(Dispatchers.Default) {
+            start.await()
+            binaryChunk(receiver, 0, 0, cipher)
+        }
+        start.complete(Unit)
+        offerJob.await()
+        chunkJob.await()
+        assertEquals(1L, sentAckContiguous().last())
         for (index in 1L until 3L) {
             binaryChunk(receiver, index, 0, FakeFileCryptoGateway.fakeEncrypt(chunkPlaintext(index)))
         }

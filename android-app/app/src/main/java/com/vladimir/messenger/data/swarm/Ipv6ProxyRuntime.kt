@@ -78,17 +78,21 @@ object Ipv6ProxyRuntime {
             return
         }
 
+        val changed = activeConfig != config
         activeConfig = config
         when (config.protocol) {
             Ipv6ProxyProtocol.SOCKS5 -> {
                 stopBridgeLocked()
+                // Reapply to a fresh engine even when the saved config is the
+                // same; the native setter is itself idempotent.
                 sink.setSocks5Proxy(config.host, config.port, config.username, config.password)
-                sink.wakeNetwork()
+                if (changed) sink.wakeNetwork()
             }
             Ipv6ProxyProtocol.HTTP -> {
                 val running = bridge
-                val localBridge = if (running != null && running.matches(config) && running.isAlive()) {
-                    running
+                val reuseBridge = running != null && running.matches(config) && running.isAlive()
+                val localBridge = if (reuseBridge) {
+                    checkNotNull(running)
                 } else {
                     stopBridgeLocked()
                     Ipv6HttpConnectBridge(config).also {
@@ -97,7 +101,7 @@ object Ipv6ProxyRuntime {
                     }
                 }
                 sink.setSocks5Proxy("127.0.0.1", localBridge.localPort, "", "")
-                sink.wakeNetwork()
+                if (changed || !reuseBridge) sink.wakeNetwork()
             }
         }
     }

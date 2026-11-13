@@ -1,0 +1,100 @@
+name: Create isolated disabled push Worker
+
+# An explicitly requested, owner-reviewed one-time infrastructure step only.
+# It does not upload FCM credentials, enable push, or touch the existing relay.
+on:
+  push:
+    branches: ['arena/1266946d-apumir']
+    paths:
+      - '.github/workflows/deploy-disabled-push.yml'
+      - 'scripts/ci/push-disabled-deploy.py'
+      - 'scripts/ci/test-push-disabled-deploy.py'
+      - 'scripts/ci/push-infra-preflight.py'
+      - 'scripts/ci/test-push-infra-preflight.py'
+      - 'scripts/ci/check-firebase-client-config.py'
+      - 'tools/worker/push/**'
+      - 'docs/APP_DELIVERY_TRACKER.md'
+
+permissions:
+  contents: read
+  actions: read
+
+# Never cancel an upload in progress. A failed/uncertain creation is inspected
+# manually. The create endpoint is documented to reject an existing name;
+# follow-up version upload is addressed only by the newly returned Worker ID.
+concurrency:
+  group: disabled-push-deployment
+  cancel-in-progress: false
+
+jobs:
+  offline-tests:
+    if: github.repository == 'vzhem/APUMIR' && github.ref == 'refs/heads/arena/1266946d-apumir' && contains(github.event.head_commit.message, '[deploy-push-disabled]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Check out the reviewed commit without retaining Git credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Test guard and isolated Worker without credentials
+        # npm test includes the exact storage-free API payload in local workerd.
+        # The Wrangler dry-run uses the broader prototype config; neither deploys.
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/test-push-disabled-deploy.py
+          python3 scripts/ci/test-push-infra-preflight.py
+          npm ci --prefix tools/worker/push --no-audit --no-fund
+          npm test --prefix tools/worker/push
+          WRANGLER_SEND_METRICS=false npm run check:bundle --prefix tools/worker/push
+
+  protection-check:
+    needs: offline-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the reviewed commit without retaining Git credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Confirm owner-review and exact branch protection
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APU_GITHUB_STEP_DEBUG: ${{ secrets.ACTIONS_STEP_DEBUG || vars.ACTIONS_STEP_DEBUG }}
+          APU_GITHUB_RUNNER_DEBUG: ${{ secrets.ACTIONS_RUNNER_DEBUG || vars.ACTIONS_RUNNER_DEBUG }}
+        run: |
+          python3 scripts/ci/push-infra-preflight.py --check-protection
+          python3 scripts/ci/push-disabled-deploy.py --check-head
+
+  create-disabled:
+    needs: protection-check
+    environment: apu-push-staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the reviewed commit without retaining Git credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      # No npm/Worker code runs in this job. Only the bounded Python API client
+      # receives the separate Cloudflare credential in its final step.
+      - name: Recheck protection after owner approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APU_GITHUB_STEP_DEBUG: ${{ secrets.ACTIONS_STEP_DEBUG || vars.ACTIONS_STEP_DEBUG }}
+          APU_GITHUB_RUNNER_DEBUG: ${{ secrets.ACTIONS_RUNNER_DEBUG || vars.ACTIONS_RUNNER_DEBUG }}
+        run: |
+          python3 scripts/ci/push-infra-preflight.py --check-protection
+          python3 scripts/ci/push-disabled-deploy.py --check-head
+      - name: Create only the new disabled Worker and verify health
+        env:
+          APU_GITHUB_STEP_DEBUG: ${{ secrets.ACTIONS_STEP_DEBUG || vars.ACTIONS_STEP_DEBUG }}
+          APU_GITHUB_RUNNER_DEBUG: ${{ secrets.ACTIONS_RUNNER_DEBUG || vars.ACTIONS_RUNNER_DEBUG }}
+          APU_PUSH_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.APU_PUSH_CLOUDFLARE_ACCOUNT_ID }}
+          APU_PUSH_CLOUDFLARE_DEPLOY_TOKEN: ${{ secrets.APU_PUSH_CLOUDFLARE_DEPLOY_TOKEN }}
+        run: python3 scripts/ci/push-disabled-deploy.py

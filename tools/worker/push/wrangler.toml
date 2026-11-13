@@ -1,0 +1,18 @@
+# Experimental, isolated wake service. Deploying this file does NOT enable push.
+# Never target the existing p2p-relay Worker or reuse its Durable Object class.
+name = "apu-push-wake-experimental"
+main = "worker.mjs"
+compatibility_date = "2025-07-18"
+workers_dev = true
+
+[vars]
+PUSH_ENABLED = "false"
+MAILBOX_ENABLED = "false"
+
+[[durable_objects.bindings]]
+name = "PUSH_SHARDS"
+class_name = "PushShard"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PushShard"]

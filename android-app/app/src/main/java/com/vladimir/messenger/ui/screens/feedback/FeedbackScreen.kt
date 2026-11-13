@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.feedback
 
+import com.vladimir.messenger.ui.components.ApuBackButton
+
 import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuSettingsCard
 import android.net.Uri
@@ -21,7 +23,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -109,11 +110,7 @@ fun FeedbackScreen(onBackClick: () -> Unit) {
                         scrolledContainerColor = Color.Transparent,
                     ),
                     title = { ApuSettingsHeader(stringResource(R.string.feedback_title)) },
-                    navigationIcon = {
-                        IconButton(onClick = onBackClick) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                        }
-                    },
+                    navigationIcon = { ApuBackButton(onClick = onBackClick) },
                 )
             },
         ) { padding ->

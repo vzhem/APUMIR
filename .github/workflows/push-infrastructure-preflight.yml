@@ -1,0 +1,89 @@
+name: Push infrastructure preflight (read only)
+
+# No deployment, FCM request, secret upload, pull_request, or pull_request_target.
+# The credentialed job runs only after an explicit commit marker (or manual run
+# once this workflow is available on the default branch), a protection check,
+# and GitHub's own environment reviewer approval. See PUSH_INFRA_SETUP.md.
+on:
+  push:
+    branches:
+      - 'arena/1266946d-apumir'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Any newer push cancels an older pending review, so a stale SHA is not approved.
+concurrency:
+  group: push-infrastructure-preflight-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-tests:
+    if: github.repository == 'vzhem/APUMIR' && github.ref == 'refs/heads/arena/1266946d-apumir'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out this exact commit without retaining Git credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Test preflight with fabricated data, offline
+        run: python3 scripts/ci/test-push-infra-preflight.py
+
+  protection-check:
+    needs: offline-tests
+    if: >-
+      github.repository == 'vzhem/APUMIR' &&
+      github.ref == 'refs/heads/arena/1266946d-apumir' &&
+      (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[push-infra-preflight]'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out this exact commit without retaining Git credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Confirm the GitHub environment is already protected
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APU_GITHUB_STEP_DEBUG: ${{ secrets.ACTIONS_STEP_DEBUG || vars.ACTIONS_STEP_DEBUG }}
+          APU_GITHUB_RUNNER_DEBUG: ${{ secrets.ACTIONS_RUNNER_DEBUG || vars.ACTIONS_RUNNER_DEBUG }}
+        run: python3 scripts/ci/push-infra-preflight.py --check-protection
+
+  read-only-preflight:
+    needs: protection-check
+    if: github.repository == 'vzhem/APUMIR' && github.ref == 'refs/heads/arena/1266946d-apumir'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: apu-push-staging
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out this exact commit without retaining Git credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      # Recheck after approval and before the step that receives secrets. The
+      # repo administrator can still change GitHub rules; owner review remains
+      # essential and this check is not an atomic lock on remote settings.
+      - name: Recheck environment protection before reading secrets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APU_GITHUB_STEP_DEBUG: ${{ secrets.ACTIONS_STEP_DEBUG || vars.ACTIONS_STEP_DEBUG }}
+          APU_GITHUB_RUNNER_DEBUG: ${{ secrets.ACTIONS_RUNNER_DEBUG || vars.ACTIONS_RUNNER_DEBUG }}
+        run: python3 scripts/ci/push-infra-preflight.py --check-protection
+      - name: Validate configuration and read Cloudflare token status
+        env:
+          APU_PUSH_CLOUDFLARE_TOKEN: ${{ secrets.APU_PUSH_CLOUDFLARE_TOKEN }}
+          APU_PUSH_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.APU_PUSH_CLOUDFLARE_ACCOUNT_ID }}
+          APU_PUSH_FCM_SERVICE_ACCOUNT: ${{ secrets.APU_PUSH_FCM_SERVICE_ACCOUNT }}
+          APU_FIREBASE_ANDROID_CONFIG: ${{ secrets.APU_FIREBASE_ANDROID_CONFIG }}
+        run: python3 scripts/ci/push-infra-preflight.py --check-secrets

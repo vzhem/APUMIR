@@ -1,0 +1,39 @@
+name: Remote push prototype tests
+
+on:
+  push:
+    branches:
+      - 'arena/**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: push-wake-prototype-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prototype:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tools/worker/push/package-lock.json
+      - name: Install pinned local test tools
+        run: npm ci --prefix tools/worker/push --no-audit --no-fund
+      - name: Exercise Worker and SQLite with fake FCM
+        run: npm test --prefix tools/worker/push
+      - name: Guard early push-control quarantine in both Android receive paths
+        run: python3 scripts/ci/check-push-ingress.py
+      - name: Test disabled deployment client with a fake provider
+        run: python3 scripts/ci/test-push-disabled-deploy.py
+      - name: Check isolated disabled deployment bundle without deploying
+        env:
+          WRANGLER_SEND_METRICS: 'false'
+        run: npm run check:bundle --prefix tools/worker/push

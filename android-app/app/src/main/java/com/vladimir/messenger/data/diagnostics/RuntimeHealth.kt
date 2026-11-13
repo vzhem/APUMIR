@@ -149,5 +149,34 @@ data class RuntimeHealthSnapshot(
 }
 
 enum class ExitHistoryStatus { READY, UNAVAILABLE, UNSUPPORTED }
-enum class ProcessExitReason { ANR, CRASH, NATIVE_CRASH, LOW_MEMORY, USER_REQUESTED, OTHER }
+
+/** Android's public ApplicationExitInfo reason codes, mapped to fixed labels only. */
+enum class ProcessExitReason {
+    UNKNOWN, EXIT_SELF, SIGNALED, LOW_MEMORY, CRASH, NATIVE_CRASH, ANR,
+    INITIALIZATION_FAILURE, PERMISSION_CHANGE, EXCESSIVE_RESOURCE_USAGE,
+    USER_REQUESTED, USER_STOPPED, DEPENDENCY_DIED, OTHER, FREEZER,
+    PACKAGE_STATE_CHANGE, PACKAGE_UPDATED;
+
+    companion object {
+        fun fromAndroidReason(reason: Int): ProcessExitReason = when (reason) {
+            0 -> UNKNOWN
+            1 -> EXIT_SELF
+            2 -> SIGNALED
+            3 -> LOW_MEMORY
+            4 -> CRASH
+            5 -> NATIVE_CRASH
+            6 -> ANR
+            7 -> INITIALIZATION_FAILURE
+            8 -> PERMISSION_CHANGE
+            9 -> EXCESSIVE_RESOURCE_USAGE
+            10 -> USER_REQUESTED
+            11 -> USER_STOPPED
+            12 -> DEPENDENCY_DIED
+            14 -> FREEZER
+            15 -> PACKAGE_STATE_CHANGE
+            16 -> PACKAGE_UPDATED
+            else -> OTHER // Includes Android's REASON_OTHER=13 and future/OEM codes.
+        }
+    }
+}
 data class PreviousProcessExit(val reason: ProcessExitReason, val agoMs: Long, val importance: Int)

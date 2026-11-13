@@ -5,20 +5,13 @@ import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Бодрствование CPU только на время реальной работы ядра.
  *
- * Раньше служба держала PARTIAL_WAKE_LOCK постоянно и продлевала его каждые
- * восемь минут: телефон не засыпал даже когда приложение просто открыто и
- * никто ничего не делает. Теперь замок берётся на обработку пачки событий и
- * на круг файлового насоса, а в простое отпускается. Сеть и будильники
- * доставки ([DeliveryAssurance], [EmergencyKeepAlive]) остаются страховкой.
- *
- * Замок всегда с таймаутом: если корутина умрёт не отпустив аренду, система
- * сама снимет его через [WORK_WAKE_LOCK_MS]. Несколько аренд считаются
- * счётчиком, чтобы параллельные насосы не снимали замок друг у друга.
+ * Замок всегда с таймаутом. Параллельные аренды и системные переходы
+ * сериализованы вместе: один обработчик не снимет замок у другого.
+ * После остановки службы новые аренды больше не выдаются.
  */
 class CoreWorkWakeLock(context: Context) {
 
@@ -27,23 +20,23 @@ class CoreWorkWakeLock(context: Context) {
         PowerManager.PARTIAL_WAKE_LOCK,
         "P2PMessenger::CoreWorkWakeLock",
     ).apply { setReferenceCounted(false) }
-    private val registry = WakeLeaseRegistry()
+    private val leases = WorkWakeLeases(
+        platformIsHeld = { wakeLock.isHeld },
+        platformAcquire = {
+            wakeLock.acquire(WORK_WAKE_LOCK_MS)
+            OperationalDiagnostics.wake.acquire(SystemClock.elapsedRealtime(), WORK_WAKE_LOCK_MS)
+        },
+        platformRelease = {
+            if (wakeLock.isHeld) wakeLock.release()
+            OperationalDiagnostics.wake.release(SystemClock.elapsedRealtime())
+        },
+        recordFailure = { operation, error ->
+            Log.w(TAG, "work wake lock $operation failed", error)
+        },
+    )
 
-    /** Взять аренду; закрывающий её [Lease.close] идемпотентен. */
-    fun acquire(): Lease {
-        val first = registry.acquire()
-        if (first) {
-            val ok = runCatching {
-                wakeLock.acquire(WORK_WAKE_LOCK_MS)
-                OperationalDiagnostics.wake.acquire(SystemClock.elapsedRealtime(), WORK_WAKE_LOCK_MS)
-            }.onFailure {
-                registry.release()
-                Log.w(TAG, "work wake lock acquire failed: ${it.message}")
-            }.isSuccess
-            if (!ok) return Lease(active = false)
-        }
-        return Lease(active = true)
-    }
+    /** Взять аренду; её закрытие идемпотентно. */
+    fun acquire(): AutoCloseable = leases.acquire()
 
     suspend fun <T> withLock(block: suspend () -> T): T {
         val lease = acquire()
@@ -54,57 +47,13 @@ class CoreWorkWakeLock(context: Context) {
         }
     }
 
-    /** Снять всё при остановке службы. */
-    fun releaseAll() {
-        registry.reset()
-        runCatching {
-            if (wakeLock.isHeld) wakeLock.release()
-            OperationalDiagnostics.wake.release(SystemClock.elapsedRealtime())
-        }.onFailure { Log.w(TAG, "work wake lock release failed: ${it.message}") }
-    }
-
-    inner class Lease internal constructor(private val active: Boolean) : AutoCloseable {
-        private val closed = AtomicBoolean(false)
-        override fun close() {
-            if (!active || !closed.compareAndSet(false, true)) return
-            val last = registry.release()
-            if (last) {
-                runCatching {
-                    if (wakeLock.isHeld) wakeLock.release()
-                    OperationalDiagnostics.wake.release(SystemClock.elapsedRealtime())
-                }.onFailure { Log.w(TAG, "work wake lock lease release failed: ${it.message}") }
-            }
-        }
-    }
+    /** Снять всё при окончательной остановке этой службы. */
+    fun releaseAll() = leases.releaseAll()
 
     companion object {
         private const val TAG = "CoreWorkWakeLock"
 
-        /** Потолок одной аренды: работа дольше него должна взять новую. */
+        /** Потолок одной аренды: новая работа после таймаута возьмёт замок снова. */
         const val WORK_WAKE_LOCK_MS = 5 * 60 * 1000L
-    }
-}
-
-/** Чистый счётчик аренд без Android — проверяется JVM-тестом. */
-class WakeLeaseRegistry {
-    private var holders = 0
-
-    val held: Boolean get() = holders > 0
-
-    /** true, если это первая аренда (надо взять системный замок). */
-    @Synchronized fun acquire(): Boolean {
-        holders++
-        return holders == 1
-    }
-
-    /** true, если ушла последняя аренда (надо снять системный замок). */
-    @Synchronized fun release(): Boolean {
-        if (holders == 0) return false
-        holders--
-        return holders == 0
-    }
-
-    @Synchronized fun reset() {
-        holders = 0
     }
 }

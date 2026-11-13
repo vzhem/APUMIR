@@ -95,7 +95,7 @@ object BackupRestoreMerge {
                 continue
             }
             val available = source.columns.associateBy { it.name }
-            val targets = table.columns.filter { !isInternal(it.name) }
+            val targets = table.columns.filter { !isInternal(it.name) && !(table.name == "messages" && it.name == "notificationPending") }
             if (available.isEmpty()) {
                 steps += Step.Skip(table.name, "в копии нет колонок")
                 continue
@@ -108,14 +108,16 @@ object BackupRestoreMerge {
                 continue
             }
             val columns = written.joinToString(", ") { quote(it.name) }
+            // `copy` is the attached database, not a table alias. Qualify
+            // columns with the explicit alias so the SELECT runs on SQLite.
             val values = written.joinToString(", ") { column ->
-                if (available.containsKey(column.name)) "copy." + quote(column.name) else literal(column)
+                if (available.containsKey(column.name)) "src." + quote(column.name) else literal(column)
             }
             steps += Step.Insert(
                 table.name,
                 "INSERT OR IGNORE INTO " + quote(table.name) +
                     " (" + columns + ") SELECT " + values +
-                    " FROM copy." + quote(source.name),
+                    " FROM copy." + quote(source.name) + " AS src",
             )
         }
         return steps

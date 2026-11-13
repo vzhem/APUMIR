@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.ui.components.ApuBackButton
+
 import com.vladimir.messenger.ui.components.ApuSegmentedControl
 
 import com.vladimir.messenger.ui.components.ApuPremiumSpinner
@@ -40,7 +42,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -189,11 +190,7 @@ fun ProfileBackupScreen(
                         scrolledContainerColor = Color.Transparent,
                     ),
                     title = { ApuSettingsHeader(stringResource(R.string.backup_title)) },
-                    navigationIcon = {
-                        IconButton(onClick = onBackClick) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                        }
-                    },
+                    navigationIcon = { ApuBackButton(onClick = onBackClick) },
                 )
             },
         ) { padding ->

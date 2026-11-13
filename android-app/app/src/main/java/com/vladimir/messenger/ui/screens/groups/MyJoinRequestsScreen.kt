@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.groups
 
+import com.vladimir.messenger.ui.components.ApuBackButton
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,7 +24,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Groups
@@ -141,14 +142,7 @@ fun MyJoinRequestsScreen(
                             ),
                         )
                     },
-                    navigationIcon = {
-                        IconButton(onClick = onBackClick) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = stringResource(R.string.action_back),
-                            )
-                        }
-                    },
+                    navigationIcon = { ApuBackButton(onClick = onBackClick) },
                 )
             },
         ) { padding ->

@@ -26,8 +26,9 @@ use crate::network::router::Router;
 use crate::network::dht::{RoutingTable, DhtNodeInfo};
 use crate::network::relay::RelayManager;
 use crate::network::presence::PresenceManager;
+use crate::network::presence_observation::{self, PresenceObservation, PresenceOutcome};
 use crate::network::presence_scope::{
-    direct_presence_payload, parse_direct_presence, PresenceMode, PresenceScope,
+    parse_direct_presence, PresenceMode, PresenceScope,
     BEACON_INTERVAL_MS, DIRECT_PRESENCE_PREFIX, MAX_OWN_PER_ROUND,
 };
 use crate::network::custody_relay::{
@@ -65,6 +66,11 @@ use crate::network::adaptive_polling::AdaptivePolling;
 use crate::network::swarm_first::SwarmFirstPolicy;
 use crate::resilience::AddressBook;
 
+#[path = "broker_settings.rs"]
+mod broker_settings;
+#[path = "foreground_recovery.rs"]
+mod foreground_recovery;
+
 const MQTT_OUTBOUND_COMMAND_CAPACITY: usize = 256;
 
 /// Give a newly discovered *own* public endpoint to directly authenticated
@@ -93,6 +99,7 @@ enum MqttOutboundCommand {
         recipient: String,
         envelope: String,
         message_id: String,
+        legacy_redelivery: bool,
     },
     /// Подтверждение доставки автору сообщения.
     ///
@@ -103,10 +110,13 @@ enum MqttOutboundCommand {
     DeliveryAck {
         recipient: String,
         message_id: String,
+        room_committed: bool,
     },
     /// Немедленно объявить себя и запросить presence остальных (кнопка
     /// «Собрать данные об абонентах»). Обычный цикл делает это раз в минуту.
     AnnounceNow,
+    /// Automatic foreground recovery: obey beacon budget, do not claim an old address is fresh.
+    AnnounceAfterIdle,
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -347,25 +357,6 @@ fn remember_bounded_id(
     order.push_back(owned);
 }
 
-fn remember_bounded_delivery(
-    entries: &mut HashMap<String, String>,
-    order: &mut VecDeque<String>,
-    msg_id: &str,
-    origin: &str,
-    capacity: usize,
-) {
-    if capacity == 0 || entries.contains_key(msg_id) {
-        return;
-    }
-    while order.len() >= capacity {
-        if let Some(oldest) = order.pop_front() {
-            entries.remove(&oldest);
-        }
-    }
-    entries.insert(msg_id.to_string(), origin.to_string());
-    order.push_back(msg_id.to_string());
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EngineState {
     Uninitialized,
@@ -597,10 +588,8 @@ pub struct P2PCore {
     /// K4: сигнал потоку личного presence остановиться (`stop()`).
     presence_task_stop: Arc<std::sync::atomic::AtomicBool>,
     /// Задача владельца 2026-09-18: поменялся СОБСТВЕННЫЙ адрес (STUN:
-    /// перезагрузка, смена сети, новый NAT) — поток личного presence
-    /// должен СРАЗУ, минуя 60-секундный цикл и 32-пакетный круг, расслать
-    /// personal presence со свежим адресом ВСЕМ «своим». Ставит STUN,
-    /// снимает presence-поток после рассылки.
+    /// перезагрузка, смена сети, новый NAT). STUN ставит флаг; личная
+    /// рассылка подхватывает его в ближайшем ограниченном круге.
     own_addr_changed: Arc<std::sync::atomic::AtomicBool>,
     /// K4-2: поиск адреса по nodeId без брокера (DHT наружу): очередь
     /// ответов и расписание вопросов, см. `network::address_lookup`.
@@ -954,11 +943,10 @@ impl P2PCore {
                 let peer_addrs_inbound = Arc::clone(&peer_addrs_arc);
                 let address_book_inbound = Arc::clone(&self.address_book);
                 let on_inbound = Arc::new(move |sender: &str, addr: SocketAddr| {
-                    peer_addrs_inbound
-                        .lock()
-                        .unwrap()
-                        .insert(sender.to_string(), addr);
-                    address_book_inbound.record(sender, addr);
+                    presence_observation::remember_route(
+                        &peer_addrs_inbound, &address_book_inbound, sender, addr,
+                        crate::storage::models::now_ms(),
+                    );
                 });
                 let discovery_identity = crate::crypto::signing_identity::installed_signing_identity()
                     .filter(|identity| identity.legacy_routing_node_id() == node_id);
@@ -1074,47 +1062,35 @@ impl P2PCore {
                         let Some(effect) = directory.handle(&identity, bytes, binding, remote, public, now) else {
                             return BoundFrameResult::default();
                         };
-                        let observations = book.observations();
-                        // Third-party leases are hints only. They do not overwrite an address
-                        // that still works, and do not create online peers or contact/profile data.
-                        for (id, addr, observed_at) in effect.candidates {
-                            if id == identity.legacy_routing_node_id() { continue; }
-                            let current = addrs.lock().unwrap().get(&id).copied();
-                            let learned_at = observations.get(&id).map(|(_, at)| *at).unwrap_or(0);
-                            if current.is_none() || directory.needs_lookup(&id, current, learned_at, now) {
-                                {
-                                    let mut addresses = addrs.lock().unwrap();
-                                    addresses.insert(id.clone(), addr);
-                                    addresses.insert(format!("{}_public", id), addr);
-                                }
-                                book.record_observed_at(&id, addr, observed_at);
-                                book.record_observed_at(&format!("{}_public", id), addr, observed_at);
-                            } else if let Some(current) = current {
-                                // Часть 4: у узла в каталоге две подписанные
-                                // аренды — по одной на стек. Второй адрес не
-                                // заменяет работающий (это правило каталога), а
-                                // становится запасным путём `_public`: его
-                                // пробует PEX, если основной адрес не ответил.
-                                if current.is_ipv6() != addr.is_ipv6() {
-                                    let key = format!("{}_public", id);
-                                    let mut addresses = addrs.lock().unwrap();
-                                    if !addresses.contains_key(&key) {
-                                        addresses.insert(key.clone(), addr);
-                                        drop(addresses);
-                                        book.record_observed_at(&key, addr, observed_at);
+                        // Third-party leases are only address hints. Serialize route
+                        // decisions with the book so a delayed signed lease cannot
+                        // overwrite a newer direct or broker observation in memory.
+                        {
+                            let mut addresses = addrs.lock().unwrap();
+                            let observations = book.observations();
+                            for (id, addr, observed_at) in effect.candidates {
+                                if id == identity.legacy_routing_node_id() { continue; }
+                                let current = addresses.get(&id).copied();
+                                let learned_at = observations.get(&id).map(|(_, at)| *at).unwrap_or(0);
+                                if current.is_none() || directory.needs_lookup(&id, current, learned_at, now) {
+                                    presence_observation::remember_locked(&mut addresses, &book, &id, addr, observed_at);
+                                    let public = format!("{}_public", id);
+                                    presence_observation::remember_locked(&mut addresses, &book, &public, addr, observed_at);
+                                } else if let Some(current) = current {
+                                    // Preserve the working primary; remember a second stack only as an alternative.
+                                    let public = format!("{}_public", id);
+                                    if current.is_ipv6() != addr.is_ipv6() && !addresses.contains_key(&public) {
+                                        presence_observation::remember_locked(&mut addresses, &book, &public, addr, observed_at);
                                     }
                                 }
                             }
-                        }
-                        // The directly signed session, unlike the forwarded hints, is live now.
-                        {
-                            let mut addresses = addrs.lock().unwrap();
-                            addresses.insert(effect.sender_id.clone(), effect.sender_endpoint);
+                            // The directly signed session is a fresh observation, not a forwarded hint.
+                            presence_observation::remember_locked(&mut addresses, &book, &effect.sender_id, effect.sender_endpoint, now);
                             if is_public_endpoint(effect.sender_endpoint) {
-                                addresses.insert(format!("{}_public", effect.sender_id), effect.sender_endpoint);
+                                let public = format!("{}_public", effect.sender_id);
+                                presence_observation::remember_locked(&mut addresses, &book, &public, effect.sender_endpoint, now);
                             }
                         }
-                        book.record(&effect.sender_id, effect.sender_endpoint);
                         if own_scope.is_own(&effect.sender_id) {
                             if let Some(owner_key) = directory.pinned_key(&effect.sender_id) {
                                 // The response is tied to the direct TLS session AND signed by
@@ -1123,18 +1099,17 @@ impl P2PCore {
                             }
                         }
                         let known = network.peers().into_iter().find(|p| p.peer_id == effect.sender_id);
-                        let is_new = known.is_none();
                         let mut info = known.unwrap_or_else(|| PeerInfo::new(effect.sender_id.clone(), "Абонент".into()));
                         info.is_direct = true;
                         network.add_peer(info);
                         network.touch_peer(&effect.sender_id);
                         network.set_status(NetworkStatus::Connected);
-                        if is_new {
-                            events.emit(CoreEvent::PeerDiscovered {
-                                peer_id: effect.sender_id.clone(), display_name: "Абонент".into(),
-                                is_local: !is_public_endpoint(effect.sender_endpoint),
-                            });
-                        }
+                        // Each session-bound, owner-signed exchange is a new
+                        // observation, not just the first insert into the map.
+                        events.emit(CoreEvent::PeerDiscovered {
+                            peer_id: effect.sender_id.clone(), display_name: "Абонент".into(),
+                            is_local: !is_public_endpoint(effect.sender_endpoint), observed_at_ms: now,
+                        });
                         BoundFrameResult { sender: Some(effect.sender_id), response: effect.response }
                     }) as BoundFrameHandler
                 });
@@ -1586,8 +1561,7 @@ impl P2PCore {
                 Some(presence) => {
                     // Версия формата и срок годности - та же арифметика, что и
                     // в обработчике presence из брокера: старое не берём.
-                    if presence.version
-                        + crate::config::defaults::PRESENCE_VERSION_TOLERANCE
+                    if presence.version.saturating_add(crate::config::defaults::PRESENCE_VERSION_TOLERANCE)
                         <= crate::config::defaults::PRESENCE_VERSION
                     {
                         tracing::info!(
@@ -1597,55 +1571,21 @@ impl P2PCore {
                         );
                         return None;
                     }
-                    let age_ms = crate::storage::models::now_ms()
-                        .saturating_sub(presence.sent_at_ms);
-                    if age_ms > crate::config::defaults::PRESENCE_MAX_AGE_MS {
-                        tracing::info!(
-                            "PRESENCE K4: ignored personal presence from {} - {}h old",
-                            presence.node_id,
-                            age_ms / 3_600_000
-                        );
+                    if network.local_node_id().as_deref() == Some(presence.node_id.as_str()) {
                         return None;
                     }
-                    tracing::info!(
-                        "PRESENCE K4: personal presence from {} ({}) addr={}",
-                        presence.display_name,
-                        presence.node_id,
-                        presence
-                            .addr
-                            .map(|a| a.to_string())
-                            .unwrap_or_else(|| "unknown".into())
+                    let outcome = presence_observation::observe(
+                        events, network, peer_addrs, address_book,
+                        PresenceObservation {
+                            peer_id: &presence.node_id, display_name: &presence.display_name,
+                            addr: presence.addr, sent_at_ms: presence.sent_at_ms, is_local: false,
+                        },
+                        crate::storage::models::now_ms(), false,
                     );
-                    network.add_peer(PeerInfo::new(
-                        presence.node_id.clone(),
-                        presence.display_name.clone(),
-                    ));
-                    network.touch_peer(&presence.node_id);
-                    network.set_status(NetworkStatus::Connected);
-                    // Адрес из кадра — самозаявка отправителя (тот же
-                    // уровень авторитета, что у брокер-presence: его
-                    // адрес знает только он). Именно так доходит срочная
-                    // рассылка «мой адрес поменялся» (задача владельца
-                    // 2026-09-18): получатель записывает свежий адрес в
-                    // память и в азбуку. mDNS и брокер продолжат
-                    // обновлять адрес, как и раньше.
-                    if let Some(addr) = presence.addr {
-                        let public_key = format!("{}_public", presence.node_id);
-                        let mut addrs = peer_addrs.lock().unwrap();
-                        addrs.insert(presence.node_id.clone(), addr);
-                        addrs.insert(public_key.clone(), addr);
-                        drop(addrs);
-                        address_book.record(&presence.node_id, addr);
-                        address_book.record(&public_key, addr);
-                        tracing::info!(
-                            "PRESENCE K4: fresh addr from {} = {}",
-                            presence.node_id,
-                            addr
-                        );
-                    }
-                    // Отправителя возвращаем: транспорт усыновит входящее
-                    // соединение, и ответ уйдёт по нему даже за строгим NAT.
-                    return Some(presence.node_id);
+                    // Only a fresh frame can mark the peer online or adopt its
+                    // inbound connection. Personal presence is still legacy,
+                    // unsigned self-assertion, not a verified PEX identity.
+                    return if outcome == PresenceOutcome::Live { Some(presence.node_id) } else { None };
                 }
                 None => {
                     tracing::debug!("QUIC: malformed personal presence frame dropped");
@@ -1743,10 +1683,10 @@ impl P2PCore {
                 if let Some(target_addr) = reply.addr {
                     if reply.target_id != reply.from_id && (!addrs.contains_key(&reply.target_id)
                         || lookup.may_refresh_from(&reply.target_id, &reply.from_id, crate::storage::models::now_ms())) {
-                        addrs.insert(reply.target_id.clone(), target_addr);
-                        recorded += 1;
-                        // Азбука адресов: адрес из DHT-ответа — тоже наш.
-                        address_book.record(&reply.target_id, target_addr);
+                        if presence_observation::remember_locked(
+                            &mut addrs, address_book, &reply.target_id, target_addr,
+                            crate::storage::models::now_ms(),
+                        ) { recorded += 1; }
                     }
                 }
                 for (node_id, node_addr) in reply.closer.iter() {
@@ -1765,9 +1705,10 @@ impl P2PCore {
                     if addrs.contains_key(&key) {
                         continue;
                     }
-                    addrs.insert(key.clone(), *node_addr);
-                    recorded += 1;
-                    address_book.record(&key, *node_addr);
+                    if presence_observation::remember_locked(
+                        &mut addrs, address_book, &key, *node_addr,
+                        crate::storage::models::now_ms(),
+                    ) { recorded += 1; }
                 }
             }
             if recorded > 0 { lookup.forget(&reply.target_id); }
@@ -2091,8 +2032,10 @@ impl P2PCore {
 
                         tracing::info!("mDNS: discovered peer {} at {}", peer_id, peer_addr);
 
-                        peer_addrs.lock().unwrap().insert(peer_id.clone(), peer_addr);
-                        address_book.record(&peer_id, peer_addr);
+                        presence_observation::remember_route(
+                            &peer_addrs, &address_book, &peer_id, peer_addr,
+                            crate::storage::models::now_ms(),
+                        );
                         // Второй стек узла: mDNS принёс больше одного адреса
                         // (AAAA и A). Транспорт пробует их, если основной не
                         // ответил, — см. `DirectTransport::set_alternatives`.
@@ -2154,8 +2097,10 @@ impl P2PCore {
                         }
                         // Also register under mDNS full name (old chats may use it as contactId)
                         if node.node_id_hex.is_some() {
-                            peer_addrs.lock().unwrap().insert(node.full_name.clone(), peer_addr);
-                            address_book.record(&node.full_name, peer_addr);
+                            presence_observation::remember_route(
+                                &peer_addrs, &address_book, &node.full_name, peer_addr,
+                                crate::storage::models::now_ms(),
+                            );
                         }
 
                         network.add_peer(PeerInfo::new(peer_id.clone(), peer_name.clone()));
@@ -2168,8 +2113,10 @@ impl P2PCore {
                         if let Some(ref pa) = node.public_addr {
                             if let Ok(pub_addr) = pa.parse::<SocketAddr>() {
                                 let key = format!("{}_public", peer_id);
-                                peer_addrs.lock().unwrap().insert(key.clone(), pub_addr);
-                                address_book.record(&key, pub_addr);
+                                presence_observation::remember_route(
+                                    &peer_addrs, &address_book, &key, pub_addr,
+                                    crate::storage::models::now_ms(),
+                                );
                                 tracing::info!("mDNS: public addr for {} = {}", peer_id, pub_addr);
                             }
                         }
@@ -2179,6 +2126,7 @@ impl P2PCore {
                             peer_id: peer_id.clone(),
                             display_name: peer_name,
                             is_local: true,
+                            observed_at_ms: crate::storage::models::now_ms(),
                         });
                     }
                 }
@@ -2196,8 +2144,6 @@ impl P2PCore {
         _network: Arc<NetworkManagerFfi>,
         port: u16,
     ) {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
         // Dual-stack с откатом на IPv4: в сети только-v6 слушатель истории на
         // `0.0.0.0` был недостижим для соседей.
         let listener = match crate::network::dual_stack::bind_tcp_dual(port).await {
@@ -2211,6 +2157,13 @@ impl P2PCore {
             }
         };
 
+        Self::run_tcp_connections(events, listener).await;
+    }
+
+    // Kept separate from binding so the real accept/read/emit path is testable
+    // on an ephemeral loopback port, without racing to reserve a port first.
+    async fn run_tcp_connections(events: Arc<EventBus>, listener: tokio::net::TcpListener) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
         loop {
             match listener.accept().await {
                 Ok((mut stream, peer)) => {
@@ -2228,10 +2181,7 @@ impl P2PCore {
                                     let parts: Vec<&str> = text.splitn(4, '|').collect();
                                     // Страж отправителя - см. QUIC-приёмник выше.
                                     if parts.len() == 4 && parts[0].starts_with("pk_") {
-                                        let ts = std::time::SystemTime::now()
-                                            .duration_since(std::time::UNIX_EPOCH)
-                                            .unwrap_or_default()
-                                            .as_secs() as i64;
+                                        let ts = crate::storage::models::now_ms();
                                         ev.emit(CoreEvent::MessageReceived {
                                             message_id: parts[1].to_string(),
                                             chat_id: parts[2].to_string(),
@@ -2397,6 +2347,7 @@ impl P2PCore {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(5));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut generation = 0;
+        let mut audience_generation = 0;
         let mut legacy_at = crate::storage::models::now_ms().saturating_add(20_000);
         // Let ordinary fresh-address discovery run first. This does not wake the
         // phone solely to scan: the task exists only while the engine is active.
@@ -2412,6 +2363,8 @@ impl P2PCore {
             swarm_first.report(now, transport.authenticated_connection_ids(&ids).await);
             let updated = book.generation();
             if updated != generation { generation = updated; directory.wake(); }
+            let updated_audience = scope.generation();
+            if updated_audience != audience_generation { audience_generation = updated_audience; directory.wake(); }
             directory.flush(false, now);
             if !directory.due(now) && now < legacy_at && now < history_at { continue; }
             let observations = book.observations();
@@ -2516,13 +2469,8 @@ impl P2PCore {
             query_payload(our_id, target_id).into_bytes())).collect()
     }
 
-    /// K4-1: личный presence «своим» по прямому QUIC.
-    ///
-    /// Поток просыпается каждые [`OWN_PRESENCE_TICK_SECS`], но рассылает не
-    /// чаще [`crate::network::presence_scope::OWN_INTERVAL_MS`]. В маленькой
-    /// сети (режим [`PresenceMode::Broadcast`]) он не делает ничего: presence
-    /// уходит в общий топик ровно как до K4, поэтому поведение на телефонах
-    /// владельца и на старых сборках не меняется.
+    /// K4: независимая ограниченная рассылка присутствия и старый поток
+    /// ответов поиска/кастодии. Оба работают и без MQTT.
     fn spawn_own_presence_task(&mut self, node_id: String) {
         const OWN_PRESENCE_TICK_SECS: u64 = 5;
         // Сколько тиков между вопросами про адреса (12 * 5 с = минута).
@@ -2533,6 +2481,13 @@ impl P2PCore {
 
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         self.presence_task_stop = Arc::clone(&stop);
+        if let Some(runtime) = self.runtime.as_ref() {
+            crate::network::presence_dispatch::PresenceDispatcher::spawn_periodic(
+                runtime.handle().clone(), Arc::clone(&stop), Arc::clone(&self.presence_scope),
+                Arc::clone(&self.direct), Arc::clone(&self.peer_addrs), Arc::clone(&self.public_addr),
+                Arc::clone(&self.own_addr_changed), node_id.clone(), self.config.display_name.clone(),
+            );
+        }
 
         let scope = Arc::clone(&self.presence_scope);
         let lookup = Arc::clone(&self.address_lookup);
@@ -2547,11 +2502,6 @@ impl P2PCore {
         let file_custody = Arc::clone(&self.file_custody);
         let direct = Arc::clone(&self.direct);
         let peer_addrs = Arc::clone(&self.peer_addrs);
-        let public_addr = Arc::clone(&self.public_addr);
-        let network = Arc::clone(&self.network);
-        let addr_changed = Arc::clone(&self.own_addr_changed);
-        let display_name = self.config.display_name.clone();
-
         let spawned = std::thread::Builder::new()
             .name("apu-own-presence".into())
             .spawn(move || loop {
@@ -2586,62 +2536,12 @@ impl P2PCore {
                     tracing::info!("DHT K4: {} address answer(s) sent", replies_sent);
                 }
 
-                // В маленькой сети (режим Broadcast) личный presence не
-                // вмешивается: объявление идёт в общий топик, как до K4.
-                let scoped =
-                    PresenceMode::for_peers(network.peer_count()) == PresenceMode::Scoped;
-                let addr_str = {
-                    let pa = public_addr.lock().unwrap();
-                    pa.map(|a| a.to_string())
-                };
-
-                // Задача владельца 2026-09-18: СОБСТВЕННЫЙ адрес поменялся
-                // (STUN поднял флаг: перезагрузка, смена сети, новый NAT) —
-                // СРАЗУ рассказываем ВСЕМ «своим», не дожидаясь
-                // 60-секундного цикла и без 32-пакетного круга. Работает и
-                // в маленькой сети, где обычный личный presence выключен:
-                // каждый онлайн-получатель записывает свежий адрес в свою
-                // азбуку, и после рестарта они стучат уже к нему.
-                if addr_str.is_some()
-                    && addr_changed.swap(false, std::sync::atomic::Ordering::Relaxed)
-                {
-                    let own = scope.all_own();
-                    if !own.is_empty() {
-                        let payload = direct_presence_payload(
-                            &node_id,
-                            &display_name,
-                            addr_str.as_deref(),
-                            true,
-                            now_ms,
-                        )
-                        .into_bytes();
-                        let mut sent = 0usize;
-                        for peer_id in &own {
-                            let addr = {
-                                let addrs = peer_addrs.lock().unwrap();
-                                addrs
-                                    .get(peer_id)
-                                    .copied()
-                                    .or_else(|| addrs.get(&format!("{}_public", peer_id)).copied())
-                            };
-                            if transport.send_blocking(peer_id, addr, payload.clone()) {
-                                sent += 1;
-                            }
-                        }
-                        tracing::info!(
-                            "PRESENCE K4: own address changed — immediate personal presence sent to {}/{} own peer(s)",
-                            sent,
-                            own.len()
-                        );
-                    }
-                }
-
                 // Раз в минуту смотрим, у кого из «своих» адреса нет, и
                 // спрашиваем соседей напрямую - без брокера. Идёт и в
                 // маленькой сети: это просто ещё одна возможность найти
                 // адрес, когда брокер молчит.
                 if !modern_discovery && ticks % OWN_LOOKUP_TICKS == 0 {
-                    let candidates = scope.next_batch(MAX_OWN_PER_ROUND);
+                    let candidates = scope.next_lookup_batch(MAX_OWN_PER_ROUND);
                     let observed = address_book.observations();
                     let missing: Vec<String> = {
                         let addrs = peer_addrs.lock().unwrap();
@@ -2682,10 +2582,9 @@ impl P2PCore {
                 hold.purge_expired(now_ms);
                 offers.purge_expired(now_ms);
 
-                // Копии, которые держим, отдаём тем получателям, кто сейчас
-                // в сети. Отдали - копию убираем и говорим автору, что
-                // искать хранителей дальше не нужно.
-                let mut delivered_items = 0usize;
+                // QUIC stream admission is not a Room commit. Keep the bounded
+                // copy until a drop hint or TTL, retrying with backoff.
+                let mut offered_items = 0usize;
                 for recipient in hold.recipients() {
                     let addr = {
                         let addrs = peer_addrs.lock().unwrap();
@@ -2694,27 +2593,20 @@ impl P2PCore {
                     let Some(addr) = addr else {
                         continue;
                     };
-                    for item in hold.take_for_recipient(&recipient, 8) {
-                        if !hold.note_delivered(&item.msg_id) {
-                            continue;
-                        }
+                    for item in hold.take_due_for_recipient(&recipient, 8) {
                         if transport.send_blocking(
                             &recipient,
                             Some(addr),
                             deliver_payload(&item.envelope).into_bytes(),
                         ) {
-                            delivered_items += 1;
-                            hold.remove(&item.msg_id);
-                            if item.origin.starts_with("pk_") {
-                                hold.queue_outbound(&item.origin, drop_payload(&item.msg_id));
-                            }
+                            offered_items += 1;
                         }
                     }
                 }
-                if delivered_items > 0 {
+                if offered_items > 0 {
                     tracing::info!(
-                        "CUSTODY K5: {} held message(s) delivered to their recipients",
-                        delivered_items
+                        "CUSTODY K5: {} held message(s) offered on a stream; awaiting app delivery",
+                        offered_items
                     );
                 }
 
@@ -2747,6 +2639,7 @@ impl P2PCore {
                                 addr,
                                 offer_payload(&envelope).into_bytes(),
                             );
+                            if !sent { offers.note_send_failed(&msg_id, &peer); }
                             tracing::info!(
                                 "CUSTODY K5: offer {} to {} sent: {}",
                                 msg_id,
@@ -2872,41 +2765,6 @@ impl P2PCore {
                     }
                 }
 
-                if scoped && scope.own_due(now_ms) {
-                    let recipients = scope.next_batch(MAX_OWN_PER_ROUND);
-                    if !recipients.is_empty() {
-                        let total = recipients.len();
-                        scope.mark_own(now_ms);
-                        let payload = direct_presence_payload(
-                            &node_id,
-                            &display_name,
-                            addr_str.as_deref(),
-                            addr_str.is_some(),
-                            now_ms,
-                        )
-                        .into_bytes();
-
-                        let mut sent = 0usize;
-                        for peer_id in recipients {
-                            let addr = {
-                                let addrs = peer_addrs.lock().unwrap();
-                                addrs
-                                    .get(&peer_id)
-                                    .copied()
-                                    .or_else(|| addrs.get(&format!("{}_public", peer_id)).copied())
-                            };
-                            if transport.send_blocking(&peer_id, addr, payload.clone()) {
-                                sent += 1;
-                            }
-                        }
-                        tracing::info!(
-                            "PRESENCE K4: personal presence sent to {}/{} own peer(s); shared beacon every {} min",
-                            sent,
-                            total,
-                            BEACON_INTERVAL_MS / 60_000
-                        );
-                    }
-                }
             });
         if let Err(error) = spawned {
             tracing::warn!("PRESENCE K4: own presence thread not started: {}", error);
@@ -2923,6 +2781,19 @@ impl P2PCore {
             &msg.msg_id, &msg.recipient, &msg.origin_sender, &msg.chat_scope,
             ttl_secs, msg.hop_count, &msg.e2e_payload,
         );
+        (wire.len() <= MAX_MESH_RELAY_ENVELOPE_BYTES).then_some(wire)
+    }
+
+    /// N-1-compatible direct-format retry of a retained own ciphertext. It is
+    /// live-only, and expiry/metadata are checked again when the command drains.
+    fn own_legacy_retry_wire(msg: &RelayMessage, now_ms: i64) -> Option<String> {
+        if msg.is_expired_at(now_ms) || msg.remaining_ttl_secs_at(now_ms) == 0
+            || !msg.origin_sender.starts_with("pk_")
+            || !crate::network::relay_queue::valid_metadata_atom(&msg.msg_id, crate::network::relay_queue::MAX_MESSAGE_ID_BYTES)
+            || !crate::network::relay_queue::valid_metadata_atom(&msg.chat_scope, crate::network::relay_queue::MAX_CHAT_SCOPE_BYTES)
+        { return None; }
+        let text = std::str::from_utf8(&msg.e2e_payload).ok()?;
+        let wire = format!("{}|{}|{}|{}", msg.origin_sender, msg.msg_id, msg.chat_scope, text);
         (wire.len() <= MAX_MESH_RELAY_ENVELOPE_BYTES).then_some(wire)
     }
 
@@ -3121,23 +2992,11 @@ impl P2PCore {
             ).await;
         }
 
-        // Event loop: один оборот примерно раз в секунду (poll_event ждёт не
-        // дольше секунды). Счётчик оборотов задаёт периодические задачи.
-        let mut tick: u32 = 0;
-        /// Как часто объявляем о себе и убираем пропавших.
-        ///
-        /// Было 30 секунд. Presence - это публикация в общий эфир, её получают
-        /// ВСЕ телефоны сети, поэтому цена не «один пакет», а «один пакет
-        /// умножить на всех». Минута даёт ту же живость списка (потеря
-        /// фиксируется по трём пропускам подряд), но вдвое меньше трафика.
-        const PRESENCE_EVERY_TICKS: u32 = 60;
-        /// Как часто пересказываем сети список знакомых узлов.
-        ///
-        /// Было тоже 30 секунд, и это была самая дорогая рассылка: до 30 имён
-        /// в общий эфир, который читают все. Состав знакомых меняется редко,
-        /// поэтому раз в пять минут достаточно, а трафика в десять раз меньше.
-        const GOSSIP_EVERY_TICKS: u32 = 300;
-        let mut gossip_tick: u32 = 0;
+        // Message and command bursts must not accelerate public presence or
+        // gossip. Timers are monotonic, rather than counting loop iterations.
+        let mut cadence = super::mqtt_cadence::MqttCadence::new(std::time::Instant::now());
+        // A command selected while waiting is handled at the next bounded drain.
+        let mut pending_outbound: Option<MqttOutboundCommand> = None;
         // === GOSSIP PROTOCOL: peer exchange state ===
         // Значение: имя, когда видели, подтверждён ли узел ЛИЧНО.
         // «Лично» = его собственный presence, mDNS или входящее соединение.
@@ -3194,8 +3053,7 @@ impl P2PCore {
         const MAX_DELIVERED_MESH_RELAY_IDS: usize = 4_096;
         let mut seen_mesh_relay_ids: HashSet<String> = HashSet::new();
         let mut seen_mesh_relay_order: VecDeque<String> = VecDeque::new();
-        let mut delivered_mesh_relay_origins: HashMap<String, String> = HashMap::new();
-        let mut delivered_mesh_relay_order: VecDeque<String> = VecDeque::new();
+        let mut local_mesh_deliveries = super::mesh_delivery::LocalMeshDeliveries::new(MAX_DELIVERED_MESH_RELAY_IDS);
         // Messages retained while the broker was asleep are reoffered only
         // after fallback resumes, once per MQTT generation (bounded pages).
         let mut published_own_in_generation = HashSet::new();
@@ -3260,7 +3118,7 @@ impl P2PCore {
                     }
                 };
                 session_restart_backoff_secs = 1;
-                tick = 0;
+                cadence.reset_presence(std::time::Instant::now());
                 published_own_in_generation.clear();
                 own_reoffer_cursor = 0;
                 last_own_reoffer_at = std::time::Instant::now()
@@ -3278,19 +3136,31 @@ impl P2PCore {
             // persistent transport. `try_send` on the producer side never claims SENT; local
             // RelayQueue ownership remains the durability/retry source until a receipt arrives.
             for _ in 0..32 {
-                match outbound_rx.try_recv() {
+                let command = match pending_outbound.take() {
+                    Some(command) => Ok(command),
+                    None => outbound_rx.try_recv(),
+                };
+                // The policy can change while draining. Preserve a taken ACK
+                // across the paused generation rather than publishing early or
+                // losing an unrepeatable command.
+                if !policy.transport_fallback_allowed(crate::storage::models::now_ms()) {
+                    if let Ok(command) = command { pending_outbound = Some(command); }
+                    break;
+                }
+                match command {
                     Ok(MqttOutboundCommand::MeshRelay {
-                        recipient, envelope, message_id,
+                        recipient, envelope, message_id, legacy_redelivery,
                     }) => {
-                        if !policy.transport_fallback_allowed(crate::storage::models::now_ms()) {
-                            continue;
-                        }
+                        // The just-taken command was checked against the
+                        // fallback policy above. Dropping it on a second check
+                        // here would lose it when that policy changes.
                         // Commands can sit behind direct search or a paused
                         // session. Never publish their stale relative TTL.
-                        let refreshed = relay_queue.as_ref()
+                        let retained = relay_queue.as_ref()
                             .and_then(|q| q.own_message(&message_id))
-                            .filter(|m| m.origin_sender == node_id && m.recipient == recipient)
-                            .and_then(|m| Self::own_fallback_wire(&m, crate::storage::models::now_ms()));
+                            .filter(|m| m.origin_sender == node_id && m.recipient == recipient);
+                        let refreshed = retained.as_ref()
+                            .and_then(|m| Self::own_fallback_wire(m, crate::storage::models::now_ms()));
                         let wire = refreshed.or_else(|| {
                             message_id.starts_with("ppres-").then_some(envelope)
                         });
@@ -3311,10 +3181,23 @@ impl P2PCore {
                                 message_id, recipient, error
                             ),
                         }
+                        // N-1's mesh dedup can suppress a repeated relay event
+                        // indefinitely, including after an app ACK was lost.
+                        // The old direct-format packet reaches its Room dedup
+                        // and makes it send that ACK again. Only use the same
+                        // retained ciphertext, on an existing retry, live-only.
+                        if legacy_redelivery {
+                            if let Some(raw) = retained.as_ref().and_then(|m| Self::own_legacy_retry_wire(m, crate::storage::models::now_ms())) {
+                                if let Err(error) = transport.send_mesh_relay(&recipient, &raw).await {
+                                    tracing::warn!("MESH origin: compatible retry publish failed: {}", error);
+                                }
+                            }
+                        }
                     },
                     Ok(MqttOutboundCommand::DeliveryAck {
                         recipient,
                         message_id,
+                        room_committed,
                     }) => {
                         let payload = format!("ack|{}", message_id);
                         // send_mesh_relay, а НЕ send_message: второй публикует
@@ -3335,9 +3218,33 @@ impl P2PCore {
                                 error
                             ),
                         }
+                        // Only an explicit Android handling ACK can cause a
+                        // legacy mesh receipt. The sender and recipient must
+                        // match the mesh event observed by this session; an ACK
+                        // for a direct-only message needs no mesh cleanup.
+                        if room_committed && local_mesh_deliveries.knows_sender(&message_id, &recipient)
+                            && crate::network::relay_queue::valid_metadata_atom(&message_id, crate::network::relay_queue::MAX_MESSAGE_ID_BYTES)
+                        {
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                            let receipt = crate::network::wire::build_receipt(&message_id, &node_id, now.as_secs());
+                            match transport.send_mesh_receipt(&recipient, &message_id, &receipt).await {
+                                Ok(()) => {
+                                    tracing::info!("MESH receipt: {} sent automatically to unique origin topic after app ACK", message_id);
+                                    if let Err(error) = transport.send_mesh_cleanup_receipt(&message_id, &receipt).await {
+                                        tracing::warn!("MESH receipt: cleanup fanout failed: {}", error);
+                                    }
+                                }
+                                Err(error) => tracing::warn!("MESH receipt: origin publish failed: {}", error),
+                            }
+                        }
                     }
-                    Ok(MqttOutboundCommand::AnnounceNow) => {
-                        let current_addr = {
+                    Ok(command @ (MqttOutboundCommand::AnnounceNow | MqttOutboundCommand::AnnounceAfterIdle)) => {
+                        let resume = matches!(command, MqttOutboundCommand::AnnounceAfterIdle);
+                        if resume && !foreground_recovery::allow_resume_beacon(
+                            known_peers.len(), &presence_scope, crate::storage::models::now_ms(),
+                        ) { continue; }
+                        let current_addr = if resume { None } else {
                             let pa = public_addr.lock().unwrap();
                             pa.map(|a| a.to_string())
                         };
@@ -3393,7 +3300,14 @@ impl P2PCore {
                 }
             }
 
-            let polled_event = transport.poll_event().await;
+            let polled_event = match transport.poll_event_or(outbound_rx.recv()).await {
+                crate::network::mqtt_transport::MqttPoll::Event(event) => event,
+                crate::network::mqtt_transport::MqttPoll::Wake(Some(command)) => {
+                    pending_outbound = Some(command);
+                    None
+                }
+                crate::network::mqtt_transport::MqttPoll::Wake(None) => return,
+            };
 
             // Never discard an event already handed to core. If a terminal/stalled condition is
             // observed together with one final event, process it now and restart next iteration.
@@ -3449,7 +3363,7 @@ impl P2PCore {
 
                     session_generation = next_generation;
                     session_restart_backoff_secs = 1;
-                    tick = 0;
+                    cadence.reset_presence(std::time::Instant::now());
                     published_own_in_generation.clear();
                     own_reoffer_cursor = 0;
                     last_own_reoffer_at = std::time::Instant::now()
@@ -3486,6 +3400,11 @@ impl P2PCore {
                 } else if evt.topic.starts_with("p2pm2/presence/") {
                     if evt.payload.is_empty() { continue; }  // Skip empty (retained clear)
                     let parts: Vec<&str> = evt.payload.split('|').collect();
+                    // A shared announcement must at least name the owner of
+                    // its topic. Legacy MQTT itself remains unsigned.
+                    if evt.topic.strip_prefix("p2pm2/presence/") != parts.first().copied() {
+                        continue;
+                    }
 
                     // Своё же объявление, вернувшееся из брокера: ставим метку
                     // «я был в сети с этим адресом». По ней видно, что наша
@@ -3510,8 +3429,7 @@ impl P2PCore {
                             .get(4)
                             .and_then(|v| v.trim().parse().ok())
                             .unwrap_or(1);
-                        if peer_presence_version
-                            + crate::config::defaults::PRESENCE_VERSION_TOLERANCE
+                        if peer_presence_version.saturating_add(crate::config::defaults::PRESENCE_VERSION_TOLERANCE)
                             <= crate::config::defaults::PRESENCE_VERSION
                         {
                             tracing::info!(
@@ -3539,54 +3457,28 @@ impl P2PCore {
                                 continue;
                             }
                         };
-                        let age_ms = crate::storage::models::now_ms().saturating_sub(sent_at);
-                        if age_ms > crate::config::defaults::PRESENCE_MAX_AGE_MS {
-                            tracing::info!(
-                                "PRESENCE: ignored {} - announcement is {}h old",
-                                peer_id,
-                                age_ms / 3_600_000
-                            );
-                            continue;
-                        }
-
-                        tracing::info!("MQTT: peer online: {} ({})", display_name, peer_id);
-
-                        // Presence несёт публичный адрес пира (STUN), но раньше он
-                        // просто отбрасывался: peer_addrs заполнял только mDNS. Из-за
-                        // этого через интернет абоненты «не находили» друг друга -
-                        // прямая отправка не знала адреса и всё уходило в очередь.
-                        // Регистрируем адрес и самого пира так же, как это делает mDNS.
-                        seen_via_presence.insert(peer_id.to_string());
+                        let now_ms = crate::storage::models::now_ms();
                         let peer_public_addr = parts[2].trim();
-                        if !peer_public_addr.is_empty() {
+                        let addr = if peer_public_addr.is_empty() { None } else {
                             match peer_public_addr.parse::<SocketAddr>() {
-                                Ok(addr) => {
-                                    let mut addrs = peer_addrs.lock().unwrap();
-                                    addrs.insert(peer_id.to_string(), addr);
-                                    addrs.insert(format!("{}_public", peer_id), addr);
-                                    // Азбука адресов: свежий адрес из presence.
-                                    address_book.record(peer_id, addr);
-                                    address_book.record(&format!("{}_public", peer_id), addr);
-                                    tracing::info!(
-                                        "MQTT: public addr for {} = {}",
-                                        peer_id,
-                                        addr
-                                    );
+                                Ok(addr) => Some(addr),
+                                Err(e) => {
+                                    tracing::warn!("MQTT: bad public addr '{}' for {}: {}", peer_public_addr, peer_id, e);
+                                    None
                                 }
-                                Err(e) => tracing::warn!(
-                                    "MQTT: bad public addr '{}' for {}: {}",
-                                    peer_public_addr,
-                                    peer_id,
-                                    e
-                                ),
                             }
-                        }
-                        network.add_peer(PeerInfo::new(
-                            peer_id.to_string(),
-                            display_name.to_string(),
-                        ));
-                        network.touch_peer(peer_id);
-                        network.set_status(NetworkStatus::Connected);
+                        };
+                        let outcome = presence_observation::observe(
+                            &events, &network, &peer_addrs, &address_book,
+                            PresenceObservation { peer_id, display_name, addr, sent_at_ms: sent_at, is_local: false },
+                            now_ms, presence_scope.is_own(peer_id),
+                        );
+                        // A retained frame older than the online window can be
+                        // an address candidate for an own contact, but must not
+                        // trigger delivery, gossip or an online indicator.
+                        if outcome != PresenceOutcome::Live { continue; }
+                        seen_via_presence.insert(peer_id.to_string());
+                        tracing::info!("MQTT: fresh peer presence: {} ({})", display_name, peer_id);
                         
                         // PEER ONLINE: РґРѕСЃС‚Р°РІРёС‚СЊ РЅР°РєРѕРїР»РµРЅРЅС‹Рµ СЃРѕРѕР±С‰РµРЅРёСЏ
                         if let Some(ref q) = queue {
@@ -3685,13 +3577,18 @@ impl P2PCore {
                             }
                         }
                         
-                        events.emit(CoreEvent::PeerDiscovered {
-                            peer_id: peer_id.to_string(),
-                            display_name: display_name.to_string(),
-                            is_local: false,
-                        });
-                        // === GOSSIP: record in known_peers ===
-                        known_peers.insert(peer_id.to_string(), (display_name.to_string(), std::time::Instant::now(), true));
+                        // Retained frames keep their original age in gossip too.
+                        let age = now_ms.saturating_sub(sent_at).max(0) as u64;
+                        let observed = std::time::Instant::now()
+                            .checked_sub(std::time::Duration::from_millis(age))
+                            .unwrap_or_else(std::time::Instant::now);
+                        match known_peers.get_mut(peer_id) {
+                            Some(entry) if !entry.2 || observed > entry.1 => {
+                                *entry = (display_name.to_string(), observed, true);
+                            }
+                            Some(_) => {}
+                            None => { known_peers.insert(peer_id.to_string(), (display_name.to_string(), observed, true)); }
+                        }
                     }
                 } else if evt.topic.starts_with("p2pm2/gossip/broadcast") {
                     // === GOSSIP: receive peer list from other nodes ===
@@ -3733,11 +3630,8 @@ impl P2PCore {
                         if !known_peers.contains_key(peer_id) {
                             known_peers.insert(peer_id.to_string(), (peer_name.to_string(), std::time::Instant::now(), false));
                             tracing::info!("Gossip: learned about peer {} ({})", peer_name, peer_id);
-                            events.emit(CoreEvent::PeerDiscovered {
-                                peer_id: peer_id.to_string(),
-                                display_name: peer_name.to_string(),
-                                is_local: false,
-                            });
+                            // Third-party gossip is a discovery hint, not an
+                            // observation of this peer and never an online event.
                         }
                         // Слух НЕ продлевает жизнь узла. Раньше здесь
                         // обновлялось время последней встречи, и мёртвые узлы
@@ -3775,52 +3669,10 @@ impl P2PCore {
                                 message_id: mid.to_string(),
                             });
 
-                            // Владелец 2026-10-07 (отчёт v11.74.199: «своё ждёт
-                            // получателя=1000» при «сигналов=0» и постоянных
-                            // «delivery ACK received»). Подтверждение доставки
-                            // ОБЯЗАНО снимать запись с удержания — иначе каждая
-                            // доставленная строка навсегда остаётся в резерве
-                            // «своих» и однажды вытеснит недоставленное.
-                            // Раньше это делал только mesh receipt; прямой
-                            // MQTT-ACK лишь зажигал галочку.
-                            // Чужую ретрансляцию подтверждают не нам: её не
-                            // трогаем ни в RAM, ни в durable.
-                            let ack_is_foreign = relay_queue
-                                .as_ref()
-                                .and_then(|q| q.is_own(mid))
-                                == Some(false);
-                            if let Some(ref q) = relay_queue {
-                                if q.remove_delivered_own(mid) {
-                                    tracing::info!(
-                                        "MQTT: delivery ACK снял {} с удержания (своё доставлено)",
-                                        mid
-                                    );
-                                }
-                            }
-                            // Durable-копия — по образцу receipt: снимаем и
-                            // ставим tombstone, чтобы после перезапуска запись
-                            // не «ожила» и снова не заняла резерв.
-                            if !ack_is_foreign {
-                                if let Some(ref custody) = relay_custody {
-                                    let now_durable =
-                                        crate::network::relay_queue::utc_now_ms();
-                                    match custody
-                                        .store
-                                        .remove_encrypted_and_tombstone(mid, now_durable)
-                                    {
-                                        Ok(true) => tracing::info!(
-                                            "MQTT: delivery ACK removed durable custody for {}",
-                                            mid
-                                        ),
-                                        Ok(false) => {}
-                                        Err(e) => tracing::warn!(
-                                            "MQTT: durable cleanup failed for {}: {}",
-                                            mid,
-                                            e
-                                        ),
-                                    }
-                                }
-                            }
+                            // Android must commit the outgoing status first. It
+                            // calls confirm_message_delivered afterwards; doing
+                            // relay cleanup here could lose the retry on a crash.
+
                         }
                     } else if evt.payload.starts_with("relay|") {
                         // M3(a): relay-конверт. Gossip будет добавлен отдельным шагом
@@ -3838,136 +3690,30 @@ impl P2PCore {
                                 if msg_id.is_empty() || recipient.is_empty() || origin.is_empty() {
                                     tracing::warn!("MESH relay: missing required metadata, dropped");
                                 } else if recipient == node_id {
-                                    // M3(c.2-r3): одно msg_id показываем локальному recipient
-                                    // не больше раза. Повтор от того же origin получает новый
-                                    // receipt (для cleanup relay), но не второе UI-событие.
-                                    let previous_origin = delivered_mesh_relay_origins
-                                        .get(&msg_id)
-                                        .cloned();
-                                    let should_send_receipt = match previous_origin {
-                                        Some(ref known_origin) if known_origin == &origin => {
-                                            tracing::info!(
-                                                "MESH relay: duplicate local delivery {} suppressed",
-                                                msg_id
-                                            );
-                                            true
-                                        }
-                                        Some(known_origin) => {
-                                            tracing::warn!(
-                                                "MESH relay: conflicting origin for {}, dropped ({} != {})",
-                                                msg_id,
-                                                origin,
-                                                known_origin
-                                            );
-                                            false
-                                        }
-                                        None => match String::from_utf8(e2e_payload) {
-                                            Ok(text) => {
-                                                // Раунд 119: durable tombstone БОЛЬШЕ НЕ
-                                                // подавляет UI-доставку. Раньше: доставка ->
-                                                // tombstone -> процесс убит (например,
-                                                // ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ) до того, как Kotlin
-                                                // сохранил сообщение -> повторная доставка
-                                                // подавлялась tombstone-ом, receipt уходил,
-                                                // отправитель ставил «доставлено» ->
-                                                // сообщение пропадало навсегда. Теперь
-                                                // UI-событие шлём ВСЕГДА: дубль уже
-                                                // сохранённого отфильтрует Room по msg_id
-                                                // (messageExists + повторный ACK), а
-                                                // незасохранённое сообщение наконец дойдёт.
-                                                // Tombstone остаётся книгой учёта для
-                                                // cleanup чужих custody-копий.
-                                                let now = std::time::SystemTime::now()
-                                                    .duration_since(std::time::UNIX_EPOCH)
-                                                    .unwrap_or_default();
+                                    // A queued EventBus event is NOT a committed Room row. Do not
+                                    // send a receipt or tombstone here. The Android handler sends
+                                    // its app ACK only after handling the event; that ACK now also
+                                    // drives legacy mesh receipt/cleanup. A failed handler or lost
+                                    // process can therefore receive the same ID again.
+                                    match String::from_utf8(e2e_payload) {
+                                        Ok(text) => match local_mesh_deliveries.admit(&msg_id, &origin, std::time::Instant::now()) {
+                                            super::mesh_delivery::Admission::Dispatch => {
                                                 events.emit(CoreEvent::MessageReceived {
-                                                    message_id: msg_id.clone(),
+                                                    message_id: msg_id,
                                                     chat_id: chat_scope,
-                                                    sender_id: origin.clone(),
+                                                    sender_id: origin,
                                                     text,
-                                                    timestamp: now.as_millis() as i64,
+                                                    timestamp: crate::storage::models::now_ms(),
                                                 });
-                                                remember_bounded_delivery(
-                                                    &mut delivered_mesh_relay_origins,
-                                                    &mut delivered_mesh_relay_order,
-                                                    &msg_id,
-                                                    &origin,
-                                                    MAX_DELIVERED_MESH_RELAY_IDS,
-                                                );
-                                                // M8-B/D: tombstone остаётся книгой учёта
-                                                // доставки (cleanup чужих custody-копий и
-                                                // запрет повторного хранения), но UI-доставку
-                                                // он больше не блокирует.
-                                                if let Some(ref custody) = relay_custody {
-                                                    if !crate::network::relay_queue::message_kind(&msg_id, "", b"").is_transient() {
-                                                    let now_durable =
-                                                        crate::network::relay_queue::utc_now_ms();
-                                                    if let Err(e) =
-                                                        custody.store.record_tombstone(&msg_id, now_durable)
-                                                    {
-                                                        tracing::warn!(
-                                                            "MESH relay: durable tombstone failed for {}: {}",
-                                                            msg_id,
-                                                            e
-                                                        );
-                                                    }
-                                                }
-                                                }
-                                                tracing::info!(
-                                                    "MESH relay: {} delivered to local recipient",
-                                                    msg_id
-                                                );
-                                                true
                                             }
-                                            Err(_) => {
-                                                tracing::warn!(
-                                                    "MESH relay: payload for {} is not valid UTF-8, dropped",
-                                                    msg_id
-                                                );
-                                                false
+                                            super::mesh_delivery::Admission::Suppress => {
+                                                tracing::trace!("MESH relay: local duplicate burst suppressed");
+                                            }
+                                            super::mesh_delivery::Admission::ConflictingOrigin => {
+                                                tracing::warn!("MESH relay: conflicting origin for local message, dropped");
                                             }
                                         },
-                                    };
-
-                                    if should_send_receipt {
-                                        let now = std::time::SystemTime::now()
-                                            .duration_since(std::time::UNIX_EPOCH)
-                                            .unwrap_or_default();
-                                        let receipt = crate::network::wire::build_receipt(
-                                            &msg_id,
-                                            &node_id,
-                                            now.as_secs(),
-                                        );
-                                        match transport
-                                            .send_mesh_receipt(&origin, &msg_id, &receipt)
-                                            .await
-                                        {
-                                            Ok(_) => {
-                                                tracing::info!(
-                                                    "MESH receipt: {} sent automatically to unique origin topic",
-                                                    msg_id
-                                                );
-                                                match transport
-                                                    .send_mesh_cleanup_receipt(&msg_id, &receipt)
-                                                    .await
-                                                {
-                                                    Ok(_) => tracing::info!(
-                                                        "MESH receipt: {} cleanup fanout queued for relay nodes",
-                                                        msg_id
-                                                    ),
-                                                    Err(e) => tracing::warn!(
-                                                        "MESH receipt: cleanup fanout failed for {}: {}",
-                                                        msg_id,
-                                                        e
-                                                    ),
-                                                }
-                                            }
-                                            Err(e) => tracing::warn!(
-                                                "MESH receipt: failed to send {}: {}",
-                                                msg_id,
-                                                e
-                                            ),
-                                        }
+                                        Err(_) => tracing::warn!("MESH relay: invalid UTF-8 payload, dropped"),
                                     }
                                 } else if let Some(ref q) = relay_queue {
                                     // КРИТИЧНО: contains ОБЯЗАТЕЛЕН перед каждым enqueue.
@@ -4109,96 +3855,18 @@ impl P2PCore {
                             _ => tracing::warn!("MESH relay: malformed envelope dropped"),
                         }
                     } else if evt.payload.starts_with("receipt|") {
-                        // M3(b): receipt удаляет доставленное сообщение только если msg_id
-                        // и recipient совпадают с записью в RelayQueue. Подпись добавит M7.
+                        // N-1 recipients may emit this before the event reaches
+                        // Room. Never mark delivered or remove any relay copy on
+                        // this legacy signal. Clear only our exact retained
+                        // topic to avoid permanent broker litter; retries wait
+                        // for the independent app ACK.
                         match crate::network::wire::parse(&evt.payload) {
-                            Some(MeshEnvelope::Receipt {
-                                msg_id,
-                                recipient,
-                                ts,
-                            }) => {
-                                let is_own_retained_receipt = !msg_id.is_empty()
-                                    && !recipient.is_empty()
-                                    && transport.is_own_mesh_receipt_topic(&evt.topic, &msg_id);
-
-                                if msg_id.is_empty() || recipient.is_empty() {
-                                    tracing::warn!("MESH receipt: missing metadata, dropped");
-                                } else if let Some(ref q) = relay_queue {
-                                    let stored_message = q
-                                        .for_recipient(&recipient)
-                                        .into_iter()
-                                        .find(|message| message.msg_id == msg_id);
-
-                                    if let Some(message) = stored_message {
-                                        let is_origin = message.origin_sender == node_id;
-                                        if q.remove(&msg_id) {
-                                            tracing::info!(
-                                                "MESH receipt: removed {} for {} at {}",
-                                                msg_id,
-                                                recipient,
-                                                ts
-                                            );
-
-                                            if is_origin {
-                                                events.emit(CoreEvent::MessageDelivered {
-                                                    message_id: msg_id.clone(),
-                                                });
-                                                tracing::info!(
-                                                    "MESH receipt: {} delivered at origin",
-                                                    msg_id
-                                                );
-                                            }
-                                        }
-                                    } else {
-                                        // Повторный/чужой receipt безопасно игнорируется.
-                                        tracing::trace!(
-                                            "MESH receipt: unknown {} for {}, ignored",
-                                            msg_id,
-                                            recipient
-                                        );
-                                    }
-                                } else {
-                                    tracing::warn!(
-                                        "MESH receipt: queue unavailable, dropped {}",
-                                        msg_id
-                                    );
-                                }
-
-                                // M8-B/C: receipt авторитетен независимо от RAM-копии: durable
-                                // encrypted custody удаляется и tombstone-ится даже если запись
-                                // после restart осталась только в SQLite (RAM о ней не знает).
-                                if !msg_id.is_empty() && !recipient.is_empty() {
-                                    if let Some(ref custody) = relay_custody {
-                                        let now_durable =
-                                            crate::network::relay_queue::utc_now_ms();
-                                        match custody.store.remove_encrypted_and_tombstone(&msg_id, now_durable) {
-                                            Ok(true) => tracing::info!(
-                                                "MESH receipt: durable custody removed for {}",
-                                                msg_id
-                                            ),
-                                            Ok(false) => {}
-                                            Err(e) => tracing::warn!(
-                                                "MESH receipt: durable cleanup failed for {}: {}",
-                                                msg_id,
-                                                e
-                                            ),
-                                        }
-                                    }
-                                }
-
-                                // Удаляет retained receipt только его локальный origin и
-                                // только с topic, чей SHA-256 key совпал с msg_id.
-                                if is_own_retained_receipt {
-                                    match transport.clear_own_mesh_receipt(&msg_id).await {
-                                        Ok(_) => tracing::info!(
-                                            "MESH receipt: cleared retained topic for {}",
-                                            msg_id
-                                        ),
-                                        Err(e) => tracing::warn!(
-                                            "MESH receipt: failed to clear retained topic for {}: {}",
-                                            msg_id,
-                                            e
-                                        ),
+                            Some(MeshEnvelope::Receipt { msg_id, recipient, .. }) => {
+                                if !msg_id.is_empty() && !recipient.is_empty()
+                                    && transport.is_own_mesh_receipt_topic(&evt.topic, &msg_id)
+                                {
+                                    if let Err(error) = transport.clear_own_mesh_receipt(&msg_id).await {
+                                        tracing::warn!("MESH receipt: retained topic cleanup failed: {}", error);
                                     }
                                 }
                             }
@@ -4403,43 +4071,21 @@ impl P2PCore {
                         if let Some(presence) =
                             crate::network::presence_scope::parse_direct_presence(&evt.payload)
                         {
-                            if presence.node_id != node_id
-                                && presence.version
-                                    + crate::config::defaults::PRESENCE_VERSION_TOLERANCE
+                            if evt.topic.trim_start_matches("p2pm2/msg/") == node_id
+                                && presence.node_id != node_id
+                                && presence.version.saturating_add(crate::config::defaults::PRESENCE_VERSION_TOLERANCE)
                                     > crate::config::defaults::PRESENCE_VERSION
                             {
-                                let age_ms = crate::storage::models::now_ms()
-                                    .saturating_sub(presence.sent_at_ms);
-                                if age_ms <= crate::config::defaults::PRESENCE_MAX_AGE_MS {
-                                    tracing::info!(
-                                        "PRESENCE K4-MQTT: personal presence from {} addr={}",
-                                        presence.node_id,
-                                        presence
-                                            .addr
-                                            .map(|a| a.to_string())
-                                            .unwrap_or_else(|| "unknown".into())
-                                    );
-                                    network.add_peer(PeerInfo::new(
-                                        presence.node_id.clone(),
-                                        presence.display_name.clone(),
-                                    ));
-                                    network.touch_peer(&presence.node_id);
-                                    if let Some(addr) = presence.addr {
-                                        let public_key =
-                                            format!("{}_public", presence.node_id);
-                                        {
-                                            let mut addrs = peer_addrs.lock().unwrap();
-                                            addrs.insert(presence.node_id.clone(), addr);
-                                            addrs.insert(public_key.clone(), addr);
-                                        }
-                                        address_book.record(&presence.node_id, addr);
-                                        address_book.record(&public_key, addr);
-                                        tracing::info!(
-                                            "PRESENCE K4-MQTT: fresh addr from {} = {}",
-                                            presence.node_id,
-                                            addr
-                                        );
-                                    }
+                                let outcome = presence_observation::observe(
+                                    &events, &network, &peer_addrs, &address_book,
+                                    PresenceObservation {
+                                        peer_id: &presence.node_id, display_name: &presence.display_name,
+                                        addr: presence.addr, sent_at_ms: presence.sent_at_ms, is_local: false,
+                                    },
+                                    crate::storage::models::now_ms(), presence_scope.is_own(&presence.node_id),
+                                );
+                                if outcome == PresenceOutcome::Live {
+                                    tracing::info!("PRESENCE K4-MQTT: fresh personal presence from {}", presence.node_id);
                                 }
                             }
                         }
@@ -4509,10 +4155,7 @@ impl P2PCore {
                     }
                 }
             }
-            tick += 1;
-            gossip_tick += 1;
-            if tick >= PRESENCE_EVERY_TICKS {
-                tick = 0;
+            if cadence.take_presence(std::time::Instant::now()) {
 
                 // Релейная очередь: убираем просроченное не только на чужой
                 // сводке (gossip), но и по минутному таймеру. Иначе истёкшие
@@ -4604,8 +4247,11 @@ impl P2PCore {
                         let base = key.strip_suffix("_public").unwrap_or(key.as_str());
                         // Адреса из mDNS не трогаем: их владельцы могут не
                         // присылать presence, оставаясь достижимыми по Wi-Fi.
-                        alive.contains(base) || !seen_via_presence.contains(base)
+                        alive.contains(base) || presence_scope.is_own(base) || !seen_via_presence.contains(base)
                     });
+                    // Keep contact routes as candidates for reconnection, but
+                    // discard tracking for expired strangers to bound growth.
+                    seen_via_presence.retain(|id| alive.contains(id.as_str()) || presence_scope.is_own(id));
                 }
                 // Адрес перечитываем каждый раз. Раньше он брался один раз при
                 // старте - через 3 секунды после запуска, когда STUN обычно ещё
@@ -4679,10 +4325,9 @@ impl P2PCore {
                 }
                 // === GOSSIP: broadcast known peers to the network ===
                 // Реже, чем presence: список знакомых меняется медленно.
-                if gossip_tick < GOSSIP_EVERY_TICKS {
+                if !cadence.take_gossip(std::time::Instant::now()) {
                     continue;
                 }
-                gossip_tick = 0;
                 if !known_peers.is_empty() {
                     let ts = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -4889,27 +4534,37 @@ impl P2PCore {
         // группы или контакт): ему адресованный presence, а не общий эфир.
         self.presence_scope
             .add_own(to_node_id, self.node_id_str.as_deref());
+        // Queue app ACKs even during the bounded direct-search window. The
+        // persistent session drains them only when fallback is allowed, so
+        // this does not open an external connection early or discard the ACK.
+        let ack = payload.strip_prefix("ack-room|").map(|id| (id, true))
+            .or_else(|| payload.strip_prefix("ack|").map(|id| (id, false)));
+        if let Some((message_id, room_committed)) = ack {
+            let message_id = message_id.trim();
+            if !crate::network::relay_queue::valid_metadata_atom(message_id, crate::network::relay_queue::MAX_MESSAGE_ID_BYTES) {
+                return false;
+            }
+            if let Some(sender) = self.mqtt_outbound_tx.as_ref() {
+                if sender.try_send(MqttOutboundCommand::DeliveryAck {
+                    recipient: to_node_id.to_string(),
+                    message_id: message_id.to_string(),
+                    room_committed,
+                }).is_ok() {
+                    return true;
+                }
+                tracing::warn!("ACK: persistent queue unavailable, considering one-shot publish");
+            }
+        }
         if !self.external_transport_allowed() {
             self.peer_exchange.wake();
             tracing::debug!("MQTT one-shot: deferred while the bounded direct-search window is active");
             return false;
         }
-        if let Some(message_id) = payload.strip_prefix("ack|") {
-            if let Some(sender) = self.mqtt_outbound_tx.as_ref() {
-                let queued = sender
-                    .try_send(MqttOutboundCommand::DeliveryAck {
-                        recipient: to_node_id.to_string(),
-                        message_id: message_id.trim().to_string(),
-                    })
-                    .is_ok();
-                if queued {
-                    return true;
-                }
-                // Очередь переполнена или закрыта - падаем на разовый путь ниже.
-                tracing::warn!("ACK: persistent queue unavailable, using one-shot publish");
-            }
+        // The internal marker never goes on the wire, including fallback.
+        match ack {
+            Some((message_id, _)) => self.send_message_mqtt_oneshot(to_node_id, &format!("ack|{}", message_id.trim())),
+            None => self.send_message_mqtt_oneshot(to_node_id, payload),
         }
-        self.send_message_mqtt_oneshot(to_node_id, payload)
     }
 
     fn send_message_mqtt_oneshot(&self, to_node_id: &str, payload: &str) -> bool {
@@ -5034,14 +4689,13 @@ impl P2PCore {
             Some(a) => a,
             None => return false,
         };
-        self.peer_addrs.lock().unwrap().insert(node_id.clone(), addr);
-        self.address_book.record(&node_id, addr);
+        presence_observation::remember_route(
+            &self.peer_addrs, &self.address_book, &node_id, addr,
+            crate::storage::models::now_ms(),
+        );
         tracing::info!("Invite: added peer {} at {}", node_id, addr);
-        self.events.emit(CoreEvent::PeerDiscovered {
-            peer_id: node_id.clone(),
-            display_name: "Anonymous".to_string(),
-            is_local: false,
-        });
+        // An invite contains only an address hint: it does not prove that
+        // the peer is reachable or online. A real observation will emit later.
         true
     }
     fn replay_file_session_ingress(&self) {
@@ -5132,7 +4786,7 @@ impl P2PCore {
     pub fn on_network_available(&self) {
         self.swarm_first.reset(crate::storage::models::now_ms());
         self.peer_exchange.reset_session();
-        *self.public_addr.lock().unwrap() = None;
+        self.invalidate_own_addresses();
         // Часть 2 задачи IPv6: смена сети (Wi-Fi → LTE, VPN, авиарежим).
         // Старые прямые соединения открыты с прежнего адреса источника и по
         // прежнему маршруту — закрываем пул, иначе каждая отправка упирается
@@ -5165,7 +4819,7 @@ impl P2PCore {
     pub fn on_network_lost(&self) {
         self.swarm_first.reset(crate::storage::models::now_ms());
         self.peer_exchange.reset_session();
-        *self.public_addr.lock().unwrap() = None;
+        self.invalidate_own_addresses();
         self.network.set_status(NetworkStatus::Offline);
         self.events.emit(CoreEvent::NetworkStatusChanged {
             status: "offline".into(),
@@ -5178,6 +4832,7 @@ impl P2PCore {
             peer_id,
             display_name,
             is_local: false,
+            observed_at_ms: crate::storage::models::now_ms(),
         });
         self.events.emit(CoreEvent::NetworkStatusChanged {
             status: "connected".into(),
@@ -5332,32 +4987,7 @@ impl P2PCore {
     /// Кнопка «Собрать данные об абонентах» раньше была заглушкой: она писала
     /// строку в лог и возвращала true, ничего не отправляя.
     pub fn trigger_gossip_discovery(&self) -> bool {
-        if !self.state.is_running() {
-            tracing::warn!("Gossip: manual trigger ignored, engine is not running");
-            return false;
-        }
-        self.peer_exchange.wake();
-        let direct_available = self.direct.lock().unwrap().is_some();
-        if !self.swarm_first.transport_fallback_allowed(crate::storage::models::now_ms()) {
-            tracing::info!("Discovery: direct swarm first; MQTT announce deferred");
-            return direct_available;
-        }
-        match self.mqtt_outbound_tx.as_ref() {
-            Some(sender) => match sender.try_send(MqttOutboundCommand::AnnounceNow) {
-                Ok(()) => {
-                    tracing::info!("Gossip: manual announce command accepted");
-                    true
-                }
-                Err(error) => {
-                    tracing::warn!("Gossip: manual announce command rejected: {}", error);
-                    direct_available
-                }
-            },
-            None => {
-                tracing::info!("Discovery: direct exchange requested; MQTT channel unavailable");
-                direct_available
-            }
-        }
+        self.schedule_discovery(MqttOutboundCommand::AnnounceNow)
     }
 
     /// Параллельный QUIC-поток для файлов: отправка НАПРЯМУЮ получателю по QUIC,
@@ -5960,6 +5590,7 @@ impl P2PCore {
                         // clone: конверт нужен и повторной досылке ниже.
                         envelope: prepared.envelope.clone(),
                         message_id: message_id.clone(),
+                        legacy_redelivery: false,
                     }) {
                         Ok(()) => tracing::info!(
                             "MESH origin: offline relay command accepted {} for {}",
@@ -5996,6 +5627,7 @@ impl P2PCore {
                                 recipient: recipient_id.clone(),
                                 envelope: prepared.envelope.clone(),
                                 message_id: message_id.clone(),
+                                legacy_redelivery: true,
                             })
                             .is_ok();
                         tracing::info!(
@@ -6030,6 +5662,7 @@ impl P2PCore {
                 recipient: recipient_id.clone(),
                 envelope: ppres,
                 message_id: format!("ppres-{}", message_id),
+                legacy_redelivery: false,
             })
             .is_ok();
             tracing::info!(
@@ -6053,6 +5686,31 @@ impl P2PCore {
         });
         direct_send_ok
     }
+    /// Bounded snapshot for reconciling a Room ACK committed before a crash.
+    /// Only IDs of this origin's current in-memory relay entries are returned.
+    pub fn own_relay_message_ids(&self) -> Vec<String> {
+        self.relay_queue.as_ref().map_or_else(Vec::new, |q| q.own_message_ids())
+    }
+
+    /// Android calls this only after its outgoing delivery status is committed.
+    /// Legacy mesh receipts alone never enter this cleanup path.
+    pub fn confirm_message_delivered(&self, message_id: &str) -> bool {
+        let Some(node_id) = self.node_id() else { return false; };
+        let removed = super::mesh_cleanup::confirmed_local(
+            self.relay_queue.as_deref(), self.relay_custody.as_deref(), &node_id, message_id,
+        );
+        // K5 holders may have accepted a transport stream without the app
+        // storing it. Drop hints are sent only after the outgoing Room commit.
+        let peers = self.custody_offers.take_offered_peers(message_id);
+        self.custody_offers.remove(message_id);
+        for peer in &peers {
+            if !self.custody_hold.queue_outbound(peer, drop_payload(message_id)) {
+                tracing::warn!("CUSTODY K5: drop hint queue full; held copy expires normally");
+            }
+        }
+        removed || !peers.is_empty()
+    }
+
     /// Прямая отправка через общий QUIC-endpoint (K1).
     ///
     /// До v11.70.24 здесь на КАЖДОЕ сообщение создавался новый endpoint
@@ -6481,7 +6139,7 @@ impl P2PCore {
     /// нужно ждать доставки.
     #[allow(clippy::too_many_arguments)]
     pub fn offer_file_chunk_for_custody(
-        &mut self,
+        &self,
         recipient_id: String,
         transfer_id_hex: String,
         chunk_index: u64,
@@ -6555,38 +6213,7 @@ impl P2PCore {
     /// Встраивать можно до `start()`: адрес читается, когда поднимается
     /// MQTT-сессия. `true` - адрес принят (`host:port`, можно с `mqtt://`).
     pub fn set_own_broker(&mut self, text: String) -> bool {
-        let parsed =
-            crate::network::multi_broker::parse_broker_endpoint(&text);
-        match parsed {
-            Some((host, port)) => {
-                self.config.own_broker = Some(format!("{}:{}", host, port));
-                if let Ok(mut slot) = self.own_broker_shared.lock() {
-                    *slot = Some((host.clone(), port));
-                }
-                tracing::info!("MQTT OWN BROKER: задан {}:{}", host, port);
-                // Живая сессия создана со старым адресом: пусть пересоздастся
-                // сама, без перезапуска приложения (см. `restart_reason`).
-                crate::network::mqtt_transport::note_broker_settings_changed();
-                true
-            }
-            None => {
-                // Пустая строка - это «выключить свой брокер», а не ошибка.
-                if text.trim().is_empty() {
-                    self.config.own_broker = None;
-                    if let Ok(mut slot) = self.own_broker_shared.lock() {
-                        *slot = None;
-                    }
-                    tracing::info!("MQTT OWN BROKER: выключен, только публичные");
-                    crate::network::mqtt_transport::note_broker_settings_changed();
-                    return true;
-                }
-                tracing::warn!(
-                    "MQTT OWN BROKER: адрес {:?} не разобран, оставляю как было",
-                    text
-                );
-                false
-            }
-        }
+        self.set_own_broker_with(text, crate::network::mqtt_transport::note_broker_settings_changed)
     }
 
     /// Проверить, отвечает ли брокер по этому адресу СЕЙЧАС.
@@ -6646,8 +6273,9 @@ impl P2PCore {
     }
 
     pub fn set_presence_audience(&self, ids: Vec<String>) -> u32 {
-        let count = self.presence_scope.set_own(ids, self.node_id_str.as_deref());
-        tracing::info!("PRESENCE K4: audience set, {} own peer(s)", count);
+        let (count, changed) = self.presence_scope.set_own_with_change(ids, self.node_id_str.as_deref());
+        if changed { self.peer_exchange.wake(); }
+        tracing::info!("PRESENCE K4: audience set, {} own peer(s), changed={}", count, changed);
         count as u32
     }
 }
@@ -6699,6 +6327,35 @@ mod tests {
         e
     }
 
+    #[tokio::test]
+    async fn tcp_delivery_emits_a_real_millisecond_timestamp() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::time::{timeout, Duration};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let events = Arc::new(EventBus::with_defaults());
+        let server = tokio::spawn(P2PCore::run_tcp_connections(Arc::clone(&events), listener));
+        let before = crate::storage::models::now_ms();
+        let mut client = timeout(Duration::from_secs(5), tokio::net::TcpStream::connect(address))
+            .await.unwrap().unwrap();
+        client.write_all(b"pk_friend|tcp-test|chat|hello").await.unwrap();
+        let mut ack = [0u8; 3];
+        timeout(Duration::from_secs(5), client.read_exact(&mut ack)).await.unwrap().unwrap();
+        let after = crate::storage::models::now_ms();
+        assert_eq!(&ack, b"ACK");
+        match events.poll().expect("listener must emit the message before ACK") {
+            CoreEvent::MessageReceived { message_id, chat_id, sender_id, text, timestamp } => {
+                assert_eq!((message_id.as_str(), chat_id.as_str(), sender_id.as_str(), text.as_str()),
+                    ("tcp-test", "chat", "pk_friend", "hello"));
+                assert!(timestamp >= before && timestamp <= after,
+                    "TCP timestamp must be local epoch milliseconds: {timestamp}, expected {before}..={after}");
+            }
+            other => panic!("expected TCP message, got {other:?}"),
+        }
+        server.abort();
+    }
+
     #[test]
     fn paused_mqtt_reoffers_only_own_unexpired_ciphertext_with_remaining_ttl() {
         let now = crate::network::relay_queue::utc_now_ms();
@@ -6724,6 +6381,20 @@ mod tests {
     }
 
     #[test]
+    fn legacy_redelivery_uses_the_same_ciphertext_and_never_extends_expiry() {
+        let now = crate::network::relay_queue::utc_now_ms();
+        let mut msg = RelayMessage::new_at_ms(now, "id".into(), "pk_b".into(), "pk_a".into(), "chat".into(), b"APUSEAL1|cipher".to_vec());
+        let wire = P2PCore::own_legacy_retry_wire(&msg, now).unwrap();
+        assert_eq!(wire, "pk_a|id|chat|APUSEAL1|cipher");
+        assert!(P2PCore::own_legacy_retry_wire(&msg, msg.expires_at_ms).is_none());
+        msg.chat_scope = "bad|scope".into();
+        assert!(P2PCore::own_legacy_retry_wire(&msg, now).is_none());
+        msg.chat_scope = "chat".into();
+        msg.e2e_payload = vec![0xff];
+        assert!(P2PCore::own_legacy_retry_wire(&msg, now).is_none());
+    }
+
+    #[test]
     fn bounded_id_cache_evicts_oldest() {
         let mut entries = HashSet::new();
         let mut order = VecDeque::new();
@@ -6738,22 +6409,36 @@ mod tests {
     }
 
     #[test]
-    fn bounded_delivery_cache_keeps_first_origin_and_evicts_oldest() {
-        let mut entries = HashMap::new();
-        let mut order = VecDeque::new();
-        remember_bounded_delivery(&mut entries, &mut order, "m1", "pk_a", 2);
-        remember_bounded_delivery(&mut entries, &mut order, "m1", "pk_attacker", 2);
+    fn direct_personal_presence_emits_each_fresh_observation_but_not_stale_or_future() {
+        let events = EventBus::with_defaults();
+        let network = NetworkManagerFfi::new();
+        let peer_addrs = Arc::new(Mutex::new(HashMap::new()));
+        let lookup = Arc::new(AddressLookup::new());
+        let hold = Arc::new(CustodyHold::new());
+        let offers = Arc::new(CustodyOffers::new());
+        let book = Arc::new(AddressBook::open(None));
+        let peer = "pk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let now = crate::storage::models::now_ms();
+        let receive = |at| P2PCore::handle_direct_frame(
+            &events, &network, &peer_addrs, &lookup, &hold, &offers, false, None, &book,
+            crate::network::presence_scope::direct_presence_payload(peer, "Alice", Some("8.8.8.8:7777"), true, at).into_bytes(),
+        );
+        assert_eq!(receive(now), Some(peer.to_string()));
+        assert!(matches!(events.poll(), Some(CoreEvent::PeerDiscovered { observed_at_ms, .. }) if observed_at_ms == now));
+        assert_eq!(receive(now), Some(peer.to_string()));
+        assert!(matches!(events.poll(), Some(CoreEvent::PeerDiscovered { .. })));
+        assert_eq!(receive(now - crate::network::presence_scope::LIVE_PRESENCE_TTL_MS - 1), None);
+        assert_eq!(receive(now + crate::network::presence_scope::MAX_FUTURE_SKEW_MS + 10_000), None);
+        assert!(events.is_empty());
+    }
 
-        assert_eq!(entries.get("m1").map(String::as_str), Some("pk_a"));
-        assert_eq!(order.len(), 1);
-
-        remember_bounded_delivery(&mut entries, &mut order, "m2", "pk_b", 2);
-        remember_bounded_delivery(&mut entries, &mut order, "m3", "pk_c", 2);
-
-        assert!(!entries.contains_key("m1"));
-        assert_eq!(entries.get("m2").map(String::as_str), Some("pk_b"));
-        assert_eq!(entries.get("m3").map(String::as_str), Some("pk_c"));
-        assert_eq!(order.len(), 2);
+    #[test]
+    fn invite_is_only_an_address_hint_not_online_presence() {
+        let mut core = P2PCore::new(EngineConfig::default());
+        let peer = "pk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        assert!(core.connect_via_invite(format!("p2pm://connect?node={peer}&addr=8.8.8.8:7777")));
+        assert!(core.events.is_empty());
+        assert!(core.peer_addrs.lock().unwrap().contains_key(peer));
     }
 
     // --- K3: APUF-кадры и hex-помощники ---

@@ -3,6 +3,7 @@
 
 use std::collections::VecDeque;
 use std::sync::{Condvar, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 // ============================================================
@@ -26,6 +27,8 @@ pub enum CoreEvent {
         peer_id: String,
         display_name: String,
         is_local: bool,
+        /// Original observation time, so queued/retained events cannot renew themselves.
+        observed_at_ms: i64,
     },
 
     /// Peer отключился
@@ -152,10 +155,32 @@ impl std::fmt::Display for CoreEvent {
 // Event Bus
 // ============================================================
 
+/// Binary file ranges have an independent consumer. All other events share one
+/// consumer so contact/presence and message handlers cannot race each other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EventLane {
+    Main,
+    File,
+}
+
+impl EventLane {
+    fn matches(self, event: &CoreEvent) -> bool {
+        let is_file = matches!(event, CoreEvent::FileChunkReceived { .. });
+        (self == Self::File) == is_file
+    }
+}
+
+/// Encrypted chat and encrypted service packets are indistinguishable here.
+/// Both are prioritised, without inspecting or altering the sealed payload.
+fn is_interactive(event: &CoreEvent) -> bool {
+    matches!(event, CoreEvent::MessageReceived { .. } | CoreEvent::MessageDelivered { .. })
+}
+
 /// Шина событий — очередь событий для Kotlin
 pub struct EventBus {
     queue: Mutex<VecDeque<CoreEvent>>,
     ready: Condvar,
+    wake_generation: AtomicU64,
     max_size: usize,
 }
 
@@ -164,6 +189,7 @@ impl EventBus {
         Self {
             queue: Mutex::new(VecDeque::new()),
             ready: Condvar::new(),
+            wake_generation: AtomicU64::new(0),
             max_size,
         }
     }
@@ -183,7 +209,7 @@ impl EventBus {
     pub fn emit(&self, event: CoreEvent) {
         let mut queue = self.queue.lock().unwrap();
         if queue.len() >= self.max_size {
-            let victim = (1..=2).find_map(|rank| {
+            let victim = (1..=2).rev().find_map(|rank| {
                 queue.iter().rposition(|e| e.eviction_rank() == rank)
             });
             match victim {
@@ -198,8 +224,9 @@ impl EventBus {
             }
         }
         queue.push_back(event);
-        // Будим ожидающий Kotlin-поток сразу, а не по таймеру опроса.
-        self.ready.notify_one();
+        // Both lane waiters share this condvar. Waking only one can wake the
+        // wrong lane and leave a message sleeping until the timeout.
+        self.ready.notify_all();
     }
 
     /// Получить одно событие (для polling из Kotlin)
@@ -213,6 +240,39 @@ impl EventBus {
         queue.drain(..).collect()
     }
 
+    /// Remove one event, leaving the others in the native queue. On the main
+    /// lane, prefer message events while preserving FIFO within each class;
+    /// callers periodically request the opposite class to avoid starvation.
+    pub fn poll_lane(&self, lane: EventLane, prefer_interactive: bool) -> Option<CoreEvent> {
+        let mut queue = self.queue.lock().unwrap();
+        let index = if lane == EventLane::Main {
+            queue.iter().position(|event| lane.matches(event) && is_interactive(event) == prefer_interactive)
+                .or_else(|| queue.iter().position(|event| lane.matches(event)))?
+        } else {
+            queue.iter().position(|event| lane.matches(event))?
+        };
+        queue.remove(index)
+    }
+
+    /// Wait for the requested lane, not merely for any event. The predicate is
+    /// checked while holding the queue mutex so an emit cannot be missed.
+    pub fn wait_for_lane(&self, lane: EventLane, timeout: Duration) -> bool {
+        self.wait_for_lane_with(lane, timeout, || {})
+    }
+
+    fn wait_for_lane_with(&self, lane: EventLane, timeout: Duration, locked: impl FnOnce()) -> bool {
+        let queue = self.queue.lock().unwrap();
+        let generation = self.wake_generation.load(Ordering::Acquire);
+        // Tests can announce registration while holding the same mutex as the
+        // waker. In production this callback is a no-op.
+        locked();
+        let (queue, _) = self.ready.wait_timeout_while(queue, timeout, |q| {
+            !q.iter().any(|event| lane.matches(event)) &&
+                self.wake_generation.load(Ordering::Acquire) == generation
+        }).unwrap();
+        queue.iter().any(|event| lane.matches(event))
+    }
+
     /// Блокирующее ожидание события для FFI: поток спит на Condvar и не
     /// тратит CPU, пока очередь пуста. Возвращает число событий после
     /// пробуждения (0 - истёк таймаут). Замок движка при этом НЕ держится.
@@ -221,15 +281,22 @@ impl EventBus {
         if !queue.is_empty() {
             return queue.len();
         }
+        let generation = self.wake_generation.load(Ordering::Acquire);
         let (queue, _result) = self
             .ready
-            .wait_timeout_while(queue, timeout, |q| q.is_empty())
+            .wait_timeout_while(queue, timeout, |q| {
+                q.is_empty() && self.wake_generation.load(Ordering::Acquire) == generation
+            })
             .unwrap();
         queue.len()
     }
 
     /// Разбудить ожидающих без события (остановка движка).
     pub fn wake_waiters(&self) {
+        // Hold the same mutex used by waiters while changing the predicate and
+        // notifying, preventing a wake between the predicate check and sleep.
+        let _queue = self.queue.lock().unwrap();
+        self.wake_generation.fetch_add(1, Ordering::Release);
         self.ready.notify_all();
     }
 
@@ -294,7 +361,8 @@ mod tests {
             CoreEvent::PeerDiscovered {
                 peer_id: "p1".into(),
                 display_name: "Alice".into(),
-                is_local: true
+                is_local: true,
+                observed_at_ms: 1,
             }
             .event_type(),
             "peer_discovered"
@@ -331,7 +399,8 @@ mod tests {
         assert!(CoreEvent::PeerDiscovered {
             peer_id: "p1".into(),
             display_name: "A".into(),
-            is_local: false
+            is_local: false,
+            observed_at_ms: 1,
         }
         .is_network());
         assert!(CoreEvent::PeerLost {
@@ -500,11 +569,91 @@ mod tests {
         }
     }
 
+    fn file_chunk(index: u64) -> CoreEvent {
+        CoreEvent::FileChunkReceived {
+            transfer_id: "transfer".into(),
+            chunk_index: index,
+            chunk_offset: 0,
+            ciphertext_chunk_len: 1,
+            ciphertext: vec![1],
+        }
+    }
+
+    #[test]
+    fn main_lane_prioritizes_messages_and_preserves_fifo_in_each_class() {
+        let bus = EventBus::with_defaults();
+        bus.emit(presence(1));
+        bus.emit(file_chunk(1));
+        bus.emit(message("m1"));
+        bus.emit(presence(2));
+        bus.emit(CoreEvent::MessageDelivered { message_id: "ack1".into() });
+        bus.emit(file_chunk(2));
+        bus.emit(message("m2"));
+
+        assert!(matches!(bus.poll_lane(EventLane::Main, true), Some(CoreEvent::MessageReceived { message_id, .. }) if message_id == "m1"));
+        assert!(matches!(bus.poll_lane(EventLane::Main, true), Some(CoreEvent::MessageDelivered { message_id }) if message_id == "ack1"));
+        // A fairness turn processes the oldest non-message without taking a file range.
+        assert!(matches!(bus.poll_lane(EventLane::Main, false), Some(CoreEvent::PeerDiscovered { peer_id, .. }) if peer_id == "pk_peer0001"));
+        assert!(matches!(bus.poll_lane(EventLane::Main, true), Some(CoreEvent::MessageReceived { message_id, .. }) if message_id == "m2"));
+        assert!(matches!(bus.poll_lane(EventLane::Main, false), Some(CoreEvent::PeerDiscovered { peer_id, .. }) if peer_id == "pk_peer0002"));
+        assert!(bus.poll_lane(EventLane::Main, true).is_none());
+        assert!(matches!(bus.poll_lane(EventLane::File, false), Some(CoreEvent::FileChunkReceived { chunk_index: 1, .. })));
+        assert!(matches!(bus.poll_lane(EventLane::File, false), Some(CoreEvent::FileChunkReceived { chunk_index: 2, .. })));
+        assert!(bus.is_empty());
+    }
+
+    #[test]
+    fn lanes_wait_for_their_own_event_and_both_wake_on_shutdown() {
+        let bus = std::sync::Arc::new(EventBus::with_defaults());
+        bus.emit(file_chunk(1));
+        assert!(bus.wait_for_lane(EventLane::File, Duration::from_secs(1)));
+        assert!(!bus.wait_for_lane(EventLane::Main, Duration::from_millis(20)));
+        assert!(bus.poll_lane(EventLane::File, false).is_some());
+
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        let mut workers = Vec::new();
+        for lane in [EventLane::Main, EventLane::File] {
+            let bus = std::sync::Arc::clone(&bus);
+            let ready = ready_tx.clone();
+            let result = result_tx.clone();
+            workers.push(std::thread::spawn(move || {
+                let observed = bus.wait_for_lane_with(lane, Duration::from_secs(2), || ready.send(()).unwrap());
+                result.send((lane, observed)).unwrap();
+            }));
+        }
+        ready_rx.recv().unwrap();
+        ready_rx.recv().unwrap();
+        // The waker takes the same queue mutex, so neither registration can be missed.
+        bus.wake_waiters();
+        let first = result_rx.recv_timeout(Duration::from_millis(500)).unwrap();
+        let second = result_rx.recv_timeout(Duration::from_millis(500)).unwrap();
+        assert!(!first.1 && !second.1 && first.0 != second.0);
+        for worker in workers { worker.join().unwrap(); }
+    }
+
+    #[test]
+    fn emitting_for_one_lane_does_not_make_the_other_busy_poll() {
+        let bus = std::sync::Arc::new(EventBus::with_defaults());
+        let producer = std::sync::Arc::clone(&bus);
+        let worker = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            producer.emit(file_chunk(1));
+            std::thread::sleep(Duration::from_millis(20));
+            producer.emit(message("m1"));
+        });
+        assert!(bus.wait_for_lane(EventLane::Main, Duration::from_secs(1)));
+        assert!(matches!(bus.poll_lane(EventLane::Main, true), Some(CoreEvent::MessageReceived { message_id, .. }) if message_id == "m1"));
+        assert!(matches!(bus.poll_lane(EventLane::File, false), Some(CoreEvent::FileChunkReceived { chunk_index: 1, .. })));
+        worker.join().unwrap();
+    }
+
     fn presence(n: usize) -> CoreEvent {
         CoreEvent::PeerDiscovered {
             peer_id: format!("pk_peer{n:04}"),
             display_name: format!("Peer {n}"),
             is_local: false,
+            observed_at_ms: 1,
         }
     }
 
@@ -538,14 +687,15 @@ mod tests {
     #[test]
     fn eviction_prefers_presence_over_chunks_and_messages() {
         let bus = EventBus::new(4);
-        for n in 0..4 {
+        bus.emit(file_chunk(1));
+        for n in 0..3 {
             bus.emit(presence(n));
         }
         bus.emit(message("m1"));
-        // Очередь: [p0, p1, p2, p3] -> p3 (самое свежее служебное)
-        // вытеснено, m1 встал в хвост.
+        // The newest presence, not the older file range, is evicted.
         let drained = bus.drain();
-        assert!(matches!(drained.first(), Some(CoreEvent::PeerDiscovered { peer_id, .. }) if peer_id == "pk_peer0000"));
+        assert!(matches!(drained.first(), Some(CoreEvent::FileChunkReceived { chunk_index: 1, .. })));
+        assert!(!drained.iter().any(|e| matches!(e, CoreEvent::PeerDiscovered { peer_id, .. } if peer_id == "pk_peer0002")));
         assert_eq!(drained.len(), 4);
         assert!(drained
             .iter()
@@ -570,6 +720,15 @@ mod tests {
                 other => panic!("лишнее событие в очереди: {other:?}"),
             }
         }
+    }
+
+    /// The legacy MQTT event has no peer field; Kotlin must receive null, not an empty sender.
+    #[test]
+    fn delivery_ack_ffi_preserves_absent_sender() {
+        let event = crate::event_to_ffi(CoreEvent::MessageDelivered { message_id: "m1".into() });
+        assert_eq!(event.event_type, "delivery_ack");
+        assert_eq!(event.message_id.as_deref(), Some("m1"));
+        assert_eq!(event.sender_id, None);
     }
 
     /// Подтверждение доставки (галочка отправителя) - тоже ранг 0.

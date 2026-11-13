@@ -66,7 +66,12 @@ class SwarmPeerDirectory @Inject constructor(
     suspend fun audienceIds(): List<String> {
         val k = knowledge()
         val resetCandidates = resetDao.pendingIds()
-        return (k.contacts + k.verified + k.privileged + resetCandidates)
+        // In older databases the contact row's primary key need not be its
+        // routing fingerprint. Discovery needs the latter as well as the id.
+        val routingContacts = contactDao.observeAllContactsOnce().map { contact ->
+            contact.fingerprint.takeIf { it.startsWith("pk_") } ?: contact.id
+        }
+        return (routingContacts + k.verified + k.privileged + resetCandidates)
             .filter { it.isNotBlank() }
     }
 

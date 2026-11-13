@@ -1,5 +1,6 @@
 package com.vladimir.messenger.data.security
 
+import java.security.MessageDigest
 import java.util.Base64
 
 // java.util.Base64, а не android.util.Base64: доступен с API 26 (наш minSdk)
@@ -54,6 +55,16 @@ object SealedWire {
     }
 
     fun isSealed(text: String): Boolean = text.startsWith(PREFIX)
+
+    /**
+     * Stable manifest for ordinary sealed messages and push control. It binds
+     * the ciphertext, not routing node IDs: a peer may have legacy and current
+     * node ID representations. The signed key envelope authenticates peers.
+     */
+    internal fun manifest(ciphertext: ByteArray): ByteArray {
+        val digest = MessageDigest.getInstance("SHA-256").digest(ciphertext)
+        return ("apu-msg-v1|" + digest.joinToString("") { "%02x".format(it.toInt() and 0xff) }).toByteArray(Charsets.UTF_8)
+    }
 
     /** Extract only the v1 sender binding. Cryptographic verification still belongs to openFileKeyEnvelope. */
     fun senderBinding(wire: String): ByteArray? {

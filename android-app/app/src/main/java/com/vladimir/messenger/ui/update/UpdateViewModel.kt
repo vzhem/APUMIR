@@ -32,6 +32,7 @@ data class UpdateUiState(
 class UpdateViewModel @Inject constructor(
     application: Application,
     private val updateChecker: UpdateChecker,
+    private val apkSeeder: com.vladimir.messenger.data.update.ApkSeeder,
 ) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(UpdateUiState())
@@ -72,7 +73,11 @@ class UpdateViewModel @Inject constructor(
         _uiState.update { it.copy(isDownloading = true, error = null) }
         viewModelScope.launch {
             try {
-                downloadId = withContext(Dispatchers.IO) { updateChecker.downloadApk(release) }
+                downloadId = withContext(Dispatchers.IO) {
+                    apkSeeder.cancelDownload()
+                    apkSeeder.cancelPatchDownload()
+                    updateChecker.downloadApk(release, preferOfficial = true)
+                }
                 if (downloadId == -1L) _uiState.update { it.copy(isDownloading = false) }
             } catch (e: Exception) {
                 _uiState.update {
@@ -93,14 +98,25 @@ class UpdateViewModel @Inject constructor(
         downloadReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
-                if (id == downloadId) {
+                if (id == downloadId || com.vladimir.messenger.service.OfficialUpdateDownloads.isTracked(context, id)) {
                     viewModelScope.launch {
-                        val ok = withContext(Dispatchers.IO) { updateChecker.downloadSucceeded(id) }
-                        _uiState.update { it.copy(
-                            isDownloading = false,
-                            error = if (ok) null else "Загрузка прервана: рой снова доступен или сеть недоступна",
-                        ) }
-                        if (ok) updateChecker.installApk(id)
+                        val state = withContext(Dispatchers.IO) {
+                            updateChecker.reconcileOfficialDownload(id)
+                            updateChecker.officialDownloadState()
+                        }
+                        if (state?.isActive == true) {
+                            // The original id may already have been replaced by a fallback.
+                            downloadId = state.downloadId
+                        } else {
+                            val ok = state?.isSuccessful == true && withContext(Dispatchers.IO) {
+                                updateChecker.downloadSucceeded(state.downloadId)
+                            }
+                            _uiState.update { it.copy(
+                                isDownloading = false,
+                                error = if (ok) null else "Загрузка прервана: рой снова доступен или сеть недоступна",
+                            ) }
+                            if (ok && state != null) updateChecker.installApk(state.downloadId)
+                        }
                     }
                 }
             }

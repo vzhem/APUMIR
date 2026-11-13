@@ -192,6 +192,52 @@ class Ipv6NetworkProxyTest {
     }
 
     @Test
+    fun reapplyingSocksProxyKeepsConnectionsButStillSetsTheNativeProxy() {
+        val sink = FakeEngineSink()
+        val config = Ipv6ProxyConfig(true, Ipv6ProxyProtocol.SOCKS5, "127.0.0.1", 1080, "user", "old")
+
+        Ipv6ProxyRuntime.apply(config, sink)
+        Ipv6ProxyRuntime.apply(config, sink)
+        assertEquals(2, sink.setCalls.size) // also restores a fresh or overwritten native setting
+        assertEquals(1, sink.wakeCount)
+
+        val changed = config.copy(password = "new")
+        Ipv6ProxyRuntime.apply(changed, sink)
+        assertEquals(3, sink.setCalls.size)
+        assertEquals("new", sink.setCalls.last().password)
+        assertEquals(2, sink.wakeCount)
+
+        Ipv6ProxyRuntime.apply(changed.copy(enabled = false), sink)
+        Ipv6ProxyRuntime.apply(changed.copy(enabled = false), sink)
+        assertEquals(1, sink.clearCount)
+        assertEquals(3, sink.wakeCount)
+    }
+
+    @Test
+    fun reapplyingHttpProxyReusesBridgeWithoutWakingConnections() {
+        val sink = FakeEngineSink()
+        val config = Ipv6ProxyConfig(true, Ipv6ProxyProtocol.HTTP, "127.0.0.1", 8080, "user", "old")
+
+        Ipv6ProxyRuntime.apply(config, sink)
+        assertEquals(1, sink.setCalls.size)
+        val firstBridge = sink.setCalls.single()
+        assertEquals("127.0.0.1", firstBridge.host)
+        assertTrue(firstBridge.port > 0)
+        Ipv6ProxyRuntime.apply(config, sink)
+        assertEquals(listOf(firstBridge, firstBridge), sink.setCalls)
+        assertEquals(1, sink.wakeCount)
+
+        val changed = config.copy(password = "new")
+        Ipv6ProxyRuntime.apply(changed, sink)
+        assertEquals(3, sink.setCalls.size)
+        assertEquals(2, sink.wakeCount)
+        Ipv6ProxyRuntime.apply(changed.copy(enabled = false), sink)
+        Ipv6ProxyRuntime.apply(changed.copy(enabled = false), sink)
+        assertEquals(1, sink.clearCount)
+        assertEquals(3, sink.wakeCount)
+    }
+
+    @Test
     fun socks5ProbeVerifiesGreetingAndRfc1929Authentication() {
         ServerSocket(0, 8, InetAddress.getByName("127.0.0.1")).use { server ->
             val acceptThread = thread(isDaemon = true) {

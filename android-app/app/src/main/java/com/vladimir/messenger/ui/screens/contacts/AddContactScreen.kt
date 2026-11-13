@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.contacts
 
+import com.vladimir.messenger.ui.components.ApuBackButton
+
 import com.vladimir.messenger.ui.components.ApuPremiumSpinner
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
@@ -28,7 +30,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.KeyboardArrowRight
@@ -148,14 +149,7 @@ fun AddContactScreen(
                         scrolledContainerColor = Color.Transparent,
                     ),
                     title = { Text(stringResource(R.string.chat_add_contact), fontWeight = FontWeight.Bold) },
-                    navigationIcon = {
-                        IconButton(onClick = onBackClick) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = stringResource(R.string.action_back),
-                            )
-                        }
-                    },
+                    navigationIcon = { ApuBackButton(onClick = onBackClick) },
                 )
             },
         ) { paddingValues ->

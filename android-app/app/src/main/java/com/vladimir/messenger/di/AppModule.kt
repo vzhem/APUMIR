@@ -68,6 +68,8 @@ object AppModule {
                 AppDatabase.MIGRATION_37_38,
                 AppDatabase.MIGRATION_38_39,
                 AppDatabase.MIGRATION_39_40,
+                AppDatabase.MIGRATION_40_41,
+                AppDatabase.MIGRATION_41_42,
             )
             // Никакого fallbackToDestructiveMigration(): он молча удаляет все
             // таблицы, если миграции не нашлось, — для мессенджера это тихая
@@ -171,7 +173,8 @@ object AppModule {
         referralAttribution: com.vladimir.messenger.data.referral.ReferralAttributionSender,
         storyVideos: com.vladimir.messenger.data.story.StoryVideoDelivery,
         contactDao: ContactDao,
-    ): ChatRepository = ChatRepository(context, chatDao, messageDao, groupDao, storyVideos, referralAttribution, contactDao)
+        db: AppDatabase,
+    ): ChatRepository = ChatRepository(context, chatDao, messageDao, groupDao, storyVideos, referralAttribution, contactDao, db)
 
     @Provides @Singleton
     fun provideContactRepository(

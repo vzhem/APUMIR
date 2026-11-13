@@ -115,6 +115,26 @@ class RuntimeHealthTest {
         assertEquals(1500L, tracker.checkOverdue(1510))
     }
 
+    @Test fun androidExitReasonsUseFixedLabelsAndUnknownCodesDoNotLeakRawValues() {
+        val expected = listOf(
+            ProcessExitReason.UNKNOWN, ProcessExitReason.EXIT_SELF, ProcessExitReason.SIGNALED,
+            ProcessExitReason.LOW_MEMORY, ProcessExitReason.CRASH, ProcessExitReason.NATIVE_CRASH,
+            ProcessExitReason.ANR, ProcessExitReason.INITIALIZATION_FAILURE, ProcessExitReason.PERMISSION_CHANGE,
+            ProcessExitReason.EXCESSIVE_RESOURCE_USAGE, ProcessExitReason.USER_REQUESTED, ProcessExitReason.USER_STOPPED,
+            ProcessExitReason.DEPENDENCY_DIED, ProcessExitReason.OTHER, ProcessExitReason.FREEZER,
+            ProcessExitReason.PACKAGE_STATE_CHANGE, ProcessExitReason.PACKAGE_UPDATED,
+        )
+        expected.forEachIndexed { code, reason -> assertEquals(reason, ProcessExitReason.fromAndroidReason(code)) }
+        assertEquals(ProcessExitReason.OTHER, ProcessExitReason.fromAndroidReason(-1))
+        assertEquals(ProcessExitReason.OTHER, ProcessExitReason.fromAndroidReason(9_999))
+        val report = RuntimeHealthSnapshot(
+            exitHistory = listOf(PreviousProcessExit(ProcessExitReason.fromAndroidReason(2), 100, 100)),
+            exitStatus = ExitHistoryStatus.READY,
+        ).render()
+        assertTrue(report.contains("reason=signaled"))
+        assertFalse(report.contains("reason=2"))
+    }
+
     @Test fun reportExportsOnlyEnumsCountsAndAtMostThreeExitReasons() {
         val report = RuntimeHealthSnapshot(
             operations = listOf(OperationHealth(DiagnosticOperation.KEY_MODE_PROBE, 0, 0, 0, 0, 0, 1, 12_000, null)),

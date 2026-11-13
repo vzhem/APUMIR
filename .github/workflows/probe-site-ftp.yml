@@ -1,0 +1,73 @@
+name: Probe site FTP staging
+
+# Explicit branch-only capability test: two uniquely named tiny files, never
+# existing release assets. It serializes with the real site publisher.
+on:
+  push:
+    branches: ['arena/**']
+    paths:
+      - '.github/workflows/probe-site-ftp.yml'
+      - 'scripts/release/site_ftp_probe.py'
+      - 'scripts/release/test_site_ftp_probe.py'
+      - 'scripts/release/site_staged_upload.py'
+      - 'scripts/release/site_release_files.py'
+      - 'docs/APP_DELIVERY_TRACKER.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-publish
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    if: contains(github.event.head_commit.message, '[probe-ftp-staging]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test probe safety offline
+        run: |
+          python3 scripts/release/test_site_ftp_probe.py
+          python3 scripts/release/test_site_staged_upload.py
+      - name: Download verified Latest inputs without modifying the site
+        run: |
+          set -e
+          gh api "repos/${GITHUB_REPOSITORY}/releases/latest" > site-release.json
+          PYTHONPATH=scripts/release python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          from site_release_files import MAX_METADATA_BYTES, release_assets
+          with Path('site-release.json').open('rb') as source:
+              data = source.read(MAX_METADATA_BYTES + 1)
+          if len(data) > MAX_METADATA_BYTES:
+              raise ValueError('release metadata too large')
+          release = json.loads(data)
+          tag = release['tag_name']
+          assets = release_assets(release, tag)
+          digest = assets['app-release.apk']['digest'].removeprefix('sha256:')
+          Path('site-files').mkdir()
+          Path('site-files/latest.json').write_text(json.dumps({'version': tag, 'sha256': digest}, ensure_ascii=False, indent=2) + '\n')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env:
+              env.write(f'APU_RELEASE_TAG={tag}\n')
+          PY
+          TAG="$(python3 -c 'import json; print(json.load(open("site-release.json"))["tag_name"])')"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir site-files \
+            --pattern app-release.apk --pattern SHA256SUMS.txt \
+            --pattern feature-packs.json --pattern 'feature-pack-*.zip'
+      - name: Verify actual release and site before the probe
+        id: baseline
+        run: python3 scripts/release/site_verify_http.py
+      - name: Probe temporary FTP files and remove them
+        env:
+          APU_FTP_HOST: ${{ secrets.APU_UCOZ_FTP_HOST }}
+          APU_FTP_USER: ${{ secrets.APU_UCOZ_FTP_USER }}
+          APU_FTP_PASSWORD: ${{ secrets.APU_UCOZ_FTP_PASSWORD }}
+          APU_FTP_REMOTE_DIR: ${{ vars.APU_UCOZ_FTP_REMOTE_DIR }}
+        run: python3 scripts/release/site_ftp_probe.py
+      - name: Recheck public site after the probe
+        if: ${{ !cancelled() && steps.baseline.outcome == 'success' }}
+        run: python3 scripts/release/site_verify_http.py

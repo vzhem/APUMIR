@@ -221,7 +221,13 @@ class SettingsViewModel @Inject constructor(
     /** Перечитать DownloadManager: прогресс/пауза/отказ видны и без системной шторки. */
     fun refreshOfficialDownload() {
         viewModelScope.launch {
-            val state = withContext(Dispatchers.IO) { updateChecker.officialDownloadState() }
+            val state = withContext(Dispatchers.IO) {
+                val before = updateChecker.officialDownloadState()
+                if (before?.isActive == true && before.downloadId >= 0L) {
+                    updateChecker.reconcileOfficialDownload(before.downloadId)
+                }
+                updateChecker.officialDownloadState()
+            }
             _officialDownloadState.value = state
             _officialDownloadActive.value = state?.isActive == true
             if (state == null || state.isSuccessful) apkSeeder.pickupDownloadedApks()
@@ -578,11 +584,18 @@ class SettingsViewModel @Inject constructor(
     private val officialDownloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(receiverContext: Context, intent: Intent) {
             if (intent.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
+            val completedId = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
+            if (completedId < 0L) return
             viewModelScope.launch {
-                val state = withContext(Dispatchers.IO) { updateChecker.officialDownloadState() }
+                val state = withContext(Dispatchers.IO) {
+                    updateChecker.reconcileOfficialDownload(completedId)
+                    updateChecker.officialDownloadState()
+                }
                 _officialDownloadState.value = state
                 _officialDownloadActive.value = state?.isActive == true
-                if (state?.isFailed == true) toastIf(context.getString(R.string.st_official_download_failed))
+                if (state?.isFailed == true && (state.downloadId == completedId || state.downloadId < 0L)) {
+                    toastIf(context.getString(R.string.st_official_download_failed))
+                }
                 if (state == null || state.isSuccessful) apkSeeder.pickupDownloadedApks()
             }
         }

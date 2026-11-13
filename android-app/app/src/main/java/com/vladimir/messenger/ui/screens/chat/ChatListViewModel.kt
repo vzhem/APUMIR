@@ -859,12 +859,12 @@ class ChatListViewModel @Inject constructor(
 
     /** Переключить прочитанность личного чата из меню списка. */
     fun toggleChatReadState(chatId: String) {
-        viewModelScope.launch(Dispatchers.IO) { chatDao.toggleReadState(chatId) }
+        viewModelScope.launch(Dispatchers.IO) { chatRepository.toggleReadState(chatId) }
     }
 
     /** Сбросить счётчик непрочитанных группы или канала. */
     fun markGroupRead(groupId: String) {
-        viewModelScope.launch(Dispatchers.IO) { groupDao.markGroupRead(groupId) }
+        viewModelScope.launch(Dispatchers.IO) { groupRepository.markGroupRead(groupId) }
     }
 
     /** Выйти из группы или канала (не владельцу). */

@@ -1,0 +1,31 @@
+name: Inspect site publication (read only)
+
+# This diagnostic never publishes files or receives FTP secrets. On Arena
+# branches an explicit marker is required; ordinary tracker updates do nothing.
+on:
+  push:
+    branches: ['arena/**']
+    paths:
+      - '.github/workflows/inspect-site-publication.yml'
+      - 'scripts/release/inspect_site_publication.py'
+      - 'scripts/release/test_inspect_site_publication.py'
+      - 'docs/APP_DELIVERY_TRACKER.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  inspect:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[inspect-site-publish]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test the safe diagnostic offline
+        run: python3 scripts/release/test_inspect_site_publication.py
+      - name: Inspect public metadata and publication progress
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release/inspect_site_publication.py

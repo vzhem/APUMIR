@@ -28,7 +28,6 @@ HOOK_FILES = (
     "data/file/OutgoingFilePreparationService.kt",
     "service/CoreServerService.kt",
     "service/NetworkMonitor.kt",
-    "service/NetworkChangeReceiver.kt",
     "MessengerApplication.kt",
 )
 
@@ -113,7 +112,8 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertIn("DiagnosticsPrivacy.redact", collector)
 
     def test_report_has_every_section_the_owner_reads(self):
-        report = source(DIAG / "DiagnosticsReport.kt") + source(DIAG / "UpdateDiagnosticsReport.kt")
+        report = (source(DIAG / "DiagnosticsReport.kt") + source(DIAG / "UpdateDiagnosticsReport.kt")
+                  + source(DIAG / "CoreDiagnosticStage.kt"))
         for section in (
             "[сводка]",
             "[окружение]",
@@ -353,7 +353,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertIn(marker, source(MAIN / path))
 
-        self.assertIn("mirrorFileMetaApplier.apply(meta)", source(MAIN / "data/file/FileTransferRouter.kt"))
+        self.assertIn("mirrorFileMetaApplier.apply(meta, notify)", source(MAIN / "data/file/FileTransferRouter.kt"))
 
         # Уборка: просроченные незавершённые строки уходят вместе с кусками,
         # копии на диске без живой строки — тоже.
@@ -823,15 +823,97 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "stats.total > 0 || stats.own_capacity_evictions > 0",
             "вытеснено-своих={}",
             "MAX_TOTAL + MAX_OWN_TOTAL",
-            # Владелец 2026-10-07 (отчёт v11.74.199): «своё ждёт получателя=1000»
-            # при «сигналов=0» и постоянных «delivery ACK received». Прямое
-            # подтверждение доставки обязано снимать запись с удержания — иначе
-            # резерв «своих» не разгружается никогда (снимал только receipt).
-            "remove_delivered_own(mid)",
-            "MQTT: delivery ACK снял",
+            # Подтверждённый Android ACK всё ещё освобождает свой резерв.
+            "super::mesh_cleanup::confirmed_local(",
         ):
             with self.subTest(marker=marker):
                 self.assertTrue(marker in core, f"нет маркера {marker} в core.rs")
+        # Владелец 2026-10-07: «своё ждёт получателя=1000». Очистка нужна,
+        # но теперь только ПОСЛЕ фиксации ACK в Room: удаление из raw MQTT
+        # обработчика до транзакции могло потерять повтор при сбое процесса.
+        ack = core[core.index('if let Some(rest) = evt.payload.strip_prefix("ack|")'):
+                   core.index('} else if evt.payload.starts_with("relay|")')]
+        self.assertIn("CoreEvent::MessageDelivered", ack)
+        self.assertNotIn("remove_delivered_own", ack)
+        self.assertNotIn("remove_encrypted", ack)
+        cleanup = source(ROOT / "rust-core/src/engine/mesh_cleanup.rs")
+        self.assertIn("q.remove_delivered_own(message_id)", cleanup)
+        self.assertIn("remove_encrypted_own(", cleanup)
+        store = source(ROOT / "rust-core/src/storage/relay_store.rs")
+        self.assertIn("record.origin_sender != local_node", store)
+        coordinator = source(MAIN / "service/DeliveryReceiptCoordinator.kt")
+        self.assertLess(coordinator.index("val changed = update(messageId)"),
+                        coordinator.index("if (alreadyCommitted) release(messageId)"))
+        service = source(MAIN / "service/CoreServerService.kt")
+        self.assertIn("routeOutgoingDeliveryAck(messageId", service)
+        routing = source(MAIN / "service/ScopedDeliveryRouting.kt")
+        self.assertIn("applyOutgoingDeliveryAck(messageId", routing)  # legacy MQTT has no sender
+        self.assertLess(routing.index("applyPeerScopedDeliveryAck("), routing.index("release(messageId)"))
+        self.assertLess(routing.index("release(messageId)"), routing.index("forward?.invoke()"))
+        self.assertIn("result == ScopedDeliveryAck.UPDATED || result == ScopedDeliveryAck.ALREADY_COMMITTED", routing)
+        self.assertIn("if (result != ScopedDeliveryAck.REJECTED)", routing)  # MISSING may exist on the partner
+        scoped = source(MAIN / "data/receipt/ScopedDeliveryAck.kt")
+        for marker in ("database.withTransaction", "!row.isFromMe", 'row.channel == "GROUP"',
+                       "?: return@withTransaction ScopedDeliveryAck.MISSING",
+                       "database.groupDao().getGroupById(row.chatId)", "OutboxRecipient.forMessage(row, chat.contactId) != senderId"):
+            self.assertIn(marker, scoped)
+        ffi = source(ROOT / "rust-core/src/lib.rs")
+        ffi_event = ffi[ffi.index("fn event_to_ffi("):ffi.index("// Error type", ffi.index("fn event_to_ffi("))]
+        self.assertIn("sender_id: None", ffi_event)
+        delivered = ffi_event[ffi_event.index("CoreEvent::MessageDelivered { message_id }"):ffi_event.index("CoreEvent::Error")]
+        self.assertNotIn("sender_id", delivered)  # None, not an empty string, reaches Kotlin
+        events = source(ROOT / "rust-core/src/engine/events.rs")
+        self.assertIn("fn delivery_ack_ffi_preserves_absent_sender()", events)
+        self.assertIn("markMessageDelivered(ackedId, senderId) { mirror?.publishEnvelope", service)
+        self.assertIn("markMessageDelivered(messageId, senderId)", service)
+        self.assertIn("markMessageDelivered(messageId, event.senderId)", service)
+        deferred = source(MAIN / "data/schedule/DeferredDelivery.kt")
+        self.assertIn("DeferredDeliveryPolicy.matchesTransportAckPeer(peer, senderId)", deferred)
+        self.assertIn('DeferredWire.transportId(letter.id, peer, "normal$index") else letter.id', deferred)
+        groups = source(MAIN / "di/GroupsModule.kt")
+        self.assertIn("RustBridge.sendMessage(groupFanoutId(groupId, recipientId, envelope)", groups)
+        self.assertLess(routing.index("noteTransport(messageId, senderId)"), routing.index("applyPeerScopedDeliveryAck("))
+        repository = source(MAIN / "data/repository/ChatRepository.kt")
+        incoming = repository[repository.index("suspend fun applyMirrorIncoming("):repository.index("suspend fun applyMirrorSent(")]
+        sent = repository[repository.index("suspend fun applyMirrorSent("):repository.index("suspend fun scheduledRecipient(")]
+        self.assertIn("applyPeerScopedDeliveryAck(database, it, row.senderId", incoming)
+        self.assertIn("isServicePacket(row.content)) return", sent)
+        self.assertNotIn("markOutgoingMessageDelivered", sent)  # an outgoing ACK is not a receipt
+        self.assertIn("applyPeerScopedDeliveryAck(database, it, senderId", repository)
+        self.assertIn("messageDao.deliveryAckJunkRows(pattern)", repository)
+        self.assertIn("RustBridge::confirmMessageDelivered", service)
+        self.assertIn("acknowledgeStoredIncomingText(messageId", service)
+        self.assertIn("sealed && MessageSealer.openedByExpectedSender(rawText, senderId)", service)
+        self_filter = service[service.index("if (myNodeId.isNotBlank() && senderId == myNodeId)"):
+                              service.index("// ШИФРОВАНИЕ: конверт вскрывается ДО любых разборщиков")]
+        self.assertIn("canAcknowledgeSelfEcho(sealed, preopened)", self_filter)
+        self.assertIn("(!sealed || opened != null)", coordinator)
+        self.assertIn("!DeliveryAckWire.isPacket(opened)", coordinator)  # no ACK-of-ACK
+        self.assertLess(coordinator.index("if (!storedIncomingText("), coordinator.index("sendAck(openedByExpectedSender())"))
+        # Neither a merely recognized group packet nor a CF duplicate proves
+        # a durable personal message/sender match for mesh cleanup. CF must
+        # open before deduplication: an unopenable copy cannot receive an ACK
+        # based solely on another row that happens to have the same ID.
+        group = service[service.rindex("if (groupRouter.routeIncoming(senderId, chatId, messageId, text))"):
+                        service.rindex("// Реакции на сообщения:")]
+        self.assertIn("RustBridge.sendDeliveryAck(messageId, senderId)", group)
+        self.assertNotIn("roomCommitted = true", group)
+        cf_start = service.index("is RelayEnvelope.Parsed.Message -> {")
+        cf_duplicate = service.index("if (existingMsg != null && cfContent != null) {", cf_start)
+        cf_new = service.index("if (cfContent == null) {", cf_duplicate)
+        cf = service[cf_duplicate:cf_new]
+        self.assertLess(service.index("PushControlIngress.isReserved(cfContent)", cf_start), cf_duplicate)
+        self.assertIn("classifyCfDuplicate(existingMsg.isFromMe, existingMsg.senderId, existingMsg.content, senderId", cf)
+        self.assertIn("MessageSealer.openedByExpectedSender(parsed.content, senderId)", cf)
+        self.assertIn("if (DeliveryAckWire.isPacket(incomingText)) incomingText else storedText", coordinator)
+        self.assertIn("CfDuplicateAction.ApplyAck(DeliveryAckWire.messageId(ackText))", coordinator)
+        self.assertIn("CfDuplicateAction.Ignore", cf)
+        self.assertIn("CfDuplicateAction.AcknowledgeText ->", cf)
+        self.assertIn("RustBridge.sendDeliveryAck(messageId, senderId)", cf)
+        self.assertNotIn("roomCommitted = true", cf)
+        self.assertNotIn("acknowledgeStoredIncomingText", cf)
+        bridge = source(MAIN / "data/RustBridge.kt")
+        self.assertIn("captured.confirmMessageDelivered(messageId)", bridge)
 
     def test_service_signals_do_not_take_the_correspondence_reserve(self):
         """Владелец 2026-10-07: «своё ждёт получателя=1000», а внутри — сигналы.
@@ -1155,9 +1237,13 @@ class DiagnosticsContractsTest(unittest.TestCase):
         stats = queue[queue.index("pub fn stats"):queue.index("impl Default for RelayQueue")]
         # Возраст считается по СВОЕЙ переписке: служебное не в счёт.
         self.assertIn("e.own && !e.kind.is_transient()", stats)
+        self.assertIn("e.own && e.kind.is_transient()", stats)
         self.assertIn("own_oldest_age_ms", stats)
 
         report = source(DIAG / "DiagnosticsReport.kt")
+        self.assertNotIn("из них сигналов и пакетов", report)
+        self.assertIn("отдельно сигналов и пакетов", report)
+        self.assertNotIn('?: "нет (пусто)"', report)
         scan = source(DIAG / "TransferDiagnostics.kt")
         for marker in (
             "relayQueueOwnLimit",
@@ -1200,12 +1286,14 @@ class DiagnosticsContractsTest(unittest.TestCase):
         ровно как строку в «Логах».
         """
         transport = source(ROOT / "rust-core/src/network/mqtt_transport.rs")
+        transport_tests = source(ROOT / "rust-core/src/network/mqtt_transport_tests.rs")
+        self.assertIn('#[path = "mqtt_transport_tests.rs"]', transport)
         self.assertIn("pub(crate) const MAX_MQTT_PACKET_BYTES: usize = 64 * 1024;", transport)
         # Предел обязан быть не меньше того, что очередь пересылки обещает
         # принять и хранить: иначе запись лежит и не может быть отдана.
         self.assertIn(
             "MAX_MQTT_PACKET_BYTES >= crate::network::relay_queue::MAX_MESH_RELAY_ENVELOPE_BYTES",
-            transport,
+            transport_tests,
         )
         # Ставится в ОБЕИХ постоянных сессиях, и проверяется до сети.
         self.assertEqual(transport.count("set_max_packet_size(MAX_MQTT_PACKET_BYTES, MAX_MQTT_PACKET_BYTES)"), 2)
@@ -1224,7 +1312,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "fn our_limit_refuses_oversize_publish_before_the_network()",
         ):
             with self.subTest(test=test):
-                self.assertIn(test, transport)
+                self.assertIn(test, transport_tests)
         # Остальные сессии (наблюдатель вторичного брокера и разовая отправка
         # квитанции) живут мимо постоянного соединения — предел нужен и им.
         observer = source(ROOT / "rust-core/src/network/mqtt_secondary_observer.rs")
@@ -1279,14 +1367,15 @@ class DiagnosticsContractsTest(unittest.TestCase):
         query = dao.split("SELECT COUNT(*) FROM messages WHERE isFromMe = 1", 1)[1].split(")", 1)[0]
         self.assertIn("'PENDING'", query)
         self.assertIn("'QUEUED_OFFLINE'", query)
-        # Тот же список, что у помпы досылки (`getPendingOutgoingMessages`):
-        # иначе «ещё не ушло» на экране и то, что реально досылается, разойдутся.
+        # Тот же список, что у fair-помпы (`getRetryableOutgoingMessages`):
+        # иначе «ещё не ушло» на экране и реально досылаемое разойдутся.
         pump = dao.split(
             "@Query(\"SELECT * FROM messages WHERE isFromMe = 1 AND status IN "
-            "('PENDING', 'QUEUED_OFFLINE') ORDER BY timestamp ASC\")",
+            "('PENDING', 'QUEUED_OFFLINE') ORDER BY timestamp ASC, id ASC LIMIT :limit\")",
             1,
         )
         self.assertEqual(len(pump), 2, "помпа досылки обязана брать оба состояния")
+        self.assertIn("suspend fun getRetryableOutgoingMessages(limit: Int)", pump[1])
 
 
 if __name__ == "__main__":

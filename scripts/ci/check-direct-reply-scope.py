@@ -1,0 +1,252 @@
+#!/usr/bin/env python3
+"""Execute the actual Room reply queries on SQLite and check ingress wiring.
+
+These are SQL/source contracts, not transport or identity-authentication tests.
+"""
+import ast
+import re
+import sqlite3
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+BASE = ROOT / "android-app/app/src/main/java/com/vladimir/messenger"
+DAO = BASE / "data/local/dao/MessageDao.kt"
+
+
+def query(name):
+    source = DAO.read_text(encoding="utf-8")
+    end = source.index(f"suspend fun {name}(")
+    start = source.rindex("@Query(", 0, end)
+    return "".join(ast.literal_eval(token) for token in re.findall(r'"(?:\\.|[^"\\])*"', source[start:end]))
+
+
+class DirectReplyScopeTest(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(":memory:")
+        self.db.executescript("""
+            CREATE TABLE chats(id TEXT PRIMARY KEY, contactId TEXT NOT NULL);
+            CREATE TABLE groups(id TEXT PRIMARY KEY, isLeft INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE group_members(groupId TEXT NOT NULL, nodeId TEXT NOT NULL, isBanned INTEGER NOT NULL,
+                PRIMARY KEY(groupId, nodeId));
+            CREATE TABLE messages(id TEXT PRIMARY KEY, chatId TEXT NOT NULL, senderId TEXT NOT NULL,
+                isFromMe INTEGER NOT NULL, channel TEXT NOT NULL, topicId TEXT,
+                replyToId TEXT, replyAuthor TEXT NOT NULL, replyText TEXT NOT NULL);
+            INSERT INTO chats VALUES ('chat', 'pk_friend123'), ('other', 'pk_other456'),
+                                     ('group', 'pk_friend123');
+            INSERT INTO groups(id) VALUES ('group');
+            INSERT INTO group_members VALUES ('group', 'pk_local123', 0);
+        """)
+
+    def tearDown(self):
+        self.db.close()
+
+    def add(self, id, chat="chat", sender="pk_friend123", mine=0, channel="LOCAL", topic=None):
+        self.db.execute("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, NULL, '', '')",
+                        (id, chat, sender, mine, channel, topic))
+
+    def update(self, id, peer="pk_friend123", q=None, group="group", target="quoted", author="Alice", text="text", owner="pk_local123"):
+        return self.db.execute(q or query("applyDirectReplyFromPeer"), {
+            "senderId": peer, "messageId": id, "groupId": group, "ownerId": owner,
+            "replyToId": target, "replyAuthor": author, "replyText": text,
+        }).rowcount
+
+    def reply(self, id):
+        return self.db.execute("SELECT replyToId FROM messages WHERE id=?", (id,)).fetchone()[0]
+
+    def test_matching_incoming_personal_row_and_duplicate_apply(self):
+        self.add("parent")
+        self.assertEqual(1, self.update("parent"))
+        self.assertEqual(1, self.update("parent"))
+        self.assertEqual("quoted", self.reply("parent"))
+
+    def test_foreign_sender_changed_chat_outgoing_group_and_topic_are_excluded(self):
+        rows = [
+            ("foreign", "other", "pk_other456", 0, "LOCAL", None),
+            ("moved", "other", "pk_friend123", 0, "LOCAL", None),
+            ("mine", "chat", "pk_friend123", 1, "LOCAL", None),
+            ("group-parent", "group", "pk_friend123", 0, "LOCAL", None),
+            ("legacy-group", "chat", "pk_friend123", 0, "GROUP", None),
+            ("topic", "chat", "pk_friend123", 0, "LOCAL", "t"),
+            ("orphan", "missing", "pk_friend123", 0, "LOCAL", None),
+        ]
+        for row in rows:
+            self.add(*row)
+            self.assertEqual(0, self.update(row[0]), row[0])
+            self.assertIsNone(self.reply(row[0]), row[0])
+        self.assertEqual(0, self.update("missing-parent"))
+
+    def test_reply_requires_a_canonical_personal_channel(self):
+        # The message transport enum is the complete supported personal set.
+        # A future transport must update this guard deliberately; an unknown or
+        # malformed channel is not proof that the row belongs to a direct chat.
+        channel_source = (BASE / "domain/model/MessageChannel.kt").read_text(encoding="utf-8")
+        enum_body = channel_source.split("enum class MessageChannel {", 1)[1].split("fun toIcon", 1)[0]
+        supported = set(re.findall(r"^\s*([A-Z][A-Z0-9_]*)\s*[,;]", enum_body, re.M))
+        self.assertEqual({"UNKNOWN", "MQTT", "CF", "LOCAL", "STORE_FORWARD"}, supported)
+        for index, channel in enumerate(sorted(supported)):
+            id = f"personal-{index}"
+            self.add(id, channel=channel)
+            self.assertEqual(1, self.update(id), channel)
+            self.assertEqual("quoted", self.reply(id), channel)
+
+        # Some historical/imported rows can outlive the group record or be
+        # malformed. They still must not become personal solely because a chat
+        # with the same ID/contact happens to exist.
+        for index, channel in enumerate(("GROUP", "group", " Group ", "\tGROUP\n", "GROUP\0tail",
+                                         "LOCAL\0tail", "LOCAL ", "", "future-transport", "ＧＲＯＵＰ")):
+            id = f"malformed-{index}"
+            self.add(id, channel=channel)
+            self.assertEqual(0, self.update(id), repr(channel))
+            self.assertIsNone(self.reply(id), repr(channel))
+
+        actual = query("applyDirectReplyFromPeer")
+        whitelist = "channel IN ('MQTT', 'CF', 'LOCAL', 'STORE_FORWARD', 'UNKNOWN')"
+        self.assertIn(whitelist, actual)
+        old = actual.replace(whitelist, "channel != 'GROUP'")
+        # Negative control: the previous comparison did apply a reply to a
+        # group-labelled row without a corresponding groups record.
+        self.add("old-bypass", channel="group")
+        self.assertEqual(0, self.update("old-bypass", q=actual))
+        self.assertEqual(1, self.update("old-bypass", q=old))
+
+    def test_scope_is_evaluated_at_update_not_just_at_an_earlier_lookup(self):
+        self.add("parent")
+        self.db.execute("UPDATE chats SET contactId='pk_other456' WHERE id='chat'")
+        self.assertEqual(0, self.update("parent"))
+        self.assertIsNone(self.reply("parent"))
+        self.db.execute("UPDATE chats SET contactId='pk_friend123' WHERE id='chat'")
+        self.assertEqual(1, self.update("parent"))
+
+    def test_group_query_and_early_buffer_are_scoped_and_old_query_was_id_only(self):
+        self.add("foreign", chat="other", sender="pk_other456")
+        self.assertEqual(0, self.update("foreign"))
+        old_query = "UPDATE messages SET replyToId=:replyToId, replyAuthor=:replyAuthor, replyText=:replyText WHERE id=:messageId"
+        # Reconstruct the former SQL as a negative control; no transport is executed.
+        self.assertEqual(1, self.update("foreign", q=old_query))
+        self.assertEqual(0, self.update("foreign", q=query("applyGroupReply")))
+        self.add("group-parent", chat="group", channel="GROUP")
+        self.assertEqual(0, self.update("group-parent", q=query("applyGroupReply"), group="other"))
+        self.assertEqual(0, self.update("group-parent", q=query("applyGroupReply"), peer="pk_other456"))
+        self.assertEqual(1, self.update("group-parent", q=query("applyGroupReply"), group="group"))
+        self.assertEqual(0, self.update("group-parent", q=query("applyGroupReply"), target="changed"))
+        self.assertEqual(1, self.update("group-parent", q=query("applyGroupReply"), group="group"))
+        # The previous group-scoped query alone still let another claimed sender replace it.
+        prior_group = ("UPDATE messages SET replyToId=:replyToId, replyAuthor=:replyAuthor, replyText=:replyText "
+                       "WHERE id=:messageId AND chatId=:groupId "
+                       "AND EXISTS (SELECT 1 FROM groups g WHERE g.id = messages.chatId)")
+        self.assertEqual(1, self.update("group-parent", q=prior_group, peer="pk_other456", target="forged"))
+        self.assertEqual("forged", self.reply("group-parent"))
+        group = (BASE / "data/group/GroupRepository.kt").read_text(encoding="utf-8")
+        ingress = (BASE / "data/group/GroupReplyIngress.kt").read_text(encoding="utf-8")
+        self.assertIn("groupReplies.receive(senderId, packet)", group)
+        self.assertIn("groupReplies.parentInserted(packet.groupId, localId)", group)
+        self.assertIn("messageDao.applyGroupReply(", ingress)
+        self.assertIn("pending.put(owner, packet.groupId, packet.messageId, sender", ingress)
+        self.assertIn("pending.take(owner, groupId, messageId)", ingress)
+        self.assertIn("?.isBanned == false", ingress)
+        self.assertIn("ownerId = owner", ingress)
+        self.assertNotIn("applyDirectReplyFromPeer", group)
+
+    def test_group_member_is_checked_by_the_update_not_only_a_preflight(self):
+        self.add("parent", chat="group", channel="GROUP")
+        current = query("applyGroupReply")
+        member_clause = ("AND EXISTS (SELECT 1 FROM group_members gm WHERE gm.groupId = messages.chatId "
+                         "AND gm.nodeId = :ownerId AND gm.isBanned = 0) ")
+        self.assertIn(member_clause, current)
+        before_membership_guard = current.replace(member_clause, "")
+        self.db.execute("DELETE FROM group_members WHERE groupId='group'")
+        self.assertEqual(0, self.update("parent", q=current))
+        # The old scoped query changed a row after membership was removed.
+        self.assertEqual(1, self.update("parent", q=before_membership_guard))
+        self.db.execute("UPDATE messages SET replyToId=NULL, replyAuthor='', replyText='' WHERE id='parent'")
+        self.db.execute("INSERT INTO group_members VALUES ('group', 'pk_local123', 1)")
+        self.assertEqual(0, self.update("parent", q=current))
+        self.db.execute("UPDATE group_members SET isBanned=0 WHERE groupId='group'")
+        self.assertEqual(0, self.update("parent", q=current, owner="pk_other456"))
+        self.assertEqual(1, self.update("parent", q=current))
+        self.db.execute("UPDATE group_members SET isBanned=1 WHERE groupId='group'")
+        self.assertEqual(0, self.update("parent", q=current))  # even an identical replay
+        self.assertEqual("quoted", self.reply("parent"))
+
+    def test_left_group_is_checked_even_if_a_stale_local_member_was_recreated(self):
+        self.add("parent", chat="group", channel="GROUP")
+        current = query("applyGroupReply")
+        self.assertIn("g.id = messages.chatId AND g.isLeft = 0", current)
+        before_left_guard = current.replace("g.id = messages.chatId AND g.isLeft = 0", "g.id = messages.chatId")
+        self.db.execute("UPDATE groups SET isLeft=1 WHERE id='group'")
+        self.assertEqual(0, self.update("parent", q=current))
+        # Model a GroupInfo packet recreating the member after leaving.
+        self.assertEqual(1, self.update("parent", q=before_left_guard))
+        self.db.execute("UPDATE messages SET replyToId=NULL, replyAuthor='', replyText='' WHERE id='parent'")
+        self.db.execute("UPDATE groups SET isLeft=0 WHERE id='group'")
+        self.assertEqual(1, self.update("parent", q=current))
+        self.db.execute("UPDATE groups SET isLeft=1 WHERE id='group'")
+        self.assertEqual(0, self.update("parent", q=current))  # even an identical replay
+        ingress = (BASE / "data/group/GroupReplyIngress.kt").read_text(encoding="utf-8")
+        self.assertIn("groupDao.getGroupById(groupId)?.isLeft == false", ingress)
+
+    def test_conflicting_reply_cannot_replace_the_first_but_exact_duplicate_can_ack(self):
+        self.add("parent")
+        self.assertEqual(1, self.update("parent"))
+        self.assertEqual(0, self.update("parent", target="changed"))
+        self.assertEqual(0, self.update("parent", author="changed"))
+        self.assertEqual(0, self.update("parent", text="changed"))
+        self.assertEqual("quoted", self.reply("parent"))
+        self.assertEqual(1, self.update("parent"))
+
+    def test_matching_uses_primary_key_lookup(self):
+        plan = " ".join(row[3] for row in self.db.execute("EXPLAIN QUERY PLAN " + query("applyDirectReplyFromPeer"), {
+            "senderId": "pk_friend123", "messageId": "parent", "replyToId": "x", "replyAuthor": "y", "replyText": "z",
+        }))
+        self.assertIn("INDEX", plan.upper())
+
+    def test_direct_cf_and_mirror_routes_use_distinct_verified_boundaries(self):
+        service = (BASE / "service/CoreServerService.kt").read_text(encoding="utf-8")
+        direct = service[service.index('"message_received" ->'):]
+        reply = direct[direct.index("DirectReplyWire.isPacket(text)"):]
+        self.assertIn("directReplies.network(senderId, chatId, messageId, text, sealed && MessageSealer.openedByExpectedSender(rawText, senderId), rawText)", reply[:650])
+        self.assertIn("if (canAcknowledgeSelfEcho(sealed, preopened))", direct)
+        receipt = (BASE / "service/DeliveryReceiptCoordinator.kt").read_text(encoding="utf-8")
+        self.assertIn("!DirectReplyWire.isPacket(opened)", receipt)
+        self.assertIn("if (!com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(opened)) try", direct)
+        cf = service[service.index("is RelayEnvelope.Parsed.Message ->"):service.index("is RelayEnvelope.Parsed.Other ->")]
+        self.assertLess(cf.index("DirectReplyWire.isPacket(cfContent)"), cf.index("else if (existingMsg != null && cfContent != null)"))
+        self.assertIn("MessageSealer.openedByExpectedSender(parsed.content, senderId)", cf)
+        self.assertIn("cfContent, authenticated, parsed.content)", cf)
+        self.assertIn("== com.vladimir.messenger.data.reply.DirectReplyResult.APPLIED", cf)
+        mirror = (BASE / "data/mirror/MirrorSync.kt").read_text(encoding="utf-8")
+        self.assertIn('"env", "reply2" ->', mirror)
+        self.assertIn('kind == "reply2" && MirrorReplyTrust.afterOpen', mirror)
+        self.assertIn('MirrorReplyPayload.forSend(text, replySourceAuthenticated)', mirror)
+        self.assertIn('MirrorReplyPayload.forReceive(kind, body.optString("t"), body.optString("r"))', mirror)
+        self.assertIn('"t", fields.legacyText', mirror)
+        self.assertIn("directReplies.mirror(senderId, messageId, text, replySourceAuthenticated)", service)
+        payload = (BASE / "data/mirror/MirrorReplyPayload.kt").read_text(encoding="utf-8")
+        self.assertIn('Fields("reply2", "", text, true)', payload)
+        trust = (BASE / "data/mirror/MirrorReplyTrust.kt").read_text(encoding="utf-8")
+        self.assertIn("MessageDigest.isEqual(local, signer)", trust)
+        self.assertIn("FileExchangeKeyStore.publicBinding(context)", trust)
+
+    def test_ack_and_forward_only_follow_verified_scope_checks(self):
+        source = (BASE / "data/reply/DirectReplyIngress.kt").read_text(encoding="utf-8")
+        self.assertLess(source.index("!authenticated"), source.index("apply(sender, packet)"))
+        self.assertLess(source.index("isCleared(sender, parent)"), source.index("apply(sender, packet)"))
+        self.assertIn("DirectReplyWire.transportMessageId(parent) != transportId", source)
+        self.assertIn("if (!fromMirror && applied)", source)
+        self.assertLess(source.index("if (!fromMirror && applied)"), source.index('sideEffect("forward")'))
+        self.assertLess(source.index('sideEffect("forward")'), source.index('sideEffect("ack")'))
+        self.assertIn("catch (cancelled: CancellationException)", source)
+        binding = (BASE / "service/DirectReplyRouting.kt").read_text(encoding="utf-8")
+        self.assertIn("ChatClearRegistry.isCleared", binding)
+        self.assertIn("pins.withPinnedBinding(sender, action)", binding)
+        self.assertIn("applyNetwork = pinnedApply::apply", binding)
+        self.assertIn("replySourceAuthenticated = true", binding)
+        self.assertIn("RustBridge.sendDeliveryAck", binding)
+        pinned = (BASE / "data/reply/DirectReplyPinnedApply.kt").read_text(encoding="utf-8")
+        self.assertIn("MessageDigest.isEqual(pin, candidate)", pinned)
+        self.assertLess(pinned.index("withPin(sender)"), pinned.index("apply(sender, packet)"))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

@@ -59,6 +59,8 @@ x25519-dalek  = { version = "2", features = ["static_secrets"] }
 chacha20poly1305 = "0.10"
 hkdf = "0.12"
 sha2 = "0.10"
+# Protect transient wake capability, FCM token and exchange-secret buffers.
+zeroize = "1.8"
 rand = "0.8"
 
 # ── Сериализация ────────────────────────────────────────────────────

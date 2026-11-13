@@ -14,6 +14,7 @@
 Запуск: python3 scripts/ci/check-chat-history-harness.py
 """
 import re
+import runpy
 import sys
 import unittest
 from pathlib import Path
@@ -101,6 +102,46 @@ class HistoryHarnessIsComplete(unittest.TestCase):
         names = re.findall(r'Choice\(\s*(DEFAULT_ID|"[^"]*")\s*,', palette)
         self.assertGreaterEqual(len(names), 5, "не разобрать палитру прод-файла")
         self.assertIn("re.findall", text, "заглушка должна читать прод-палитру")
+
+    def test_push_dispatcher_and_drain_are_compiled_and_run(self):
+        files = compiled_files()
+        main = MAIN / "com/vladimir/messenger/data/push"
+        tests = ROOT / "android-app/app/src/test/java/com/vladimir/messenger/data/push"
+        for name in ("PushWakeQueue", "PushWakeDrain", "PushWakeIntake", "PushWakeDispatcher",
+                     "PushWakeAdmission", "PushEpochProtocol", "PushRegistrationState", "PushWakeRunLoop",
+                     "PushWakePeriodicRecovery"):
+            self.assertIn(main / (name + ".kt"), files)
+        script = SCRIPT.read_text()
+        for name in ("PushWakeScheduleGate", "PushWakeAdmission", "PushWakeIntake",
+                     "PushWakeDispatcher", "PushWakeDrain", "PushWakeRunLoop", "PushWakePeriodicRecovery"):
+            self.assertIn(tests / (name + "Test.kt"), files)
+            self.assertIn("com.vladimir.messenger.data.push." + name + "Test", script)
+        self.assertIn("generate-push-inbox-model.py", script)
+        self.assertIn('"$PUSH_INBOX_MODEL"', script)
+
+    def test_heartbeat_ownership_and_wake_policy_are_compiled_and_run(self):
+        files = compiled_files()
+        main = MAIN / "com/vladimir/messenger/service"
+        tests = ROOT / "android-app/app/src/test/java/com/vladimir/messenger/service"
+        script = SCRIPT.read_text()
+        for name in ("ProcessHeartbeat", "DeliveryWakePolicy"):
+            self.assertIn(main / (name + ".kt"), files)
+            self.assertIn(tests / (name + "Test.kt"), files)
+            self.assertIn("com.vladimir.messenger.service." + name + "Test", script)
+
+    def test_push_inbox_stub_is_extracted_and_fails_on_unknown_shape(self):
+        generator = runpy.run_path(str(ROOT / "scripts/ci/generate-push-inbox-model.py"))["generate"]
+        source = (MAIN / "com/vladimir/messenger/data/push/PushWakeInbox.kt").read_text()
+        output = generator(source)
+        self.assertIn("enum class EnqueueResult", output)
+        self.assertIn("class Claim internal constructor(", output)
+        self.assertNotIn("SQLiteDatabase", output)  # no pretend storage implementation
+        changed = source.replace("QUEUED, RECOVERY_QUEUED, INVALID, UNAVAILABLE",
+                                 "QUEUED, RECOVERY_QUEUED, INVALID, UNAVAILABLE, EXTRA")
+        self.assertNotEqual(source, changed)
+        self.assertIn("UNAVAILABLE, EXTRA", generator(changed))
+        with self.assertRaises(ValueError):
+            generator(source.replace("    enum class EnqueueResult", "    enum class RenamedResult"))
 
 
 if __name__ == "__main__":

@@ -46,15 +46,15 @@ class SettingsReturnPositionTest(unittest.TestCase):
         self.assertIn('"Notifications"', self.memory)
         self.assertIn('"Updates"', self.memory)
 
-    def test_position_survives_rotation_and_process_death(self):
-        self.assertIn("rememberSaveable(", self.state)
-        self.assertIn("listSaver<SettingsScrollMemory, Int>", self.state)
-        self.assertIn("fun flatten(): List<Int>", self.memory)
-        self.assertIn("fun fromFlatten(flat: List<Int>)", self.memory)
+    def test_position_uses_the_saveable_lazy_list_state(self):
+        # rememberLazyListState uses LazyListState.Saver and remains in the
+        # composition even while the section's independent state is active.
+        self.assertIn("val root = rememberLazyListState()", self.state)
+        self.assertIn("return if (menuKey == SettingsScrollMemory.ROOT) root else section", self.state)
 
-    def test_restore_waits_for_the_list_to_be_measured(self):
-        self.assertIn("snapshotFlow { state.layoutInfo.totalItemsCount }.first { it > 0 }", self.state)
-        self.assertIn("state.scrollToItem(anchor.index, anchor.offset)", self.state)
+    def test_sections_cannot_clamp_or_save_the_root_scroll_state(self):
+        self.assertIn("val section = key(menuKey) { remember { LazyListState() } }", self.state)
+        self.assertNotIn("scrollToItem(", self.state)
 
     def test_menu_keys_match_the_section_enum(self):
         enum_body = self.screen.split("enum class SettingsSection", 1)[1].split("}", 1)[0]
@@ -193,6 +193,180 @@ class UpdateDownloadRecoveryTest(unittest.TestCase):
     def test_stall_policy_has_a_unit_test(self):
         test = read(ROOT / "android-app/app/src/test/java/com/vladimir/messenger/data/update/ApkUpdateTest.kt")
         self.assertIn("stalledIncomingRowIsDroppedBeforeAskingAnotherSeed", test)
+
+
+class SiteFirstUpdateTest(unittest.TestCase):
+    """Явное скачивание: сначала актуальный сайт, затем запасные источники."""
+
+    def setUp(self):
+        self.checker = read(JAVA / "service/UpdateChecker.kt")
+        self.downloads = read(JAVA / "service/OfficialUpdateDownloads.kt")
+        self.policy = read(JAVA / "service/OfficialUpdatePolicy.kt")
+        self.mirror = read(JAVA / "service/UpdateSiteMirror.kt")
+        self.worker = read(JAVA / "worker/OfficialUpdateMonitorWorker.kt")
+
+    def test_update_dialog_and_settings_choose_the_official_coordinator(self):
+        for name in ("MainActivity.kt", "ui/update/UpdateViewModel.kt", "ui/screens/settings/SettingsViewModel.kt"):
+            self.assertRegex(read(JAVA / name), r"downloadApk\([^\n]*preferOfficial\s*=\s*true")
+        self.assertIn("UpdateSiteMirror.currentCopy(releaseInfo", self.checker)
+        self.assertIn("officialDownloads.start(releaseInfo, site)", self.checker)
+
+    def test_stale_metadata_cannot_turn_into_a_pinned_old_apk(self):
+        self.assertIn("!canUseRelayMetadata(metadataStale, response.cacheHeader)", self.checker)
+        self.assertIn('conn.getHeaderField("X-Apu-Cache")', self.checker)
+        self.assertIn('setRequestProperty("Cache-Control", "no-cache, no-store")', self.checker)
+        self.assertIn('/update/latest?nocache=', self.checker)
+        self.assertIn('/releases/latest?nocache=', self.checker)
+        self.assertIn("siteApkMatchesLatest(", self.mirror)
+        self.assertIn('json.optBoolean("allowSiteMirror", false)', read(JAVA / "service/UpdateNotifier.kt"))
+        download = self.checker.split("suspend fun downloadApk(", 1)[1].split("private fun downloadApkConfirmed", 1)[0]
+        self.assertIn("if (preferOfficial) {", download)
+        self.assertIn("confirmOfficialDownloadRelease(releaseInfo", download)
+        self.assertIn("checkForUpdate(currentAppVersion(), manual = true)", download)
+        self.assertNotIn("!releaseInfo.allowSiteMirror", download)
+        self.assertIn("pinnedGithubApkUrl(attempt.version)", self.policy)
+
+    def test_managed_files_wait_for_validation_and_survive_restart(self):
+        self.assertIn("officialDownloads.mayExposeCompleted", self.checker)
+        self.assertIn("getPackageArchiveInfo", self.downloads)
+        self.assertIn("ApkUpdate.sha256OfFile", self.downloads)
+        self.assertIn("KEY_START_AFTER_ID", self.downloads)
+        self.assertIn("matchesReplacement(manager(), id, pending, source)", self.downloads)
+        self.assertIn("OfficialUpdateMonitor.restore", read(JAVA / "MessengerApplication.kt"))
+        self.assertIn("reconcileOfficialDownload", self.worker)
+        self.assertIn("OfficialUpdateDownloadReceiver", read(ROOT / "android-app/app/src/main/AndroidManifest.xml"))
+
+    def test_executable_switching_simulation_is_in_ci(self):
+        script = read(ROOT / "scripts/ci/check-chat-history.sh")
+        self.assertIn("check-update-download-sim.sh", script)
+        self.assertIn("check-update-check-sim.sh", script)
+        harness = read(ROOT / "scripts/ci/update-download-sim/DownloadHarness.kt")
+        self.assertIn("interruptedInitialEnqueue()", harness)
+        self.assertIn("interruptedSwitchAndCancellation()", harness)
+        self.assertIn("duplicateEventsAreSerialized()", harness)
+        freshness = read(ROOT / "scripts/ci/update-check-sim/CheckHarness.kt")
+        self.assertIn("checker.downloadApk(card(marker), preferOfficial = true)", freshness)
+        self.assertIn('staleRelayRejected("stale", "absent")', freshness)
+        self.assertIn("pinnedGithubApkUrl(NEW)", freshness)
+
+    def test_site_hint_and_fallback_status_are_localized(self):
+        for folder in ("values", "values-en"):
+            strings = read(RES / folder / "strings.xml")
+            for key in ("upd_site_priority_hint", "upd_fresh_check_unavailable", "st_official_trying_fallback", "st_official_verifying"):
+                self.assertIn(f'name="{key}"', strings)
+
+
+class VisibleMenuReturnTest(unittest.TestCase):
+    """Static wiring checks complement, not replace, the emulator UI tests."""
+
+    def setUp(self):
+        self.nav = read(JAVA / "ui/navigation/NavGraph.kt")
+
+    def test_return_button_is_localized_and_has_a_48dp_target(self):
+        button = read(JAVA / "ui/components/ApuBackButton.kt")
+        self.assertIn("stringResource(R.string.action_back)", button)
+        self.assertIn("size = 48.dp", button)
+        for folder in ("values", "values-en"):
+            strings = read(RES / folder / "strings.xml")
+            self.assertIn('name="action_back"', strings)
+            self.assertIn('name="call_return_to_call"', strings)
+
+    def test_menu_routes_keep_a_visible_back_control(self):
+        screens = (
+            "call/CallScreen.kt", "channels/ChannelScreen.kt", "chat/ChatFoldersScreen.kt",
+            "contacts/AddContactScreen.kt", "contacts/ContactsScreen.kt", "contacts/RenameContactScreen.kt",
+            "devices/DevicesScreenScaffold.kt", "feedback/FeedbackScreen.kt", "groups/GroupChatScreen.kt",
+            "groups/GroupsScreen.kt", "groups/MyJoinRequestsScreen.kt", "mtproxy/MtProxyListScreen.kt",
+            "qr/QrScannerScreen.kt", "saved/SavedScreen.kt", "settings/IdentityBackupScreen.kt",
+            "settings/PeerRatingScreen.kt", "settings/ProfileBackupScreen.kt", "settings/RankBenefitsScreen.kt",
+            "settings/SettingsScreen.kt", "share/ShareProfileScreen.kt", "support/SupportScreen.kt",
+        )
+        for path in screens:
+            with self.subTest(screen=path):
+                self.assertIn("ApuBackButton(", read(JAVA / "ui/screens" / path))
+        # The conversation and group-admin headers already have visible back controls.
+        self.assertIn("ApuHeaderIconBubble(onClick = onBack", read(JAVA / "ui/components/ConversationHeader.kt"))
+        self.assertIn("ApuTextAction(label = stringResource(R.string.action_back), onClick = onBackClick)",
+                      read(JAVA / "ui/screens/groups/GroupAdminScreen.kt"))
+
+    def test_devices_header_is_outside_the_scrolling_pairing_content(self):
+        screen = read(JAVA / "ui/screens/devices/DevicesScreen.kt")
+        scaffold = read(JAVA / "ui/screens/devices/DevicesScreenScaffold.kt")
+        self.assertIn("DevicesScreenScaffold(onBackClick = onBackClick)", screen)
+        self.assertLess(scaffold.index("navigationIcon = { ApuBackButton"), scaffold.index("verticalScroll("))
+        self.assertIn("onScanClick = { navController.navigate(Screen.DevicePairScan.route) }", self.nav)
+        device_scan = self.nav.split("composable(route = Screen.DevicePairScan.route)", 1)[1]
+        self.assertIn("onBackClick = { navController.popBackStack() }", device_scan)
+
+    def test_folder_editor_and_settings_close_inner_state_first(self):
+        folders = read(JAVA / "ui/screens/chat/ChatFoldersScreen.kt")
+        settings = read(JAVA / "ui/screens/settings/SettingsScreen.kt")
+        action = read(JAVA / "ui/screens/settings/SettingsBackAction.kt")
+        self.assertIn("BackHandler(enabled = editorOpen) { closeEditor() }", folders)
+        self.assertIn("onBack = closeEditor", folders)
+        self.assertIn("modifier = Modifier.swipeBack(onBack = onBack)", folders)
+        self.assertIn("settingsBackAction(settingsSection != null && !showProfile", settings)
+        self.assertIn(".swipeBack(onBack = goBack)", settings)
+        self.assertIn("ApuBackButton(onClick = goBack)", settings)
+        self.assertIn("BackHandler(enabled = sectionOpen, onBack = back)", action)
+        state = read(JAVA / "ui/screens/settings/SettingsScrollState.kt")
+        self.assertIn("val root = rememberLazyListState()", state)
+        self.assertIn("val section = key(menuKey) { remember { LazyListState() } }", state)
+        self.assertIn("return if (menuKey == SettingsScrollMemory.ROOT) root else section", state)
+
+    def test_invite_and_input_windows_have_an_explicit_exit(self):
+        for path in ("chat/ChatListInviteChoiceDialog.kt", "groups/CommunityInviteChoiceDialog.kt"):
+            dialog = read(JAVA / "ui/screens" / path)
+            self.assertIn("dismissLabel = stringResource(R.string.action_cancel)", dialog)
+            self.assertIn("onDismiss = onDismiss", dialog)
+            self.assertIn("verticalScroll(rememberScrollState())", dialog)
+        self.assertIn("ChatListInviteChoiceDialog(", read(JAVA / "ui/screens/chat/ChatListScreen.kt"))
+        self.assertIn("CommunityInviteChoiceDialog(", read(JAVA / "ui/screens/groups/GroupsScreen.kt"))
+        panel = read(JAVA / "ui/components/InputPanelDialog.kt")
+        self.assertIn("contentDescription = stringResource(R.string.action_close)", panel)
+        self.assertIn("onClick = onDismiss", panel)
+        self.assertIn("size = 48.dp", panel)
+
+    def test_call_and_community_return_paths_cannot_strand_users(self):
+        call = read(JAVA / "ui/screens/call/CallScreen.kt")
+        banner = read(JAVA / "ui/navigation/OngoingCallBanner.kt")
+        self.assertIn("onClick = onLeaveCall", call)
+        self.assertIn("if (viewModel.uiState.value.screenSharing) viewModel.setScreenSharing(false)", call)
+        self.assertIn("CallAwareNavContainer(", self.nav)
+        self.assertIn("onReturn = { navController.navigate(Screen.Call.incoming)", self.nav)
+        self.assertIn("phase != CallStateMachine.Phase.IDLE", banner)
+        self.assertIn("phase != CallStateMachine.Phase.ENDED", banner)
+        self.assertIn("content(if (showBanner) body.consumeWindowInsets(WindowInsets.statusBars) else body)", banner)
+        self.assertIn("if (peerId.isBlank()) return", read(JAVA / "ui/screens/call/CallViewModel.kt"))
+        self.assertIn("onLeftGroup = { returnAfterLeavingCommunity(navController) }", self.nav)
+        community = read(JAVA / "ui/navigation/CommunityNavigation.kt")
+        for route in ("Screen.Groups.route", "Screen.ChatList.route", "Screen.Onboarding.route"):
+            self.assertIn("popBackStack(" + route, community)
+        self.assertIn("popUpTo(navController.graph.id)", community)
+        saved = self.nav.split("composable(route = Screen.Saved.route)", 1)[1].split("composable(", 1)[0]
+        self.assertIn("ApuMainTabBar(null, mainTabActions(navController))", saved)
+
+    def test_instrumented_tests_really_run_at_both_screen_sizes(self):
+        workflow = read(ROOT / ".github/workflows/chat-clear-android.yml")
+        runner = read(ROOT / "scripts/ci/run-android-navigation-tests.sh")
+        guard = read(ROOT / "scripts/ci/check-android-navigation-results.py")
+        self.assertIn("bash scripts/ci/run-android-navigation-tests.sh", workflow)
+        self.assertIn("com.vladimir.messenger.data.chatclear", runner)
+        self.assertIn("com.vladimir.messenger.ui.navigation", runner)
+        self.assertIn("run_navigation normal", runner)
+        self.assertIn("run_navigation compact-large-text", runner)
+        self.assertIn("adb shell wm size 360x640", runner)
+        self.assertIn("adb shell settings put system font_scale 1.4", runner)
+        self.assertIn("check-android-navigation-results.py", runner)
+        for name in ("BackButtons", "SettingsNavigation", "FolderReturn", "MenuDialogs", "CallAndCommunityNavigation"):
+            self.assertIn(name + "InstrumentedTest", guard)
+            test_path = (ROOT / "android-app/app/src/androidTest/java/com/vladimir/messenger/ui/navigation" /
+                         (name + "InstrumentedTest.kt"))
+            self.assertTrue(test_path.is_file())
+            cases = re.findall(r"@Test\s+fun\s+(\w+)\(", read(test_path))
+            self.assertTrue(cases, f"{test_path} has no tests")
+            for case in cases:
+                self.assertIn(f'"{case}"', guard)
 
 
 if __name__ == "__main__":

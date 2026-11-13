@@ -25,6 +25,10 @@ interface DirectPollDao {
     @Query("SELECT * FROM direct_polls WHERE pollId = :pollId")
     suspend fun getPoll(pollId: String): DirectPollEntity?
 
+    /** A poll's human-readable question is not an ordinary mailbox text. */
+    @Query("SELECT EXISTS(SELECT 1 FROM direct_polls WHERE messageId = :messageId)")
+    suspend fun hasMessagePoll(messageId: String): Boolean
+
     @Query("SELECT * FROM direct_polls WHERE chatId = :chatId")
     fun observeChatPolls(chatId: String): Flow<List<DirectPollEntity>>
 

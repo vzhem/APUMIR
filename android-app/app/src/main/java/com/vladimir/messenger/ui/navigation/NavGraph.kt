@@ -40,8 +40,6 @@ import com.vladimir.messenger.ui.screens.chat.ChatListScreen
 import com.vladimir.messenger.ui.screens.chat.ChatDetailScreen
 import com.vladimir.messenger.ui.screens.contacts.AddContactScreen
 import com.vladimir.messenger.ui.components.ApuMainTabBar
-import com.vladimir.messenger.ui.components.ChatWallpaper
-import androidx.compose.foundation.layout.fillMaxSize
 import com.vladimir.messenger.ui.components.ApuTab
 import com.vladimir.messenger.ui.components.ApuTabActions
 import com.vladimir.messenger.ui.screens.contacts.ContactsScreen
@@ -288,7 +286,7 @@ fun MessengerNavGraph(
     }
 
     // Тап по уведомлению: по базам решаем, что это (личный чат или группа/
-    // канал), ведём в место сообщения и снимаем уведомление.
+    // канал), и ведём в место сообщения. Android снимает нажатое уведомление.
     val navLinkContext = LocalContext.current.applicationContext
     LaunchedEffect(pendingChatLink) {
         val link = pendingChatLink ?: return@LaunchedEffect
@@ -320,8 +318,10 @@ fun MessengerNavGraph(
                 contactId = chat.contactId,
             )
         }
-        // Снять уведомление ДО consume: после него эффект отменяется.
-        runCatching { entry.notificationHelper().cancelChatNotifications(chatId) }
+        // Do not cancel the entire chat here: the tapped post auto-cancels,
+        // while the visible screen marks its actual chat/topic read under the
+        // notification gate. This keeps other topics' alerts and avoids an
+        // unsynchronized cancel racing a post or clearing before navigation.
         navController.navigate(route) { launchSingleTop = true }
         // Раунд 140: сброс был ПЕРВОЙ строкой - он обнулял ключ этого
         // LaunchedEffect, корутина отменялась на первом же запросе к базе,
@@ -353,13 +353,15 @@ fun MessengerNavGraph(
     // переходами экранов просвечивал ДЕФОЛТНЫЙ белый фон окна. Обои APU
     // под NavHost - постоянная подложка: на каком бы кадре слайда ни
     // остановилась анимация, снизу всегда свой фон, а не белый.
-    androidx.compose.foundation.layout.Box(
-        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
-    ) {
-    ChatWallpaper()
+    CallAwareNavContainer(
+        phase = callUiState.phase,
+        onCallScreen = currentBackStack?.destination?.route == Screen.Call.route,
+        onReturn = { navController.navigate(Screen.Call.incoming) { launchSingleTop = true } },
+    ) { navModifier ->
     NavHost(
         navController    = navController,
         startDestination = startDestination,
+        modifier = navModifier,
         // РЎС‚Р°РЅРґР°СЂС‚РЅС‹Рµ Р°РЅРёРјР°С†РёРё: РІС…РѕРґ/РІС‹С…РѕРґ С‡РµСЂРµР· slide + fade
         enterTransition = {
             slideIntoContainer(
@@ -749,7 +751,7 @@ fun MessengerNavGraph(
                 bottomBar = {
                     // «Избранное» больше не кнопка панели, поэтому ни один
                     // раздел здесь не подсвечен - панель работает как переход.
-                    ApuMainTabBar(ApuTab.Chats, mainTabActions(navController))
+                    ApuMainTabBar(null, mainTabActions(navController))
                 },
                 onBackClick = { navController.popBackStack() },
                 // Возврат к оригиналу: личный чат, тема группы или лента канала.
@@ -966,9 +968,8 @@ fun MessengerNavGraph(
         ) {
             GroupAdminScreen(
                 onBackClick = { navController.popBackStack() },
-                onLeftGroup = {
-                    navController.popBackStack(Screen.Groups.route, inclusive = false)
-                },
+                // Управление могло быть открыто прямо из чатов или уведомления.
+                onLeftGroup = { returnAfterLeavingCommunity(navController) },
             )
         }
 

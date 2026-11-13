@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -63,6 +64,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.data.call.CallIncoming
 import com.vladimir.messenger.data.call.CallStateMachine
+import com.vladimir.messenger.ui.components.ApuBackButton
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ChatWallpaper
@@ -195,7 +197,12 @@ fun CallScreen(
         onDispose { }
     }
     DisposableEffect(Unit) {
-        onDispose { screenCapturer.stop() }
+        onDispose {
+            screenCapturer.stop()
+            // При уходе с экрана захват уже остановлен: состояние менеджера
+            // не должно показывать продолжающуюся демонстрацию.
+            if (viewModel.uiState.value.screenSharing) viewModel.setScreenSharing(false)
+        }
     }
 
     var frontCamera by remember { mutableStateOf(true) }
@@ -424,6 +431,12 @@ fun CallScreen(
                 Spacer(modifier = Modifier.height(if (state.video && inCall) 108.dp else 72.dp))
             }
         }
+        // Как системный Back: вернуться в приложение, не нажимая красную
+        // трубку. Сам звонок живёт в CallManager и не завершается навигацией.
+        ApuBackButton(
+            onClick = onLeaveCall,
+            modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(start = 8.dp, top = 4.dp),
+        )
         if (showVoiceEffects) {
             com.vladimir.messenger.ui.components.VoiceEffectPickerDialog(
                 selected = state.voiceEffect,

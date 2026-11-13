@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.support
 
+import com.vladimir.messenger.ui.components.ApuBackButton
+
 import com.vladimir.messenger.ui.components.ApuPremiumChip
 import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
@@ -42,7 +44,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -116,11 +117,7 @@ fun SupportScreen(
                         scrolledContainerColor = Color.Transparent,
                     ),
                     title = { ApuSettingsHeader(stringResource(R.string.support_title)) },
-                    navigationIcon = {
-                        IconButton(onClick = onBackClick) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                        }
-                    },
+                    navigationIcon = { ApuBackButton(onClick = onBackClick) },
                 )
             },
         ) { padding ->

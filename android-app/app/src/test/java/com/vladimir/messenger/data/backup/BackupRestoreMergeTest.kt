@@ -31,10 +31,21 @@ class BackupRestoreMergeTest {
 
         assertEquals(
             "INSERT OR IGNORE INTO \"messages\" (\"id\", \"chatId\", \"text\", \"createdAt\") " +
-                "SELECT copy.\"id\", copy.\"chatId\", copy.\"text\", copy.\"createdAt\" FROM copy.\"messages\"",
+                "SELECT src.\"id\", src.\"chatId\", src.\"text\", src.\"createdAt\" FROM copy.\"messages\" AS src",
             step.sql,
         )
         assertTrue("строка копии не должна перезаписывать живую", step.sql.startsWith("INSERT OR IGNORE"))
+    }
+
+    @Test
+    fun `device local notification work is not imported from a backup`() {
+        val columns = arrayOf(column("id"), column("notificationPending", "INTEGER", notNull = true, hasDefault = true))
+        val step = inserts(BackupRestoreMerge.plan(listOf(table("messages", *columns)), listOf(table("messages", *columns))))
+            .getValue("messages")
+        assertEquals(
+            "INSERT OR IGNORE INTO \"messages\" (\"id\") SELECT src.\"id\" FROM copy.\"messages\" AS src",
+            step.sql,
+        )
     }
 
     @Test
@@ -47,7 +58,7 @@ class BackupRestoreMergeTest {
         val step = inserts(BackupRestoreMerge.plan(live, copy)).getValue("messages")
 
         assertEquals(
-            "INSERT OR IGNORE INTO \"messages\" (\"id\") SELECT copy.\"id\" FROM copy.\"messages\"",
+            "INSERT OR IGNORE INTO \"messages\" (\"id\") SELECT src.\"id\" FROM copy.\"messages\" AS src",
             step.sql,
         )
     }
@@ -68,7 +79,7 @@ class BackupRestoreMergeTest {
 
         assertEquals(
             "INSERT OR IGNORE INTO \"messages\" (\"id\", \"pinned\", \"note\") " +
-                "SELECT copy.\"id\", 0, '' FROM copy.\"messages\"",
+                "SELECT src.\"id\", 0, '' FROM copy.\"messages\" AS src",
             step.sql,
         )
     }
@@ -82,7 +93,7 @@ class BackupRestoreMergeTest {
 
         assertEquals(
             "INSERT OR IGNORE INTO \"messages\" (\"id\", \"quoteId\") " +
-                "SELECT copy.\"id\", NULL FROM copy.\"messages\"",
+                "SELECT src.\"id\", NULL FROM copy.\"messages\" AS src",
             step.sql,
         )
     }

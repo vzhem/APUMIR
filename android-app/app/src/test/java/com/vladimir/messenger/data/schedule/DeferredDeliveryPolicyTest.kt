@@ -22,6 +22,16 @@ class DeferredDeliveryPolicyTest {
         assertNull(DeferredWire.parseReceipt("ack|${letter.id}"))
     }
 
+    @Test fun transportAckWithKnownSenderCanOnlyAffectThatRecipient() {
+        assertTrue(DeferredDeliveryPolicy.matchesTransportAckPeer(peers[0], peers[0]))
+        assertFalse(DeferredDeliveryPolicy.matchesTransportAckPeer(peers[0], peers[1]))
+        assertFalse(DeferredDeliveryPolicy.matchesTransportAckPeer(peers[0], ""))
+        assertFalse(DeferredDeliveryPolicy.matchesTransportAckPeer("", null))
+        // Older MQTT delivery events carry no sender; this compatibility path
+        // is intentionally not proof of the receiver's identity.
+        assertTrue(DeferredDeliveryPolicy.matchesTransportAckPeer(peers[0], null))
+    }
+
     @Test fun groupFallbackIsPerRecipientAndDoesNotSendAgainToConfirmedPhones() {
         assertFalse(DeferredDeliveryPolicy.needsFallback(peers[0], listOf(peers[0]), emptyList()))
         assertTrue(DeferredDeliveryPolicy.needsFallback(peers[1], listOf(peers[0]), emptyList()))

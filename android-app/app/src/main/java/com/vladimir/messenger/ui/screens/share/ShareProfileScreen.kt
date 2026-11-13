@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.share
 
+import com.vladimir.messenger.ui.components.ApuBackButton
+
 import com.vladimir.messenger.ui.components.ApuPremiumSpinner
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
@@ -9,7 +11,6 @@ import com.vladimir.messenger.ui.components.ApuSettingsHeader
 import android.content.Intent
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
@@ -64,11 +65,7 @@ fun ShareProfileScreen(
                     scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
                 ),
                 title = { ApuSettingsHeader(stringResource(R.string.settings_share_profile)) },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.action_back))
-                    }
-                }
+                navigationIcon = { ApuBackButton(onClick = onBackClick) }
             )
         }
     ) { padding ->

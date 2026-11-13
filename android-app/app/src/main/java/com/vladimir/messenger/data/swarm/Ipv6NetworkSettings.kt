@@ -64,7 +64,10 @@ object Ipv6NetworkSettings {
 
         override fun wakeNetwork() {
             try {
-                RustBridge.onNetworkAvailable()
+                // A proxy change is not an Android network change. The native
+                // proxy setter schedules MQTT replacement if needed; wake
+                // discovery without destroying healthy direct connections.
+                RustBridge.onForegroundRecovery()
             } catch (t: Throwable) {
                 Log.w(TAG, "wakeNetwork failed: ${t.message}")
             }

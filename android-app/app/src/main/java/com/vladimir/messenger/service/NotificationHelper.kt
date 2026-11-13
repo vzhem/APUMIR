@@ -1,11 +1,16 @@
 package com.vladimir.messenger.service
 
+import android.Manifest
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.vladimir.messenger.MainActivity
 import com.vladimir.messenger.MessengerApplication
 import com.vladimir.messenger.R
@@ -32,7 +37,6 @@ class NotificationHelper @Inject constructor(
     private val flashlightBlinker: FlashlightBlinker,
 ) {
     companion object {
-        private const val MESSAGE_NOTIFICATION_BASE_ID = 2000
         private const val SOS_NOTIFICATION_BASE_ID = 700_000
         const val EXTRA_CHAT_ID = "extra_chat_id"
 
@@ -52,7 +56,7 @@ class NotificationHelper @Inject constructor(
      * @param messageText Текст сообщения
      * @param isIncoming true если входящее, false если исходящее (не показываем)
      */
-    suspend fun showMessageNotification(
+    internal suspend fun showMessageNotification(
         chatId: String,
         senderId: String,
         rawText: String,
@@ -61,14 +65,15 @@ class NotificationHelper @Inject constructor(
         /** Тихое сообщение (префикс в тексте): уведомление без звука и вибрации. */
         quiet: Boolean = false,
         messageId: String? = null,
-    ) {
-        if (messageId != null && com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId)) return
+        snapshot: String? = null,
+    ): IncomingNotificationPost {
+        if (messageId != null && com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId)) return IncomingNotificationPost.SUPPRESSED
         val messageText = com.vladimir.messenger.util.QuietMessage.strip(rawText)
         val silent = quiet || com.vladimir.messenger.util.QuietMessage.isQuiet(rawText)
         android.util.Log.d("NotificationHelper", "showMessageNotification called: chatId=$chatId, senderId=${senderId.take(16)}, isIncoming=$isIncoming")
         if (!isIncoming) {
             android.util.Log.d("NotificationHelper", "Skipping notification (outgoing message)")
-            return
+            return IncomingNotificationPost.SUPPRESSED
         }
 
         // Последний страж настройки «Кто может приглашать в группы и каналы»:
@@ -84,7 +89,7 @@ class NotificationHelper @Inject constructor(
                         .getOrNull() != null
                     if (!com.vladimir.messenger.data.profile.InvitePrivacyStore.allows(mode, isContact)) {
                         android.util.Log.i("NotificationHelper", "invite notification suppressed by privacy setting")
-                        return
+                        return IncomingNotificationPost.SUPPRESSED
                     }
                 }
             }
@@ -93,11 +98,12 @@ class NotificationHelper @Inject constructor(
         val nowMs = System.currentTimeMillis()
         val group = groupDao.getGroupById(chatId)
         if (isMuted(chatId, topicId, group, nowMs)) {
-            android.util.Log.i("NotificationHelper", "Message notification suppressed by mute settings: ${chatId.take(12)}")
-            return
+            android.util.Log.i("NotificationHelper", "Message notification suppressed by mute settings")
+            return IncomingNotificationPost.SUPPRESSED
         }
 
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (!canPost(notificationManager, MessengerApplication.CHANNEL_ID)) return IncomingNotificationPost.BLOCKED
 
         // Получить имя и аватар отправителя
         val contact = contactRepository.getContactById(senderId)
@@ -117,6 +123,9 @@ class NotificationHelper @Inject constructor(
         
         // Создать intent для открытия чата
         val intent = Intent(context, MainActivity::class.java).apply {
+            // Extras do not participate in PendingIntent identity: include the
+            // full chat tag in the action so hash collisions cannot retarget taps.
+            action = "com.vladimir.messenger.notification." + LocalMessageNotifications.chatTag(chatId)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_CHAT_ID, chatId)
             if (!topicId.isNullOrBlank()) putExtra(EXTRA_TOPIC_ID, topicId)
@@ -138,13 +147,23 @@ class NotificationHelper @Inject constructor(
             .setPriority(if (silent) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_HIGH)
             .setSilent(silent)
             .setAutoCancel(true)
-            .addExtras(android.os.Bundle().apply { putString("apu_message_id", messageId) })
+            .addExtras(android.os.Bundle().apply {
+                putString(LocalMessageNotifications.EXTRA_MESSAGE, messageId)
+                putString(LocalMessageNotifications.EXTRA_CHAT, chatId)
+                putString(LocalMessageNotifications.EXTRA_TOPIC, topicId)
+                putString(LocalMessageNotifications.EXTRA_SNAPSHOT, snapshot)
+            })
             .setContentIntent(pendingIntent)
             .build()
-        
-        // Показать notification (ID на основе chatId чтобы группировать)
-        val notificationId = MESSAGE_NOTIFICATION_BASE_ID + chatId.hashCode().mod(1000)
-        notificationManager.notify(notificationId, notification)
+
+        // Tags group by the entire chat, not 1,000 colliding integer buckets.
+        try {
+            notificationManager.notify(LocalMessageNotifications.chatTag(chatId), LocalMessageNotifications.MESSAGE_ID, notification)
+        } catch (_: SecurityException) {
+            return IncomingNotificationPost.BLOCKED
+        }
+        // Permission may have changed while the notification was being built.
+        if (!canPost(notificationManager, MessengerApplication.CHANNEL_ID)) return IncomingNotificationPost.BLOCKED
         flashlightBlinker.blinkForMessage(
             kind = FlashlightMessageKind.classify(
                 hasGroup = group != null,
@@ -153,6 +172,7 @@ class NotificationHelper @Inject constructor(
             silent = silent,
             muted = false,
         )
+        return IncomingNotificationPost.POSTED
     }
 
     /**
@@ -162,15 +182,17 @@ class NotificationHelper @Inject constructor(
      * будильника, длинная вибрация и попытка полноэкранного показа:
      * уведомление должно разбудить и спящий телефон.
      */
-    suspend fun showSosNotification(
+    internal suspend fun showSosNotification(
         chatId: String,
         senderId: String,
         topicId: String?,
         messageId: String? = null,
-    ) {
+        snapshot: String? = null,
+    ): IncomingNotificationPost {
+        if (messageId != null && com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId)) return IncomingNotificationPost.SUPPRESSED
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (!canPost(notificationManager, MessengerApplication.CHANNEL_SOS_ID)) return IncomingNotificationPost.BLOCKED
         val group = groupDao.getGroupById(chatId)
-        flashlightBlinker.blinkForSos(isGroup = group != null && !group.isChannel)
         val contact = contactRepository.getContactById(senderId)
         val senderName = contact?.displayName
             ?: groupDao.getMember(chatId, senderId)?.displayName?.takeIf { it.isNotBlank() }
@@ -180,6 +202,7 @@ class NotificationHelper @Inject constructor(
         val body = "$senderName: ${com.vladimir.messenger.util.SosMessage.DEFAULT_TEXT}"
 
         val intent = Intent(context, MainActivity::class.java).apply {
+            action = "com.vladimir.messenger.notification." + LocalMessageNotifications.sosTag(chatId, messageId)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_CHAT_ID, chatId)
             if (!topicId.isNullOrBlank()) putExtra(EXTRA_TOPIC_ID, topicId)
@@ -205,15 +228,24 @@ class NotificationHelper @Inject constructor(
             // просто всплывёт поверх экрана - тихо оно не останется.
             .setFullScreenIntent(pendingIntent, true)
             .setVibrate(longArrayOf(0, 700, 250, 700, 250, 700))
-            .addExtras(android.os.Bundle().apply { putString("apu_message_id", messageId) })
+            .addExtras(android.os.Bundle().apply {
+                putString(LocalMessageNotifications.EXTRA_MESSAGE, messageId)
+                putString(LocalMessageNotifications.EXTRA_CHAT, chatId)
+                putString(LocalMessageNotifications.EXTRA_TOPIC, topicId)
+                putString(LocalMessageNotifications.EXTRA_SNAPSHOT, snapshot)
+            })
             .setContentIntent(pendingIntent)
             .build()
 
-        // ID свой на каждое сообщение: за одно нажатие приходит несколько
-        // тревог, и каждая должна прозвучать, а не перетереть предыдущую.
-        val notificationId = SOS_NOTIFICATION_BASE_ID +
-            ((messageId?.hashCode() ?: chatId.hashCode()).mod(100_000))
-        notificationManager.notify(notificationId, notification)
+        // Independent tags keep distinct SOS messages from replacing each other.
+        try {
+            notificationManager.notify(LocalMessageNotifications.sosTag(chatId, messageId), LocalMessageNotifications.SOS_ID, notification)
+        } catch (_: SecurityException) {
+            return IncomingNotificationPost.BLOCKED
+        }
+        if (!canPost(notificationManager, MessengerApplication.CHANNEL_SOS_ID)) return IncomingNotificationPost.BLOCKED
+        flashlightBlinker.blinkForSos(isGroup = group != null && !group.isChannel)
+        return IncomingNotificationPost.POSTED
     }
 
     /**
@@ -248,19 +280,39 @@ class NotificationHelper @Inject constructor(
         return chatDao.getChatById(chatId)?.mutedUntilMs?.let { it > nowMs } == true
     }
 
-    /**
-     * Отменить все уведомления для чата (когда пользователь открыл чат).
-     */
-    /** Do not dismiss a newer, unrelated message notification in the same chat. */
-    fun cancelMessageNotification(messageId: String) {
-        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.activeNotifications.filter { it.notification.extras.getString("apu_message_id") == messageId }
-            .forEach { manager.cancel(it.tag, it.id) }
+    /** Android can silently drop notify when the app or channel is blocked. */
+    internal fun canPost(manager: NotificationManager, channelId: String): Boolean {
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) return false
+        val channel = manager.getNotificationChannel(channelId) ?: return false
+        if (channel.importance == NotificationManager.IMPORTANCE_NONE) return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val group = channel.group?.let(manager::getNotificationChannelGroup)
+            if (group?.isBlocked == true) return false
+        }
+        return true
     }
 
-    fun cancelChatNotifications(chatId: String) {
-        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val notificationId = MESSAGE_NOTIFICATION_BASE_ID + chatId.hashCode().mod(1000)
-        notificationManager.cancel(notificationId)
+    /** A matching visible post can repair a crash without sounding again. */
+    internal fun isMessageNotificationActive(messageId: String, snapshot: String): Boolean {
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        return manager.activeNotifications.any {
+            it.notification.extras.getString(LocalMessageNotifications.EXTRA_MESSAGE) == messageId &&
+                it.notification.extras.getString(LocalMessageNotifications.EXTRA_SNAPSHOT) == snapshot
+        }
     }
+
+    /** A snapshot filter prevents a stale retry from dismissing a newer post. */
+    fun cancelMessageNotification(messageId: String, snapshot: String? = null) {
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.activeNotifications.filter {
+            it.notification.extras.getString(LocalMessageNotifications.EXTRA_MESSAGE) == messageId &&
+                (snapshot == null || it.notification.extras.getString(LocalMessageNotifications.EXTRA_SNAPSHOT) == snapshot)
+        }.forEach { manager.cancel(it.tag, it.id) }
+    }
+
+    /** Clear this chat only; legacy posts without a chat extra cannot be safely attributed. */
+    fun cancelChatNotifications(chatId: String) = LocalMessageNotifications.cancelChat(context, chatId)
 }

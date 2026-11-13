@@ -22,6 +22,7 @@ pub mod connection_manager;
 pub mod custody_relay;
 pub mod connection_pool;
 pub mod dht;
+pub(crate) mod direct_priority;
 pub mod direct_transport;
 pub mod dual_stack;
 pub mod fallback_chain;
@@ -48,6 +49,8 @@ pub mod helper_delivery;
 pub mod helper_quality;
 pub mod helper_policy;
 pub mod presence;
+pub mod presence_dispatch;
+pub mod presence_observation;
 pub mod presence_scope;
 pub mod quic_client;
 pub mod relay;
@@ -126,8 +129,11 @@ pub mod mqtt_backpressure;
 pub mod mqtt_dedup;
 #[cfg(feature = "mqtt-dual-broker")]
 pub mod mqtt_fanout;
+#[cfg(feature = "mqtt-dual-broker")]
+pub mod mqtt_topology;
 pub mod mqtt_liveness;
 pub mod mqtt_overflow;
+pub(crate) mod mqtt_wait;
 #[cfg(feature = "mqtt-secondary-observe")]
 pub mod mqtt_secondary_observer;
 pub mod mqtt_transport;

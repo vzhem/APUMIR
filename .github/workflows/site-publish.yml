@@ -26,6 +26,7 @@ jobs:
   publish-to-site:
     name: Upload release files to apu.clan.su
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     steps:
       - name: Check out publishing scripts
         uses: actions/checkout@v4
@@ -49,6 +50,28 @@ jobs:
             echo "::notice::Пререлиз на сайт не публикуем: сайт — только для стабильных версий."
             echo "SKIP=1" >> "$GITHUB_OUTPUT"
           fi
+
+      # A manual dispatch must not silently downgrade the site, either.
+      # Capture the exact stable Latest metadata before touching FTP.
+      - name: Require the published Latest release
+        if: steps.tag.outputs.SKIP != '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APU_RELEASE_TAG: ${{ steps.tag.outputs.TAG }}
+        run: |
+          set -e
+          gh api "repos/${GITHUB_REPOSITORY}/releases/latest" > site-release.json
+          PYTHONPATH=scripts/release python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          from site_release_files import MAX_METADATA_BYTES, release_assets
+          with Path('site-release.json').open('rb') as source:
+              data = source.read(MAX_METADATA_BYTES + 1)
+          if len(data) > MAX_METADATA_BYTES:
+              raise ValueError('release metadata too large')
+          release_assets(json.loads(data), os.environ['APU_RELEASE_TAG'])
+          print('Published stable Latest matches the requested tag')
+          PY
 
       - name: Download release assets
         if: steps.tag.outputs.SKIP != '1'
@@ -109,9 +132,14 @@ jobs:
         if: steps.tag.outputs.SKIP != '1'
         run: python3 scripts/release/chunked_upload.py --self-test
 
-      # Главный канал сайта: uCoz FTP, каталог /downloads. Порядок важен
-      # (website/INSTALL_UCOZ.md): сначала файлы, манифесты — последними,
-      # чтобы сайт ни секунды не ссылался на то, чего ещё нет.
+      - name: Test safe staged publication offline
+        if: steps.tag.outputs.SKIP != '1'
+        run: python3 scripts/release/test_site_staged_upload.py
+
+      # Главный канал сайта: uCoz FTP, каталог /downloads. Каждый файл
+      # сначала загружается под временным именем; публичное имя меняется
+      # только после проверки размера, а latest.json — последним. Это не
+      # атомарная замена всего набора; клиенты должны проверять хеши.
       # Уборка главной папки FTP: первый блин положил файлы релиза в корень
       # вместо /downloads. Скрипт удаляет только известные имена файлов
       # релиза (двойники); чужие файлы не трогает.
@@ -131,51 +159,24 @@ jobs:
       - name: Upload to apu.clan.su via FTP
         if: steps.tag.outputs.SKIP != '1'
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APU_RELEASE_TAG: ${{ steps.tag.outputs.TAG }}
           APU_FTP_HOST: ${{ secrets.APU_UCOZ_FTP_HOST }}
           APU_FTP_USER: ${{ secrets.APU_UCOZ_FTP_USER }}
           APU_FTP_PASSWORD: ${{ secrets.APU_UCOZ_FTP_PASSWORD }}
           APU_FTP_REMOTE_DIR: ${{ vars.APU_UCOZ_FTP_REMOTE_DIR }}
-          APU_UPLOAD_DELAY_SECONDS: "300"
         run: |
-          if [ -z "$APU_FTP_HOST" ] || [ -z "$APU_FTP_USER" ] || [ -z "$APU_FTP_PASSWORD" ]; then
-            echo "::warning::Секреты APU_UCOZ_FTP_HOST/USER/PASSWORD не заданы — сайт не обновлён. Что сделать владельцу: docs/SITE_PUBLISHING.md"
-            exit 0
-          fi
-          # Лёгкая база: все файлы маленькие (APK ≈74 МБ, пакеты до 37 МБ),
-          # поэтому загрузка — простым curl по одному файлу в /downloads,
-          # со сверкой размера на сервере. Система передач кусками по
-          # 100 МБ (chunked_upload.py / ftp_upload.py) остаётся для
-          # будущих больших файлов и проверяется самопрогоном выше.
-          HOST="$APU_FTP_HOST"
-          HOST="${HOST#ftp://}"
-          HOST="${HOST#FTP://}"
-          HOST="${HOST%/}"
-          REMOTE_DIR="${APU_FTP_REMOTE_DIR:-/downloads}"
-          echo "FTP host: $HOST, каталог: $REMOTE_DIR"
-          upload() {
-            file="$1"
-            name="$(basename "$file")"
-            echo "FTP -> $REMOTE_DIR/$name ($(stat -c %s "$file") Б)"
-            curl --fail --silent --show-error \
-              --user "$APU_FTP_USER:$APU_FTP_PASSWORD" \
-              --ftp-create-dirs \
-              --retry 2 \
-              -T "$file" \
-              "ftp://$HOST$REMOTE_DIR/$name"
-            remote_size="$(curl --silent --user "$APU_FTP_USER:$APU_FTP_PASSWORD" \
-              "ftp://$HOST$REMOTE_DIR/$name" --head 2>/dev/null \
-              | tr -d '\r' | awk -F': ' 'tolower($1)=="content-length"{print $2}')"
-            if [ -n "$remote_size" ] && [ "$remote_size" != "$(stat -c %s "$file")" ]; then
-              echo "::error::FTP: $name на сервере $remote_size Б, ожидалось $(stat -c %s "$file") Б"
-              exit 1
-            fi
-          }
-          set -e
-          for zip in site-files/feature-pack-*.zip; do upload "$zip"; done
-          upload site-files/feature-packs.json
-          upload site-files/app-release.apk
-          upload site-files/latest.json
-          echo "site updated: пакеты, манифест пакетов, APK, latest.json"
+          # Отсутствующие секреты, незавершённый STOR, неизвестный размер или
+          # отказ RNTO — ошибка, а не зелёная фикция обновлённого сайта.
+          python3 scripts/release/site_staged_upload.py
+
+      - name: Verify actual public site bytes
+        if: steps.tag.outputs.SKIP != '1'
+        timeout-minutes: 35
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APU_RELEASE_TAG: ${{ steps.tag.outputs.TAG }}
+        run: python3 scripts/release/site_verify_http.py
 
       # Система REST-передач большими кусками (по требованию владельца):
       # любой файл больше 100 МБ уходит на REST-приёмник кусками не больше

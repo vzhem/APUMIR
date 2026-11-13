@@ -17,6 +17,13 @@ class FileExchangePeerStore @Inject constructor(
 ) {
     suspend fun pinFirstSeen(binding: ByteArray, nowMs: Long = System.currentTimeMillis()): PinResult {
         require(binding.isNotEmpty() && binding.size <= MAX_BINDING_BYTES)
+        val snapshot = binding.copyOf()
+        return try {
+            PeerPinSerialization.serialized { pinFirstSeenLocked(snapshot, nowMs) }
+        } finally { snapshot.fill(0) }
+    }
+
+    private suspend fun pinFirstSeenLocked(binding: ByteArray, nowMs: Long): PinResult {
         check(verifyFileExchangeBinding(binding)) { "Invalid file exchange signature" }
         val nodeId = fileExchangeBindingNodeId(binding)
         val publicKey = fileExchangeBindingPublicKey(binding)
@@ -66,12 +73,24 @@ class FileExchangePeerStore @Inject constructor(
      * никогда не происходит сам: его запрашивает пользователь, заново
      * отсканировав QR собеседника. Это осознанное подтверждение личности.
      */
-    suspend fun forgetPin(nodeId: String): Boolean {
+    suspend fun forgetPin(nodeId: String): Boolean = PeerPinSerialization.serialized {
         require(nodeId.matches(Regex("^pk_[0-9a-f]{32}([0-9a-f]{32})?$")))
-        return dao.deleteForContact(nodeId) > 0
+        dao.deleteForContact(nodeId) > 0
     }
 
-    suspend fun bindingFor(nodeId: String): ByteArray? {
+    suspend fun bindingFor(nodeId: String): ByteArray? = withPinnedBinding(nodeId) { it }
+
+    /**
+     * Keep a pin stable for one bounded operation. Do not call another method
+     * of this store from [action]; the gate is deliberately non-reentrant.
+     * Keep it short and do not perform network IO while holding it. This does
+     * NOT protect identity, cached bindings, database restore or another process.
+     * A future push caller must coordinate those separately.
+     */
+    internal suspend fun <T> withPinnedBinding(nodeId: String, action: suspend (ByteArray?) -> T): T =
+        PeerPinSerialization.serialized { action(bindingForLocked(nodeId)) }
+
+    private suspend fun bindingForLocked(nodeId: String): ByteArray? {
         require(nodeId.matches(Regex("^pk_[0-9a-f]{32}([0-9a-f]{32})?$")))
         val entity = dao.get(nodeId) ?: return null
         val binding = Base64.decode(entity.bindingBase64, Base64.NO_WRAP)

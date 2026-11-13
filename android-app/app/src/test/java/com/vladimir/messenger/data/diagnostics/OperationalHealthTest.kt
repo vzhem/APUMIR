@@ -66,6 +66,7 @@ class OperationalHealthTest {
         assertEquals(200L, snapshot.backgroundUptimeMs)
         assertEquals(1L, snapshot.timings[OperationalTiming.CORE_READY_UPTIME]!!.count)
         assertEquals(250L, snapshot.timings[OperationalTiming.RESUME_READY_UPTIME]!!.maxMs)
+        assertTrue(snapshot.render().contains("Сон исключён; восстановление сети и доставка не проверяются"))
     }
     @Test fun goodputUsesConfirmedPayloadAndDoesNotInventZeroDurationSpeed() {
         val tracker = OperationalHealthTracker { 0L }

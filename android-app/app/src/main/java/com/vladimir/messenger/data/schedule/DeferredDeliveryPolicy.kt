@@ -19,4 +19,8 @@ object DeferredDeliveryPolicy {
 
     fun needsFallback(peer: String, confirmed: List<String>, handedOff: List<String>): Boolean =
         peer !in confirmed && peer !in handedOff
+
+    /** Null is the legacy MQTT event, whose wire format does not contain a sender. */
+    fun matchesTransportAckPeer(peer: String, sender: String?): Boolean =
+        peer.isNotBlank() && (sender == null || sender == peer)
 }

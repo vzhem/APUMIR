@@ -1,9 +1,9 @@
-//! Pure bounded fanout and retained-target policy for the r4.4 dual-broker overlay.
+//! Pure bounded fanout and retained-target policy for the two-session MQTT overlay.
 //!
 //! This module performs no network I/O. It gives the later transport integration a fixed two-slot
-//! broker set and a bounded digest-only ledger for retained publications that must be cleared on
-//! every broker where they were queued. Activating the second session and cross-broker receive
-//! dedup remains one atomic integration step after this policy compiles for Android.
+//! session set and a bounded digest-only ledger for retained publications that must be cleared.
+//! Primary and secondary are slots, not permanent broker identities: session endpoints can change
+//! on reconnect, so clearing the current pair cannot prove older endpoint copies were cleared.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -27,8 +27,8 @@ pub(crate) enum MqttBrokerId {
 impl MqttBrokerId {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
-            Self::Primary => "hivemq",
-            Self::Secondary => "emqx",
+            Self::Primary => "primary",
+            Self::Secondary => "secondary",
         }
     }
 
@@ -241,8 +241,8 @@ mod tests {
             ]
         );
         assert_eq!(both.len(), MAX_MQTT_PUBLISH_FANOUT);
-        assert_eq!(MqttBrokerId::Primary.as_str(), "hivemq");
-        assert_eq!(MqttBrokerId::Secondary.as_str(), "emqx");
+        assert_eq!(MqttBrokerId::Primary.as_str(), "primary");
+        assert_eq!(MqttBrokerId::Secondary.as_str(), "secondary");
     }
 
     #[test]

@@ -47,6 +47,9 @@ class EmergencyKeepAliveReceiver : BroadcastReceiver() {
             return
         }
         OperationalDiagnostics.tracker.count(OperationalCounter.DELIVERY_WAKE_ALARM)
+        // Wake decisions use a process-local heartbeat: an old APK's persisted
+        // timestamp is ignored, while a service started earlier in this new
+        // process (e.g. by Application.onCreate) is not mistakenly cleared.
         // Короткий карман бодрости: дать связи и помпам докрутиться, пока
         // система не усыпила процесс обратно.
         runCatching {
@@ -59,7 +62,7 @@ class EmergencyKeepAliveReceiver : BroadcastReceiver() {
         }
         val status = DeliveryAssurance.status(context)
         val now = System.currentTimeMillis()
-        if (!DeliveryWakePolicy.shouldWakeNow(status.conditions, status.lastAliveMs, now)) {
+        if (!DeliveryWakePolicy.shouldWakeNow(status.conditions, DeliveryAssurance.currentProcessLastAliveMs(), now)) {
             // Служба жива (метка свежая) — поднимать второй экземпляр незачем.
             // Но следующий сторож обязателен: будильник одноразовый.
             Log.i(TAG, "wake skipped: service is alive, next watchdog scheduled")
@@ -77,7 +80,7 @@ class EmergencyKeepAliveReceiver : BroadcastReceiver() {
             // исключения из оптимизации батареи. Отказ виден человеку на
             // экране «Уведомления приходят вовремя» и уходит в лестницу.
             OperationalDiagnostics.tracker.count(OperationalCounter.FOREGROUND_START_REFUSED)
-            EmergencyKeepAlive.onServiceRefused(context)
+            EmergencyKeepAlive.onExternalStartRefused(context)
         }
     }
 
@@ -115,6 +118,7 @@ class EmergencyKeepAliveReceiver : BroadcastReceiver() {
             action == EmergencyKeepAlive.ACTION_PUMP ||
                 action == ACTION_BOOT ||
                 action == ACTION_PACKAGE_REPLACED
+
     }
 }
 
@@ -128,14 +132,19 @@ object EmergencyKeepAlive {
     private const val PREFS = "emergency_keep_alive"
     private const val KEY_REFUSALS = "consecutive_refusals"
 
-    /**
-     * Служба стартовала и работает: отметить жизнь и взвести тихий сторож.
-     * Зовётся из [CoreServerService.onStartCommand] после успешного
-     * `startForeground` — но только когда это ручной/системный запуск, а не
-     * пробуждение по будильнику (см. [scheduleWatchdog]).
-     */
-    fun onServiceStarted(context: Context) {
-        DeliveryAssurance.markAlive(context)
+    /** Register lifecycle ownership before foreground entry can fail. */
+    @Synchronized
+    fun onServiceCreated(owner: Any) {
+        DeliveryAssurance.serviceCreated(owner)
+    }
+
+    /** A successful start, including a repeated intent, rearms the watchdog. */
+    @Synchronized
+    fun onServiceStarted(context: Context, owner: Any) {
+        if (!DeliveryAssurance.serviceStarted(context, owner)) {
+            Log.i(TAG, "ignoring start from a superseded service")
+            return
+        }
         refusals(context, 0)
         scheduleWatchdog(context)
     }
@@ -145,9 +154,22 @@ object EmergencyKeepAlive {
      * знает, что его «убили», и назначает быстрый подъём: именно этого не
      * хватало — раньше следующая попытка была через час.
      */
-    fun onServiceStopped(context: Context, intentional: Boolean) {
+    @Synchronized
+    fun onServiceStopped(context: Context, owner: Any, intentional: Boolean) {
+        // Keep the ownership check and alarm update in the same critical section.
+        if (!DeliveryAssurance.serviceStopped(owner)) {
+            Log.i(TAG, "ignoring stop from a superseded service")
+            return
+        }
         if (!DeliveryAssurance.isEnabled(context)) {
             cancel(context)
+            return
+        }
+        val pendingRefusals = refusals(context, -1)
+        if (pendingRefusals > 0) {
+            // onDestroy after a foreground refusal must not replace its retry
+            // ladder with the ordinary two-minute service-gone alarm.
+            applyPlan(context, DeliveryWakePolicy.afterRefusal(DeliveryAssurance.conditions(context), pendingRefusals))
             return
         }
         if (intentional) {
@@ -162,22 +184,47 @@ object EmergencyKeepAlive {
     }
 
     /** Человек смахнул приложение из списка задач: поднимаемся быстро. */
-    fun onTaskRemoved(context: Context) {
-        if (!DeliveryAssurance.isEnabled(context)) return
+    @Synchronized
+    fun onTaskRemoved(context: Context, owner: Any) {
+        if (!DeliveryAssurance.isServiceOwner(owner) || !DeliveryAssurance.isEnabled(context)) return
         applyPlan(context, DeliveryWakePolicy.taskRemoved(DeliveryAssurance.conditions(context)))
     }
 
+    /** The service itself was refused or timed out. Its onDestroy may follow. */
+    @Synchronized
+    fun onServiceRefused(context: Context, owner: Any) {
+        if (!DeliveryAssurance.serviceRefused(owner)) {
+            Log.i(TAG, "ignoring refusal from a superseded service")
+            return
+        }
+        scheduleAfterRefusal(context)
+    }
+
     /**
-     * Поднять службу не удалось (отказ `startForeground`, таймаут foreground,
-     * запрет старта из фона): следующая попытка по лестнице 1 → 5 → 15 → 30.
-     * Здесь настойчивость оправдана — письма ждут.
+     * A receiver's start request failed; it does not own the service. Do not
+     * invalidate its heartbeat: a concurrent pulse may still show it is alive.
+     * The consumed alarm must nevertheless be rearmed, even if a pulse arrives
+     * just after the check. In that race an extra retry alarm is possible.
      */
-    fun onServiceRefused(context: Context) {
+    @Synchronized
+    fun onExternalStartRefused(context: Context) {
+        val conditions = DeliveryAssurance.conditions(context)
+        if (!DeliveryWakePolicy.shouldWakeNow(
+                conditions, DeliveryAssurance.currentProcessLastAliveMs(), System.currentTimeMillis(),
+            )
+        ) {
+            scheduleWatchdog(context)
+            return
+        }
+        scheduleAfterRefusal(context)
+    }
+
+    private fun scheduleAfterRefusal(context: Context) {
         if (!DeliveryAssurance.isEnabled(context)) {
             cancel(context)
             return
         }
-        val misses = refusals(context, -1) + 1
+        val misses = (refusals(context, -1).coerceAtLeast(0).toLong() + 1).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         refusals(context, misses)
         val plan = DeliveryWakePolicy.afterRefusal(DeliveryAssurance.conditions(context), misses)
         Log.i(TAG, "reschedule after refusal #$misses: " + describe(plan))
@@ -188,11 +235,13 @@ object EmergencyKeepAlive {
      * Взвести тихий сторож, пока служба жива. Публично, потому что приёмник
      * перевзводит его после каждого срабатывания: будильник одноразовый.
      */
+    @Synchronized
     fun scheduleWatchdog(context: Context) {
         applyPlan(context, DeliveryWakePolicy.whileAlive(DeliveryAssurance.conditions(context)))
     }
 
     /** Снять будильник (человек выключил доставку — не будить зря). */
+    @Synchronized
     fun cancel(context: Context) {
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         am.cancel(pendingIntent(context))

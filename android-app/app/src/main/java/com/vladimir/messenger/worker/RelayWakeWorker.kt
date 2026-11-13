@@ -5,6 +5,8 @@ import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.data.security.DeviceIdentityMarker
+import com.vladimir.messenger.data.security.ExistingRoutingIdentity
 import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import com.vladimir.messenger.data.security.RelayAtRestMasterKey
 import java.io.File
@@ -16,8 +18,9 @@ import kotlinx.coroutines.withContext
  *
  * WorkManager даёт процессу ограниченное окно выполнения; worker не запускает
  * foreground service, не отправляет пользовательские сообщения и не ставит
- * собственные retry. Durable engine поднимается максимум на [ACTIVE_WINDOW_MS],
- * делает один bounded gossip discovery, затем гарантированно останавливается.
+ * собственные retry. Необязательное окно ожидания ограничено [ACTIVE_WINDOW_MS]
+ * и уступает запуску/остановке службы. Native start, discovery и stop могут
+ * ждать дольше; остановка временного движка выполняется в finally.
  */
 class RelayWakeWorker(
     context: Context,
@@ -26,17 +29,28 @@ class RelayWakeWorker(
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val prefs = applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        if (!prefs.getBoolean(KEY_IDENTITY_CREATED, false)) {
-            Log.i(TAG, "M8 wake skipped: identity is not created")
+        if (!prefs.getBoolean(KEY_IDENTITY_CREATED, false) || !DeviceIdentityMarker.isPresent(applicationContext)) {
+            Log.i(TAG, "M8 wake skipped: local identity is not ready")
             return@withContext Result.success()
         }
-
+        val routing = ExistingRoutingIdentity.resolve(
+            prefs.getString("node_id", null), prefs.getString("public_key", null),
+            prefs.getString(KEY_EXISTING_PUBLIC_KEY, null), prefs.getString(KEY_EXISTING_PRIVATE_KEY, null),
+        )
+        if (routing == null) {
+            Log.e(TAG, "M8 wake skipped: saved routing identity is missing or inconsistent")
+            return@withContext Result.failure()
+        }
         val displayName = prefs.getString(KEY_DISPLAY_NAME, "Anonymous") ?: "Anonymous"
-        val publicKey = prefs.getString(KEY_EXISTING_PUBLIC_KEY, null)
-        val privateKey = prefs.getString(KEY_EXISTING_PRIVATE_KEY, null)
+        val publicKey = routing.nodeId
+        val privateKey = routing.legacyPrivateKey
         val relayDbPath = File(applicationContext.filesDir, RELAY_DB_NAME).absolutePath
 
         try {
+            if (RustBridge.isRunning() && !ExistingRoutingIdentity.matchesRunning(publicKey, RustBridge.nodeId())) {
+                Log.e(TAG, "M8 wake skipped: running engine identity does not match saved identity")
+                return@withContext Result.failure()
+            }
             val signing = IdentitySigningKeyStore.installIntoCore(
                 applicationContext,
                 publicKey.orEmpty(),
@@ -49,6 +63,11 @@ class RelayWakeWorker(
                 relayDbPath = relayDbPath,
                 activeWindowMillis = ACTIVE_WINDOW_MS,
             )
+            if (wake.custodyMode == "identity_mismatch") return@withContext Result.failure()
+            if (wake.custodyMode == "yielded") {
+                Log.i(TAG, "M8 optional wake yielded to a lifecycle request; no delivery is implied")
+                return@withContext Result.success()
+            }
             Log.i(
                 TAG,
                 "M8 wake complete: signing=${signing?.mode ?: "legacy-only"} " +
@@ -59,7 +78,7 @@ class RelayWakeWorker(
             Result.success()
         } catch (error: InterruptedException) {
             Thread.currentThread().interrupt()
-            Log.w(TAG, "M8 wake interrupted; engine cleanup completed", error)
+            Log.w(TAG, "M8 wake interrupted; lifecycle cleanup may still be running", error)
             Result.failure()
         } catch (error: Exception) {
             // Следующее periodic окно — единственный retry: не создаём быстрый цикл.
