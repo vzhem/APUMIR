@@ -2,8 +2,10 @@
 """Proposed one-time creation of an isolated, *disabled* push Worker.
 
 This is not activation and is not evidence of push delivery. No FCM secrets,
-rate key, DNS routes, existing Worker names or external bindings are supplied.
-The first POST uses Cloudflare's create-Worker API, which documents failure on
+rate key, DNS routes, existing Worker names, Durable Object binding, migration,
+or external bindings are supplied. The checked-in Wrangler config describes
+more than this deliberately storage-free first version. The first POST uses
+Cloudflare's create-Worker API, which documents failure on
 an existing name; the second POST uses the ID returned by that creation, not a
 name looked up in a separate request. This relies on the provider's semantics
 and has not been validated against the real account. An account-scoped write
@@ -141,14 +143,16 @@ def version_payload(project=PROJECT):
                             "content_base64": base64.b64encode(raw).decode("ascii")})
     except (OSError, UnicodeError):
         raise DeployError("modules") from None
+    # Deliberately do not copy the prototype's Durable Object binding or its
+    # migration from wrangler.toml. Cloudflare documents that first-version
+    # bindings may require a previously deployed migration. A disabled health
+    # check needs no storage; adding it later needs a separate reviewed plan.
     payload = {
         "main_module": "worker.mjs", "compatibility_date": "2025-07-18", "modules": modules,
         "bindings": [
             {"type": "plain_text", "name": "PUSH_ENABLED", "text": "false"},
             {"type": "plain_text", "name": "MAILBOX_ENABLED", "text": "false"},
-            {"type": "durable_object_namespace", "name": "PUSH_SHARDS", "class_name": "PushShard"},
         ],
-        "migrations": {"new_tag": "v1", "new_sqlite_classes": ["PushShard"]},
     }
     if len(json.dumps(payload, separators=(",", ":"), ensure_ascii=True).encode("ascii")) > MAX_REQUEST_BYTES:
         raise DeployError("modules")
@@ -289,19 +293,22 @@ def verify_new_version(account, token, worker_id, version_id, payload, request=v
             not isinstance(item, dict) or item.get("id") != version_id or
             item.get("compatibility_date") not in ("2025-07-18", "2025-07-18T00:00:00Z") or
             item.get("compatibility_flags") not in (None, []) or item.get("main_module") != "worker.mjs" or
-            not isinstance(bindings, list) or len(bindings) != 3 or
+            not isinstance(bindings, list) or len(bindings) != 2 or
             any(not isinstance(binding, dict) for binding in bindings)):
         raise DeployError("version_readback")
     by_name = {binding.get("name"): binding for binding in bindings if isinstance(binding.get("name"), str)}
-    if set(by_name) != {"PUSH_ENABLED", "MAILBOX_ENABLED", "PUSH_SHARDS"}:
+    if set(by_name) != {"PUSH_ENABLED", "MAILBOX_ENABLED"}:
         raise DeployError("version_readback")
     for name in ("PUSH_ENABLED", "MAILBOX_ENABLED"):
         if by_name[name].get("type") != "plain_text" or by_name[name].get("text") != "false":
             raise DeployError("version_readback")
-    shard = by_name["PUSH_SHARDS"]
-    if (shard.get("type") != "durable_object_namespace" or shard.get("class_name") != "PushShard" or
-            shard.get("script_name") not in (None, "") or shard.get("environment") not in (None, "") or
-            shard.get("dispatch_namespace") not in (None, "")):
+    # The API may report ordinary Worker exports, but no stateful export,
+    # migration or container is expected for this initial disabled version.
+    exports = item.get("exports")
+    if (item.get("migration_tag") not in (None, "") or item.get("migrations") not in (None, {}) or
+            item.get("containers") not in (None, []) or
+            (exports is not None and (not isinstance(exports, dict) or
+             any(not isinstance(entry, dict) or entry.get("type") != "worker" for entry in exports.values())))):
         raise DeployError("version_readback")
     modules = item.get("modules")
     if not isinstance(modules, list) or len(modules) != len(MODULES) or any(not isinstance(m, dict) for m in modules):
@@ -335,7 +342,10 @@ def verify_active_deployment(account, token, worker_id, name, version_id, reques
         return body.get("result")
     def check_name():
         worker = read(f"{base}/workers/{name}")
-        if not isinstance(worker, dict) or worker.get("id") != worker_id or worker.get("name") != name:
+        subdomain = worker.get("subdomain") if isinstance(worker, dict) else None
+        if (not isinstance(worker, dict) or worker.get("id") != worker_id or worker.get("name") != name or
+                not isinstance(subdomain, dict) or subdomain.get("enabled") is not True or
+                subdomain.get("previews_enabled") is not False):
             raise DeployError("deployment_readback")
     check_name()
     result = read(f"{base}/scripts/{name}/deployments?page=1&per_page=1")

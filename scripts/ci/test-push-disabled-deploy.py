@@ -133,17 +133,17 @@ class InputsTest(unittest.TestCase):
 
 
 class PayloadTest(unittest.TestCase):
-    def test_exact_disabled_bindings_migration_and_checked_in_modules(self):
+    def test_exact_disabled_bindings_without_storage_and_checked_in_modules(self):
         payload = d.version_payload()
-        self.assertEqual(set(payload), {"main_module", "compatibility_date", "modules", "bindings", "migrations"})
+        # The first version must not provision or bind any Durable Object. A
+        # separate future review is required before introducing stateful storage.
+        self.assertEqual(set(payload), {"main_module", "compatibility_date", "modules", "bindings"})
         self.assertEqual(payload["main_module"], "worker.mjs")
         self.assertEqual(payload["compatibility_date"], "2025-07-18")
         self.assertEqual(payload["bindings"], [
             {"type": "plain_text", "name": "PUSH_ENABLED", "text": "false"},
             {"type": "plain_text", "name": "MAILBOX_ENABLED", "text": "false"},
-            {"type": "durable_object_namespace", "name": "PUSH_SHARDS", "class_name": "PushShard"},
         ])
-        self.assertEqual(payload["migrations"], {"new_tag": "v1", "new_sqlite_classes": ["PushShard"]})
         self.assertEqual([entry["name"] for entry in payload["modules"]], list(d.MODULES))
         for entry in payload["modules"]:
             self.assertEqual(set(entry), {"name", "content_type", "content_base64"})
@@ -181,14 +181,18 @@ class PayloadTest(unittest.TestCase):
             self.assertEqual(error.exception.code, "modules")
 
     def test_mutated_payload_is_not_uploaded(self):
-        for change in ("enabled", "extra_binding", "migration", "module"):
+        for change in ("enabled", "extra_binding", "durable_binding", "migration", "exports", "module"):
             payload = copy.deepcopy(d.version_payload())
             if change == "enabled":
                 payload["bindings"][0]["text"] = "true"
             if change == "extra_binding":
                 payload["bindings"].append({"type": "secret_text", "name": "FCM_PRIVATE_KEY", "text": "fake"})
+            if change == "durable_binding":
+                payload["bindings"].append({"type": "durable_object_namespace", "name": "PUSH_SHARDS", "class_name": "PushShard"})
             if change == "migration":
-                payload["migrations"]["deleted_classes"] = ["Other"]
+                payload["migrations"] = {"new_tag": "v1", "new_sqlite_classes": ["PushShard"]}
+            if change == "exports":
+                payload["exports"] = {"PushShard": {"type": "durable-object", "storage": "sqlite"}}
             if change == "module":
                 payload["modules"][0]["content_base64"] = "eA=="
             with self.subTest(change=change), patch.object(d, "post_json") as post:
@@ -273,7 +277,7 @@ class ProviderGuardTest(unittest.TestCase):
             d.create_disabled_version(FAKE_ACCOUNT, FAKE_TOKEN, "p2p-relay", d.version_payload(),
                                       lambda *_: self.fail("invalid ID sent"))
 
-    def test_version_readback_requires_exact_source_disabled_flags_and_local_shard(self):
+    def test_version_readback_requires_exact_source_flags_and_no_storage(self):
         payload = d.version_payload()
         item = {"id": FAKE_VERSION, "compatibility_date": "2025-07-18", "main_module": "worker.mjs",
                 "bindings": copy.deepcopy(payload["bindings"]), "modules": copy.deepcopy(payload["modules"])}
@@ -283,17 +287,19 @@ class ProviderGuardTest(unittest.TestCase):
             return 200, {"success": True, "result": item}
         d.verify_new_version(FAKE_ACCOUNT, FAKE_TOKEN, FAKE_ID, FAKE_VERSION, payload, request)
         self.assertEqual(calls, [(f"/client/v4/accounts/{FAKE_ACCOUNT}/workers/workers/{FAKE_ID}/versions/{FAKE_VERSION}?include=modules", FAKE_TOKEN)])
-        # Cloudflare's documentation shows a timestamp representation too.
+        # Cloudflare documents a timestamp and may report ordinary Worker exports.
         item["compatibility_date"] = "2025-07-18T00:00:00Z"
+        item["exports"] = {"default": {"type": "worker", "state": "created"}}
+        item["migrations"] = {}
         d.verify_new_version(FAKE_ACCOUNT, FAKE_TOKEN, FAKE_ID, FAKE_VERSION, payload, request)
         variants = []
-        for field in ("push", "mailbox", "foreign", "dispatch", "extra", "duplicate", "id", "date",
-                      "flags", "main", "source", "source_type", "missing_module", "duplicate_module"):
+        for field in ("push", "mailbox", "durable_binding", "extra", "duplicate", "id", "date",
+                      "flags", "main", "source", "source_type", "missing_module", "duplicate_module",
+                      "migration_tag", "migration", "durable_export", "bad_exports", "container"):
             changed = copy.deepcopy(item)
             if field == "push": changed["bindings"][0]["text"] = "true"
             if field == "mailbox": changed["bindings"][1]["text"] = "true"
-            if field == "foreign": changed["bindings"][2]["script_name"] = "p2p-relay"
-            if field == "dispatch": changed["bindings"][2]["dispatch_namespace"] = "foreign"
+            if field == "durable_binding": changed["bindings"].append({"type": "durable_object_namespace", "name": "PUSH_SHARDS", "class_name": "PushShard"})
             if field == "extra": changed["bindings"].append({"name": "FCM_PRIVATE_KEY", "type": "secret_text"})
             if field == "duplicate": changed["bindings"][1] = changed["bindings"][0]
             if field == "id": changed["id"] = "other"
@@ -304,6 +310,11 @@ class ProviderGuardTest(unittest.TestCase):
             if field == "source_type": changed["modules"][0]["content_type"] = "text/plain"
             if field == "missing_module": changed["modules"].pop()
             if field == "duplicate_module": changed["modules"][1] = changed["modules"][0]
+            if field == "migration_tag": changed["migration_tag"] = "v1"
+            if field == "migration": changed["migrations"] = {"new_sqlite_classes": ["PushShard"]}
+            if field == "durable_export": changed["exports"]["PushShard"] = {"type": "durable-object", "storage": "sqlite"}
+            if field == "bad_exports": changed["exports"] = ["unknown"]
+            if field == "container": changed["containers"] = [{"class_name": "PushShard"}]
             variants.append((field, changed))
         for field, changed in variants:
             with self.subTest(field=field), self.assertRaises(d.DeployError):
@@ -311,7 +322,8 @@ class ProviderGuardTest(unittest.TestCase):
                                      lambda *_: (200, {"success": True, "result": changed}))
 
     def test_active_deployment_requires_matching_worker_identity_and_only_the_new_version(self):
-        worker = {"id": FAKE_ID, "name": FAKE_NAME}
+        worker = {"id": FAKE_ID, "name": FAKE_NAME,
+                  "subdomain": {"enabled": True, "previews_enabled": False}}
         deployment = {"strategy": "percentage", "versions": [{"version_id": FAKE_VERSION, "percentage": 100}]}
         calls = []
         def request(host, path, token):
@@ -341,6 +353,20 @@ class ProviderGuardTest(unittest.TestCase):
             return 200, {"success": True, "result": worker if count == 1 else {**worker, "id": "3" * 32}}
         with self.assertRaises(d.DeployError):
             d.verify_active_deployment(FAKE_ACCOUNT, FAKE_TOKEN, FAKE_ID, FAKE_NAME, FAKE_VERSION, renamed)
+        # Version/deployment must not silently re-enable preview/version URLs.
+        for bad in (None, {}, {"enabled": False, "previews_enabled": False},
+                    {"enabled": True, "previews_enabled": True}, {"enabled": True}):
+            for changed_on_read in (1, 2):
+                count = 0
+                def changed_settings(_host, path, _token):
+                    nonlocal count
+                    if "/scripts/" in path:
+                        return 200, {"success": True, "result": {"deployments": [deployment]}}
+                    count += 1
+                    value = {**worker, "subdomain": bad} if count == changed_on_read else worker
+                    return 200, {"success": True, "result": value}
+                with self.subTest(subdomain=bad, read=changed_on_read), self.assertRaises(d.DeployError):
+                    d.verify_active_deployment(FAKE_ACCOUNT, FAKE_TOKEN, FAKE_ID, FAKE_NAME, FAKE_VERSION, changed_settings)
 
     def test_existing_subdomain_is_strictly_validated_before_creation(self):
         request = lambda *_: (200, {"success": True, "result": {"subdomain": "account-1"}})
@@ -478,7 +504,8 @@ class CompleteFakeProviderTest(unittest.TestCase):
                     item = {key: self.uploaded[key] for key in ("main_module", "compatibility_date", "bindings", "modules")}
                     return Response({"success": True, "result": {"id": FAKE_VERSION, **item}})
                 if req.get_method() == "GET" and url.path == base + "/workers/" + FAKE_NAME:
-                    return Response({"success": True, "result": {"id": FAKE_ID, "name": FAKE_NAME}})
+                    return Response({"success": True, "result": {"id": FAKE_ID, "name": FAKE_NAME,
+                        "subdomain": {"enabled": True, "previews_enabled": False}}})
                 if req.get_method() == "GET" and url.path == base + "/scripts/" + FAKE_NAME + "/deployments":
                     assert url.query == "page=1&per_page=1"
                     return Response({"success": True, "result": {"deployments": [{"strategy": "percentage", "versions":
@@ -511,6 +538,9 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn("github.repository == 'vzhem/APUMIR'", offline)
         self.assertIn("github.ref == 'refs/heads/arena/1266946d-apumir'", offline)
         self.assertIn("contains(github.event.head_commit.message, '[deploy-push-disabled]')", offline)
+        self.assertIn("'tools/worker/push/**'", workflow)
+        self.assertIn("'scripts/ci/push-infra-preflight.py'", workflow)
+        self.assertIn("npm test --prefix tools/worker/push", offline)
         self.assertIn("needs: offline-tests", protection)
         self.assertIn("needs: protection-check", creation)
         self.assertIn("environment: apu-push-staging", creation)
