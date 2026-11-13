@@ -26,8 +26,23 @@ PERIODIC_EXPECTED = {
     "cancellationRacingAnOrdinaryFailureIsNotReturnedAsRetry",
     "independentTickRepairsAnUnrecordedCallbackDespiteAStaleGate",
 }
+RUN_LOOP_CLASS = PREFIX + "PushWakeRunLoopTest"
+RUN_LOOP_EXPECTED = {
+    "newSignalDuringDrainIsRetriedAndAfterFinishSchedulesASuccessor",
+    "failedDrainOrUnavailableFinalReadNeverBecomeSuccess",
+    "cancellationReleasesOnlyTheWorkerTicketAndAllowsAnotherRequest",
+    "busyLoopRetriesWithoutReplacingTheActiveTicket",
+    "distinctDispatchersShareTheClassloaderDrainLimit",
+    "cancelledCallerCannotTurnBusyLimitIntoRetry",
+    "cancellationReleasesTheClassloaderLimitForAnotherLoop",
+    "exceptionsAndBrokenDiagnosticsReleaseTheClassloaderLimit",
+    "cancellationAfterDrainDoesNotReturnSuccessAndReleasesTicket",
+    "cancellationRacingAnErrorReleasesTicketAndClassloaderLimit",
+    "independentRecoveryPassCanRepairAStaleRetryTicket",
+}
 EXPECTED = {
     PERIODIC_CLASS: PERIODIC_EXPECTED,
+    RUN_LOOP_CLASS: RUN_LOOP_EXPECTED,
     PREFIX + "PushMailboxHttpClientTest": {
         "putStoresOnlyWithAValidServerReceiptAndClearsTransientBytes",
         "serverAcceptanceAndRetryStatesAreNotDelivery",

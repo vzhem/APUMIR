@@ -23,9 +23,9 @@ import java.util.concurrent.TimeUnit
  * check can run even while the previous worker returns, and cannot inherit its
  * eventual cancellation/failure. [PushWakeScheduleGate] coalesces normal
  * in-process requests; SQLite leases and idempotent message processing are
- * still required when jobs overlap or a process is restarted. The per-drain
- * batch limit is not a global bound on concurrent jobs: the future runtime must
- * also bound shared sync work, including across any app processes.
+ * still required when jobs overlap or a process is restarted. The run loop
+ * limits concurrent drains within one classloader, but not across processes or
+ * other effects: the future runtime must bound shared sync work accordingly.
  *
  * Before accepting FCM callbacks the caller must durably install [recovery]
  * and wait for its [Operation.result] to succeed. The periodic worker needs

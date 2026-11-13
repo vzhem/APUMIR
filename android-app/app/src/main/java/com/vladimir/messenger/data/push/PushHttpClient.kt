@@ -95,7 +95,11 @@ internal fun interface PushPost {
     fun post(endpoint: PushEndpoint, path: String, body: ByteArray): Int
 }
 
-/** System TLS validation, fixed HTTPS host, no redirects, and bounded time. */
+/**
+ * System TLS validation, fixed HTTPS host and no redirects. Connect/read socket
+ * timeouts are per operation, not an overall deadline or a write timeout; this
+ * synchronous transport is not a bounded or cancellable worker by itself.
+ */
 internal object HttpsPushPost : PushPost {
     override fun post(endpoint: PushEndpoint, path: String, body: ByteArray): Int {
         val connection = endpoint.url(path).openConnection() as HttpsURLConnection

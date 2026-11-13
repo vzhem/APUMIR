@@ -201,6 +201,7 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "failedPeriodicNormalizationRollsBackBeforeRetry",
     "concurrentPeriodicTicksCoalesceWithoutHidingProviderEvent",
     "periodicPassRepairsFailedCallbackWithSqliteAndFakeSync",
+    "expiredLeaseCannotStartConcurrentDrainsInOneClassloader",
     "periodicTickRacingLeasedScanNeedsLaterTickForUnrecordedCallback",
 }, PUSH_DRAIN_CLASS: {
     "mixedSignalsAreInspectedAndAllowedRoutesShareOneGenericSync",
@@ -214,6 +215,7 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
 }, PUSH_WORK_CLASS: {
     "independentSuccessorRunsBeforeOlderWorkerReturnsAndSurvivesItsFailure",
     "enqueueFailuresReleaseTheGateAndPreserveThePersistedSignal",
+    "concurrentWorkersRetryWithoutOverlappingSyncAndPeriodicRecoveryRedrives",
     "retryResultKeepsTheSignalUntilIndependentPeriodicRecovery",
     "periodicRecoveryDirectlyDrainsPersistentInboxDespiteStaleTicket",
 }, FIREBASE_CLASS: {

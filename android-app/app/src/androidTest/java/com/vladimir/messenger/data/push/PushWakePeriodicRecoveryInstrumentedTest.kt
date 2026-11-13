@@ -295,6 +295,58 @@ class PushWakePeriodicRecoveryInstrumentedTest {
         dispatcher.workerStopped(stale)
     }
 
+    @Test fun expiredLeaseCannotStartConcurrentDrainsInOneClassloader() = runBlocking {
+        withTimeout(10_000) {
+            val store = inbox()
+            val clock = AtomicLong(now)
+            val scans = AtomicInteger()
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            var failures = 0
+            fun dispatcher(): PushWakeDispatcher {
+                val gate = PushWakeScheduleGate({ _ -> true }, { failures++ })
+                return PushWakeDispatcher(gate, { PushWakeIntake.Hint.FOUND }, store::enqueueRoute,
+                    store::enqueueRecovery, store::pending, { failures++ })
+            }
+            val drain = PushWakeDrain(store, clock::get, { PushWakeDrain.Inspection.ALLOW }, { batch ->
+                assertEquals(1, batch.items.size)
+                assertNull(batch.items.single().route)
+                if (scans.incrementAndGet() == 1) {
+                    entered.complete(Unit)
+                    release.await()
+                }
+                batch.items.map { it.result(PushWakeDrain.SyncOutcome.COMPLETED_WINDOW) }
+            }) { failures++ }
+            val first = PushWakeRunLoop(dispatcher(), drain::run, clock::get) { failures++ }
+            val second = PushWakeRunLoop(dispatcher(), drain::run, clock::get) { failures++ }
+            val periodic = PushWakePeriodicRecovery(
+                admission = { PushWakePeriodicRecovery.Admission.ALLOW },
+                ensureMarker = store::ensurePeriodicRecovery,
+                runDrain = second::run,
+                nowMs = clock::get,
+                recordFailure = { failures++ },
+            )
+            assertEquals(PushWakeInbox.EnqueueResult.RECOVERY_QUEUED, store.ensurePeriodicRecovery(now))
+            val running = async(Dispatchers.IO) { first.run() }
+            try {
+                entered.await()
+                // Normalization releases the expired SQLite lease. The in-process
+                // bound must still prevent another drain while sync is suspended.
+                clock.set(now + PushWakeInbox.LEASE_MS)
+                assertEquals(PushWakePeriodicRecovery.Result.RETRY, periodic.run())
+                assertEquals(1, scans.get())
+                release.complete(Unit)
+                assertEquals(PushWakeRunLoop.Result.RETRY, running.await()) // old lease is stale
+                assertTrue(store.pending(clock.get()) is PushWakeInbox.PendingResult.Pending)
+                clock.incrementAndGet()
+                assertEquals(PushWakePeriodicRecovery.Result.TASK_SUCCESS, periodic.run())
+                assertEquals(2, scans.get())
+                assertEquals(PushWakeInbox.PendingResult.Empty, store.pending(clock.get()))
+                assertEquals(0, failures)
+            } finally { release.complete(Unit) }
+        }
+    }
+
     @Test fun periodicTickRacingLeasedScanNeedsLaterTickForUnrecordedCallback() = runBlocking {
         withTimeout(10_000) {
             val store = inbox()

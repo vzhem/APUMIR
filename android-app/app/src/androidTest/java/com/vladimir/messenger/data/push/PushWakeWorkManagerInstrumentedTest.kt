@@ -206,6 +206,94 @@ class PushWakeWorkManagerInstrumentedTest {
         assertNull(PushWakeWorkProbes.error.get())
     }
 
+    @Test fun concurrentWorkersRetryWithoutOverlappingSyncAndPeriodicRecoveryRedrives() {
+        // The WorkManager scheduler and SQLite are real; trust, sync and the
+        // provider are deliberately fake. No delivery is implied.
+        backend.recovery().result.get(15, TimeUnit.SECONDS)
+        val recoveryId = manager.getWorkInfosForUniqueWork(PushWakeWorkManager.RECOVERY_NAME)
+            .get(15, TimeUnit.SECONDS).single().id
+        val entered = CountDownLatch(1)
+        val busyFinished = CountDownLatch(1)
+        val recovered = CountDownLatch(1)
+        val scans = AtomicInteger()
+        val runs = AtomicInteger()
+        val busyResult = AtomicReference<PushWakeRunLoop.Result?>()
+        val blockingDrain = PushWakeDrain(inbox, clock::get, { PushWakeDrain.Inspection.ALLOW }, { batch ->
+            scans.incrementAndGet()
+            entered.countDown()
+            // Give the main test thread time to observe both independent
+            // workers even on a loaded emulator; teardown always releases it.
+            check(releaseFirst.await(60, TimeUnit.SECONDS))
+            batch.items.map { it.result(PushWakeDrain.SyncOutcome.COMPLETED_WINDOW) }
+        }) { failures.incrementAndGet() }
+        val recoveryDrain = PushWakeDrain(inbox, clock::get, { PushWakeDrain.Inspection.ALLOW }, { batch ->
+            scans.incrementAndGet()
+            batch.items.map { it.result(PushWakeDrain.SyncOutcome.COMPLETED_WINDOW) }
+        }) { failures.incrementAndGet() }
+        val firstLoop = PushWakeRunLoop(dispatcher, blockingDrain::run, clock::get) { failures.incrementAndGet() }
+        val secondLoop = PushWakeRunLoop(dispatcher, recoveryDrain::run, clock::get) { failures.incrementAndGet() }
+        PushWakeWorkProbes.drain = {
+            when (runs.incrementAndGet()) {
+                1 -> {
+                    check(runBlocking { firstLoop.run() } == PushWakeRunLoop.Result.RETRY)
+                    ListenableWorker.Result.retry()
+                }
+                2 -> {
+                    val result = runBlocking { secondLoop.run() }
+                    busyResult.set(result)
+                    busyFinished.countDown()
+                    if (result == PushWakeRunLoop.Result.RETRY) ListenableWorker.Result.retry()
+                    else ListenableWorker.Result.success()
+                }
+                else -> error("unexpected one-off worker")
+            }
+        }
+        assertEquals(PushWakeIntake.Result.QUEUED, dispatcher.onData(payload, clock.get()))
+        val firstId = workCount(PushWakeWorkManager.DRAIN_TAG, 1).single().id
+        driver.setAllConstraintsMet(firstId)
+        assertTrue(entered.await(15, TimeUnit.SECONDS))
+        assertEquals(PushWakeIntake.Result.QUEUED, dispatcher.onData(payload, clock.incrementAndGet()))
+        // The lease can expire before the first sync returns; a second worker
+        // must still retry without starting another sync in this classloader.
+        clock.addAndGet(PushWakeInbox.LEASE_MS)
+        assertTrue(backend.enqueue { failures.incrementAndGet() })
+        val secondId = workCount(PushWakeWorkManager.DRAIN_TAG, 2).single { it.id != firstId }.id
+        driver.setAllConstraintsMet(secondId)
+        assertTrue(busyFinished.await(15, TimeUnit.SECONDS))
+        assertEquals(PushWakeRunLoop.Result.RETRY, busyResult.get())
+        assertEquals(1, scans.get())
+        fun retrying(id: UUID): WorkInfo = runBlocking {
+            withTimeout(15_000) {
+                manager.getWorkInfoByIdFlow(id).filterNotNull()
+                    .first { it.state == WorkInfo.State.ENQUEUED && it.runAttemptCount > 0 }
+            }
+        }
+        assertTrue(retrying(secondId).runAttemptCount > 0)
+        releaseFirst.countDown()
+        assertTrue(retrying(firstId).runAttemptCount > 0)
+        assertTrue(inbox.pending(clock.get()) is PushWakeInbox.PendingResult.Pending)
+
+        PushWakeWorkProbes.recovery = {
+            val periodic = PushWakePeriodicRecovery(
+                admission = { PushWakePeriodicRecovery.Admission.ALLOW },
+                ensureMarker = inbox::ensurePeriodicRecovery,
+                runDrain = secondLoop::run,
+                nowMs = clock::get,
+                recordFailure = { failures.incrementAndGet() },
+            )
+            check(runBlocking { periodic.run() } == PushWakePeriodicRecovery.Result.TASK_SUCCESS)
+            recovered.countDown()
+            ListenableWorker.Result.success()
+        }
+        driver.setPeriodDelayMet(recoveryId)
+        driver.setAllConstraintsMet(recoveryId)
+        assertTrue(recovered.await(15, TimeUnit.SECONDS))
+        assertEquals(2, scans.get())
+        assertEquals(PushWakeInbox.PendingResult.Empty, inbox.pending(clock.get()))
+        assertEquals(0, failures.get())
+        assertNull(PushWakeWorkProbes.error.get())
+    }
+
     @Test fun retryResultKeepsTheSignalUntilIndependentPeriodicRecovery() {
         backend.recovery().result.get(15, TimeUnit.SECONDS)
         val recoveryId = manager.getWorkInfosForUniqueWork(PushWakeWorkManager.RECOVERY_NAME)

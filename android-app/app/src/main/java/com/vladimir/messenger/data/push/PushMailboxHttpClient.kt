@@ -133,7 +133,9 @@ internal fun interface PushMailboxPost {
 
 /**
  * System TLS, exact allowlisted host, no redirects and bounded response bytes.
- * Socket timeouts are per I/O, not an overall deadline against a slow peer.
+ * Connect/read socket timeouts are per operation, not an overall deadline or a
+ * write timeout; this synchronous transport is not bounded or cancellable by
+ * itself and must not be mistaken for a bounded worker.
  */
 internal object HttpsPushMailboxPost : PushMailboxPost {
     override fun post(endpoint: PushEndpoint, path: String, body: ByteArray): PushMailboxHttpResponse =

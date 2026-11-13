@@ -14,11 +14,11 @@ import kotlinx.coroutines.ensureActive
  * [admission] must re-read the current opt-in and local identity; this initial
  * check is not a lifecycle lock. The drain must independently revalidate the
  * feature, identity, pin and registration around every actual sync effect and
- * supply a bounded full scan with durable continuation. Different workers may
- * overlap; the per-drain batch limit is not a global concurrency limit, and a
- * lease can expire during sync. The runtime needs a shared concurrency bound
- * and idempotent effects. An index hit, stored marker or task success never
- * proves that a message was delivered.
+ * supply a bounded full scan with durable continuation. [PushWakeRunLoop] bounds
+ * active drains in its classloader, not across processes or outside the loop;
+ * a lease can still expire during sync. The runtime needs an appropriate shared
+ * bound and idempotent effects. An index hit, stored marker or task success
+ * never proves that a message was delivered.
  *
  * [ensureMarker] must be idempotent for an existing recovery marker and retain
  * its lease and backoff. Real provider events still advance the marker revision.
