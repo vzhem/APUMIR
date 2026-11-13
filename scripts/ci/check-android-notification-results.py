@@ -48,6 +48,7 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
 }, DIRECT_REPLY_CLASS: {
     "verifiedReplyCommitsBeforeAckAndSurvivesReopen",
     "wrongSenderChatOutgoingGroupAndTopicNeverChange",
+    "onlyCanonicalPersonalChannelsCanApplyReplyOrTriggerAck",
     "unauthenticatedAndEarlyPacketsAreNotAcknowledged",
     "cancellationRollsBackTheRowAndNeverAcknowledges",
     "sqliteFailureAndClearPreflightCannotAcknowledge",
@@ -110,6 +111,7 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "cancelledClearPreflightPropagatesAndEachRetryCanResume",
 }, REPLY_OUTBOX_CLASS: {
     "queuedAndUnconfirmedRetriesSurviveReopenUntilParentAck",
+    "outgoingSidecarRejectsNoncanonicalChannelsAfterRoomReopen",
     "discoveryRetryOffersSavedReplyAndStopsAfterParentAck",
     "earlyReplyIsNotAcknowledgedUntilARealRoomParentExists",
     "deletedRetargetedGroupTopicAndClearedRowsNeverSendReply",

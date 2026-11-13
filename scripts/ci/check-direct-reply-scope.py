@@ -76,6 +76,40 @@ class DirectReplyScopeTest(unittest.TestCase):
             self.assertIsNone(self.reply(row[0]), row[0])
         self.assertEqual(0, self.update("missing-parent"))
 
+    def test_reply_requires_a_canonical_personal_channel(self):
+        # The message transport enum is the complete supported personal set.
+        # A future transport must update this guard deliberately; an unknown or
+        # malformed channel is not proof that the row belongs to a direct chat.
+        channel_source = (BASE / "domain/model/MessageChannel.kt").read_text(encoding="utf-8")
+        enum_body = channel_source.split("enum class MessageChannel {", 1)[1].split("fun toIcon", 1)[0]
+        supported = set(re.findall(r"^\s*([A-Z][A-Z0-9_]*)\s*[,;]", enum_body, re.M))
+        self.assertEqual({"UNKNOWN", "MQTT", "CF", "LOCAL", "STORE_FORWARD"}, supported)
+        for index, channel in enumerate(sorted(supported)):
+            id = f"personal-{index}"
+            self.add(id, channel=channel)
+            self.assertEqual(1, self.update(id), channel)
+            self.assertEqual("quoted", self.reply(id), channel)
+
+        # Some historical/imported rows can outlive the group record or be
+        # malformed. They still must not become personal solely because a chat
+        # with the same ID/contact happens to exist.
+        for index, channel in enumerate(("GROUP", "group", " Group ", "\tGROUP\n", "GROUP\0tail",
+                                         "LOCAL\0tail", "LOCAL ", "", "future-transport", "ＧＲＯＵＰ")):
+            id = f"malformed-{index}"
+            self.add(id, channel=channel)
+            self.assertEqual(0, self.update(id), repr(channel))
+            self.assertIsNone(self.reply(id), repr(channel))
+
+        actual = query("applyDirectReplyFromPeer")
+        whitelist = "channel IN ('MQTT', 'CF', 'LOCAL', 'STORE_FORWARD', 'UNKNOWN')"
+        self.assertIn(whitelist, actual)
+        old = actual.replace(whitelist, "channel != 'GROUP'")
+        # Negative control: the previous comparison did apply a reply to a
+        # group-labelled row without a corresponding groups record.
+        self.add("old-bypass", channel="group")
+        self.assertEqual(0, self.update("old-bypass", q=actual))
+        self.assertEqual(1, self.update("old-bypass", q=old))
+
     def test_scope_is_evaluated_at_update_not_just_at_an_earlier_lookup(self):
         self.add("parent")
         self.db.execute("UPDATE chats SET contactId='pk_other456' WHERE id='chat'")

@@ -159,6 +159,7 @@ REPLY_OUTBOX_EXPECTED = {
     "falseBodyResultStillOffersReplyButBlockedBodyDoesNot",
     "manualRetryUsesItsOwnBodySenderAndSameReplyPolicy",
     "deletedChangedIncomingGroupOrMissingReplyNeverSendsSidecar",
+    "replySidecarRequiresCanonicalPersonalChannelOnItsOwnReread",
     "malformedParentOrPeerAndRejectedScopeNeverSend",
     "sidecarRereadsChangedQuoteOrRecipientBeforeTransport",
     "parentClearPreflightAfterBodySuppressesReply",

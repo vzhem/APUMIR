@@ -104,6 +104,24 @@ class DirectReplyIngressInstrumentedTest {
         assertEquals("group-target", db.messageDao().getMessageById("group-parent")!!.replyToId)
     }
 
+    @Test fun onlyCanonicalPersonalChannelsCanApplyReplyOrTriggerAck() = runBlocking {
+        val valid = listOf("UNKNOWN", "MQTT", "CF", "LOCAL", "STORE_FORWARD")
+            .mapIndexed { index, channel -> row("personal-$index").copy(channel = channel) }
+        val invalid = listOf("GROUP", "group", " Group ", "\tGROUP\n", "GROUP\u0000tail", "LOCAL\u0000tail",
+            "LOCAL ", "", "future-transport", "ＧＲＯＵＰ")
+            .mapIndexed { index, channel -> row("not-personal-$index").copy(channel = channel) }
+        (valid + invalid).forEach { db.messageDao().insertMessage(it) }
+        val receiver = ingress()
+        valid.forEach { assertEquals(DirectReplyResult.APPLIED, send(receiver, it.id)) }
+        invalid.forEach { assertEquals(DirectReplyResult.UNAPPLIED, send(receiver, it.id)) }
+        assertEquals(valid.size, acknowledgements.size)
+        assertEquals(valid.size, forwarded.size)
+        db.close()
+        db = open()
+        valid.forEach { assertEquals("quoted", db.messageDao().getMessageById(it.id)!!.replyToId) }
+        invalid.forEach { assertNull(db.messageDao().getMessageById(it.id)!!.replyToId) }
+    }
+
     @Test fun conflictingReplyCannotOverwriteTheFirstQuote() = runBlocking {
         db.messageDao().insertMessage(row("parent"))
         val receiver = ingress()

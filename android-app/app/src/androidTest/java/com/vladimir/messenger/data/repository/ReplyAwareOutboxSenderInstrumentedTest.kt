@@ -121,6 +121,26 @@ class ReplyAwareOutboxSenderInstrumentedTest {
         assertTrue(replies.all { it.second == DirectReplyWire.Packet("parent", "quoted", "Alice", "quoted text") })
     }
 
+    @Test fun outgoingSidecarRejectsNoncanonicalChannelsAfterRoomReopen() = runBlocking {
+        val valid = listOf("UNKNOWN", "MQTT", "CF", "LOCAL", "STORE_FORWARD")
+            .mapIndexed { index, channel -> row("valid-$index").copy(channel = channel) }
+        val invalid = listOf("GROUP", "group", " Group ", "\tGROUP\n", "GROUP\u0000tail", "LOCAL\u0000tail",
+            "LOCAL ", "", "future-transport", "ＧＲＯＵＰ")
+            .mapIndexed { index, channel -> row("invalid-$index").copy(channel = channel) }
+        (valid + invalid).forEach { senderDb.messageDao().insertMessage(it) }
+        senderDb.close()
+        senderDb = open(senderName)
+        val sent = mutableListOf<String>()
+        val sidecar = OutgoingReplySidecar(
+            senderDb.messageDao()::getMessageById, { _, _, _ -> true },
+            { id, _, _, _ -> sent += id; true },
+        ) { throw AssertionError("unexpected sidecar failure", it) }
+        val quote = DirectReplyWire.Target("quoted", "Alice", "quoted text")
+        valid.forEach { assertTrue(sidecar.send(it.id, it.chatId, peer, quote)) }
+        invalid.forEach { assertEquals(false, sidecar.send(it.id, it.chatId, peer, quote)) }
+        assertEquals(valid.map { DirectReplyWire.transportMessageId(it.id) }, sent)
+    }
+
     @Test fun discoveryRetryOffersSavedReplyAndStopsAfterParentAck() = runBlocking {
         senderDb.messageDao().insertMessage(row().copy(status = "PENDING"))
         var bodies = 0

@@ -4,6 +4,7 @@ import android.util.Log
 import com.vladimir.messenger.data.local.dao.MessageDao
 import com.vladimir.messenger.data.local.entity.MessageEntity
 import com.vladimir.messenger.data.reply.DirectReplyWire
+import com.vladimir.messenger.domain.model.MessageChannel
 import com.vladimir.messenger.domain.model.MessageStatus
 import kotlinx.coroutines.CancellationException
 
@@ -11,10 +12,16 @@ private val DIRECT_REPLY_TEXT_STATUSES = setOf(
     MessageStatus.PENDING.name, MessageStatus.QUEUED_OFFLINE.name, MessageStatus.SENT.name,
     MessageStatus.FAILED.name, MessageStatus.DELIVERED.name, MessageStatus.READ.name,
 )
+// Keep this allowlist aligned with applyDirectReplyFromPeer's SQL. Unknown,
+// malformed, and group-labelled rows are not evidence of a personal message.
+private val DIRECT_REPLY_CHANNELS = setOf(
+    MessageChannel.MQTT.name, MessageChannel.CF.name, MessageChannel.LOCAL.name,
+    MessageChannel.STORE_FORWARD.name, MessageChannel.UNKNOWN.name,
+)
 
 /** Rechecked on the sidecar's own Room read, including after a racing body ACK. */
 internal fun isDirectReplyTextRow(row: MessageEntity): Boolean =
-    row.isFromMe && row.senderId == "self" && !row.channel.trim().equals("GROUP", ignoreCase = true) &&
+    row.isFromMe && row.senderId == "self" && row.channel in DIRECT_REPLY_CHANNELS &&
         row.topicId.isNullOrEmpty() && row.status in DIRECT_REPLY_TEXT_STATUSES
 
 /**

@@ -92,6 +92,27 @@ class ReplyAwareOutboxSenderTest {
         assertEquals(0, replies)
     }
 
+    @Test fun replySidecarRequiresCanonicalPersonalChannelOnItsOwnReread() = runBlocking {
+        var current = row()
+        var sent = 0
+        val sidecar = OutgoingReplySidecar(
+            find = { current }, preflight = { _, _, _ -> true },
+            transport = { _, _, _, _ -> sent++; true }, recordFailure = { throw AssertionError(it) },
+        )
+        val quote = DirectReplyWire.Target("quoted", "Alice", "hello there")
+        for (channel in listOf("MQTT", "CF", "LOCAL", "STORE_FORWARD", "UNKNOWN")) {
+            current = row().copy(channel = channel)
+            assertTrue(sidecar.send("parent", "chat", peer, quote))
+        }
+        assertEquals(5, sent)
+        for (channel in listOf("GROUP", "group", " Group ", "\tGROUP\n", "GROUP\u0000tail", "LOCAL\u0000tail",
+                               "LOCAL ", "", "future-transport", "ＧＲＯＵＰ")) {
+            current = row().copy(channel = channel)
+            assertEquals(false, sidecar.send("parent", "chat", peer, quote))
+        }
+        assertEquals(5, sent)
+    }
+
     @Test fun malformedParentOrPeerAndRejectedScopeNeverSend() = runBlocking {
         var replies = 0
         var scopes = 0

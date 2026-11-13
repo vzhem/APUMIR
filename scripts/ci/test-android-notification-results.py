@@ -78,7 +78,7 @@ class NotificationResultsTest(unittest.TestCase):
 
     def test_every_reply_retry_room_case_is_required(self):
         names = checker.EXPECTED[checker.REPLY_OUTBOX_CLASS]
-        self.assertEqual(7, len(names))
+        self.assertEqual(8, len(names))
         for name in names:
             key = (checker.REPLY_OUTBOX_CLASS, name)
             self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[:2] != key]))

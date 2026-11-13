@@ -66,7 +66,7 @@ class MailboxResultsTest(unittest.TestCase):
                 self.assertEqual(1, self.run_report(skipped))
 
     def test_each_reply_retry_case_is_required_and_cannot_be_skipped(self):
-        self.assertEqual(15, len(checker.REPLY_OUTBOX_EXPECTED))
+        self.assertEqual(16, len(checker.REPLY_OUTBOX_EXPECTED))
         for name in checker.REPLY_OUTBOX_EXPECTED:
             key = (checker.REPLY_OUTBOX_CLASS, name)
             self.assertEqual(1, self.run_report([case for case in self.all_cases() if case[:2] != key]))

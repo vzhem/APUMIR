@@ -507,10 +507,11 @@ interface MessageDao {
         replyText: String,
     ): Int
 
-    /** Direct sidecars are peer-scoped and cannot overwrite a different stored quote. */
+    /** Direct sidecars require a canonical personal transport and cannot overwrite a different quote. */
     @Query(
         "UPDATE messages SET replyToId = :replyToId, replyAuthor = :replyAuthor, replyText = :replyText " +
-            "WHERE id = :messageId AND senderId = :senderId AND isFromMe = 0 AND channel != 'GROUP' " +
+            "WHERE id = :messageId AND senderId = :senderId AND isFromMe = 0 " +
+            "AND channel IN ('MQTT', 'CF', 'LOCAL', 'STORE_FORWARD', 'UNKNOWN') " +
             "AND (topicId IS NULL OR topicId = '') " +
             "AND EXISTS (SELECT 1 FROM chats c WHERE c.id = messages.chatId AND c.contactId = :senderId) " +
             "AND NOT EXISTS (SELECT 1 FROM groups g WHERE g.id = messages.chatId) " +
