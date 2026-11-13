@@ -59,8 +59,12 @@ class ApuFirebaseMessagingService : FirebaseMessagingService() {
                 // The sink accepts only the exact data-only `{v:"1"}` shape and
                 // writes one durable generic marker; it never reads a message,
                 // shows a notification or acknowledges anything.
+                // `notification` cannot arrive as data, but the SDK surfaces it
+                // separately; a payload that carried one is not data-only, so it
+                // is reported as such rather than assumed absent.
+                val notificationBlock = message.notification != null
                 when (PushSignalSink.of(PushServiceLocator.shared(context).dispatcher)
-                        .onMessage(data.ifEmpty { null }, hasNotificationBlock = false)) {
+                        .onMessage(data.ifEmpty { null }, hasNotificationBlock = notificationBlock)) {
                     PushSignalSink.Result.QUEUED_WITHOUT_SCHEDULER,
                     PushSignalSink.Result.UNAVAILABLE -> Log.w(TAG, "signal stored but not scheduled")
                     PushSignalSink.Result.IGNORED, PushSignalSink.Result.QUEUED -> Unit
