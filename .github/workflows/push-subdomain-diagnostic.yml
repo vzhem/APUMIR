@@ -81,7 +81,8 @@ jobs:
           python3 scripts/ci/push-infra-preflight.py --check-protection
           python3 scripts/ci/push-disabled-deploy.py --check-head
       # No npm, Worker code, or FCM credentials in this job. The script makes
-      # fixed Cloudflare GET requests only; it never prints provider contents.
+      # fixed Cloudflare GET requests only; it reports selected numeric error
+      # codes but never prints provider messages or response contents.
       - name: Diagnose access with fixed read-only Cloudflare requests
         env:
           APU_GITHUB_STEP_DEBUG: ${{ secrets.ACTIONS_STEP_DEBUG || vars.ACTIONS_STEP_DEBUG }}

@@ -2,9 +2,11 @@
 """Protected, read-only diagnosis of a failed workers.dev subdomain lookup.
 
 Only fixed Cloudflare GETs are made. A deploy credential is used solely for
-read requests, alongside the separately stored read credential. Never print
-credentials, account IDs, response bodies, Worker names or the subdomain. The
-result cannot establish the token's full permissions or the ability to deploy.
+read requests, alongside the separately stored read credential. HTTP errors are
+read with a small limit; only a fixed allowlist of numeric Cloudflare error codes
+is reported. Never print credentials, account IDs, response bodies, messages,
+Worker names or the subdomain. The result cannot establish the token's full
+permissions or the ability to deploy.
 """
 
 import importlib.util
@@ -13,12 +15,20 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 READ_TOKEN = "APU_PUSH_CLOUDFLARE_TOKEN"
 DEPLOY_TOKEN = "APU_PUSH_CLOUDFLARE_DEPLOY_TOKEN"
 ACCOUNT = "APU_PUSH_CLOUDFLARE_ACCOUNT_ID"
+MAX_ERROR_BYTES = 16 * 1024
+SAFE_CF_CODES = frozenset({6003, 6103, 9103, 9106, 9109, 10000, 10001})
+SAFE_CF_CATEGORIES = frozenset({"CF_NONE", "CF_OTHER", "CF_MULTIPLE", "CF_UNAVAILABLE"} |
+                               {f"CF_{code}" for code in SAFE_CF_CODES})
+HTTP_CATEGORIES = frozenset({"HTTP_400", "HTTP_401", "HTTP_403", "HTTP_404", "HTTP_429",
+                             "HTTP_REDIRECT_BLOCKED", "HTTP_OTHER_4XX", "HTTP_5XX", "HTTP_UNEXPECTED"})
 
 spec = importlib.util.spec_from_file_location("push_infra_preflight", HERE / "push-infra-preflight.py")
 preflight = importlib.util.module_from_spec(spec)
@@ -68,36 +78,89 @@ def check_checkout(sha):
         raise DiagnosticError("checkout")
 
 
-def http_category(status):
+def http_category(status, body=None):
     # Only fixed categories can leave the process; never include provider text.
-    if status == 400:
-        return "HTTP_400"
-    if status == 401:
-        return "HTTP_401"
-    if status == 403:
-        return "HTTP_403"
-    if status == 404:
-        return "HTTP_404"
-    if status == 429:
-        return "HTTP_429"
-    if isinstance(status, int) and 300 <= status < 400:
-        return "HTTP_REDIRECT_BLOCKED"
-    if isinstance(status, int) and 400 <= status < 500:
-        return "HTTP_OTHER_4XX"
-    if isinstance(status, int) and 500 <= status < 600:
-        return "HTTP_5XX"
-    return "HTTP_UNEXPECTED"
+    if status in (400, 401, 403, 404, 429):
+        category = f"HTTP_{status}"
+    elif isinstance(status, int) and 300 <= status < 400:
+        category = "HTTP_REDIRECT_BLOCKED"
+    elif isinstance(status, int) and 400 <= status < 500:
+        category = "HTTP_OTHER_4XX"
+    elif isinstance(status, int) and 500 <= status < 600:
+        category = "HTTP_5XX"
+    else:
+        category = "HTTP_UNEXPECTED"
+    safe_code = body.get("_safe_code") if isinstance(body, dict) else None
+    if isinstance(safe_code, str) and safe_code in SAFE_CF_CATEGORIES:
+        return category + "+" + safe_code
+    return category
+
+
+def allowed_request(path, token):
+    return (isinstance(path, str) and re.fullmatch(
+            r"/client/v4/(?:accounts/[0-9a-f]{32}/(?:tokens/verify|workers/subdomain|workers/scripts\?per_page=1&page=1)|user/tokens/verify)", path) is not None and
+            isinstance(token, str) and re.fullmatch(r"[A-Za-z0-9._-]{16,512}", token) is not None)
+
+
+def error_code_category(raw):
+    """Read only recognized numeric error codes, never the provider's messages."""
+    if not isinstance(raw, bytes) or len(raw) > MAX_ERROR_BYTES:
+        return "CF_UNAVAILABLE"
+    if not raw:
+        return "CF_NONE"
+    try:
+        body = preflight.parsed_json(raw.decode("utf-8"), MAX_ERROR_BYTES)
+    except (preflight.PreflightError, UnicodeError):
+        return "CF_UNAVAILABLE"
+    errors = body.get("errors") if isinstance(body, dict) else None
+    if not isinstance(errors, list):
+        return "CF_NONE"
+    codes = {entry.get("code") for entry in errors if isinstance(entry, dict) and type(entry.get("code")) is int}
+    if not codes:
+        return "CF_NONE"
+    if len(codes) != 1:
+        return "CF_MULTIPLE"
+    code = next(iter(codes))
+    return f"CF_{code}" if code in SAFE_CF_CODES else "CF_OTHER"
+
+
+def diagnostic_request(host, path, token):
+    """Fixed GET, bounded success/error bodies, no redirects, proxies or logs."""
+    if host != "api.cloudflare.com" or not allowed_request(path, token):
+        raise preflight.PreflightError("unavailable")
+    req = urllib.request.Request("https://api.cloudflare.com" + path, method="GET", headers={
+        "Authorization": "Bearer " + token, "Accept": "application/json", "User-Agent": "APU-push-preflight",
+    })
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), preflight.NoRedirect())
+    try:
+        try:
+            response = opener.open(req, timeout=10)
+        except urllib.error.HTTPError as error:
+            status = error.code
+            try:
+                with error:
+                    raw = error.read(MAX_ERROR_BYTES + 1)
+                safe_code = error_code_category(raw)
+            except Exception:
+                # Even malformed/oversized error bodies and exception text may
+                # contain secrets; only a fixed category is retained.
+                safe_code = "CF_UNAVAILABLE"
+            return status, {"_safe_code": safe_code}
+        with response:
+            raw = response.read(preflight.MAX_BODY + 1)
+            if len(raw) > preflight.MAX_BODY:
+                raise preflight.PreflightError("unavailable")
+            return response.status, preflight.parsed_json(raw.decode("utf-8"), preflight.MAX_BODY)
+    except preflight.PreflightError:
+        raise
+    except (OSError, ValueError, TypeError, UnicodeError, RecursionError):
+        raise preflight.PreflightError("unavailable") from None
 
 
 def read(request, path, token):
     # Restrict even internal callers to the documented read-only endpoints.
-    if (not isinstance(path, str) or not re.fullmatch(
-            r"/client/v4/(?:accounts/[0-9a-f]{32}/(?:tokens/verify|workers/subdomain|workers/scripts\?per_page=1&page=1)|user/tokens/verify)", path) or
-            not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9._-]{16,512}", token)):
+    if not allowed_request(path, token):
         raise DiagnosticError("internal")
-    # request_json supplies the fixed host, GET method, no proxy/redirect,
-    # bounded response and discards HTTP error bodies. Unexpected exceptions
-    # escape to main's fixed error, never to logs.
     try:
         return request("api.cloudflare.com", path, token)
     except preflight.PreflightError:
@@ -106,19 +169,22 @@ def read(request, path, token):
 
 def verify_status(request, account_path, token):
     status, body = read(request, account_path + "/tokens/verify", token)
+    via = "ACCOUNT"
     # As in the existing preflight: account-owned tokens use the account
     # endpoint; user-owned tokens may require the user endpoint instead.
     if status in (401, 403, 404):
+        via = "USER"
         status, body = read(request, "/client/v4/user/tokens/verify", token)
     if status is None:
         return "UNAVAILABLE"
     if status != 200:
-        return http_category(status)
+        return http_category(status, body)
     if not isinstance(body, dict) or body.get("success") is not True or not isinstance(body.get("result"), dict):
         return "UNEXPECTED_RESPONSE"
     token_status = body["result"].get("status")
     if token_status == "active":
-        return "OK"
+        # This reports the accepting endpoint, not the token's full scope.
+        return "OK_" + via
     if token_status in ("disabled", "expired"):
         return "NOT_ACTIVE"
     return "UNEXPECTED_RESPONSE"
@@ -129,7 +195,7 @@ def list_status(request, account_path, token):
     if status is None:
         return "UNAVAILABLE"
     if status != 200:
-        return http_category(status)
+        return http_category(status, body)
     if not isinstance(body, dict) or body.get("success") is not True or not isinstance(body.get("result"), list):
         return "UNEXPECTED_RESPONSE"
     return "OK"
@@ -140,7 +206,7 @@ def subdomain_status(request, account_path, token):
     if status is None:
         return "UNAVAILABLE"
     if status != 200:
-        return http_category(status)
+        return http_category(status, body)
     if not isinstance(body, dict) or body.get("success") is not True:
         return "UNEXPECTED_RESPONSE"
     result = body.get("result")
@@ -157,7 +223,7 @@ def subdomain_status(request, account_path, token):
 
 
 def collect(account, read_token, deploy_token, request=None):
-    request = request or preflight.request_json
+    request = request or diagnostic_request
     account_path = f"/client/v4/accounts/{account}"
     results = {}
     for label, token in (("READ", read_token), ("DEPLOY", deploy_token)):
@@ -167,10 +233,10 @@ def collect(account, read_token, deploy_token, request=None):
     return results
 
 
-CATEGORIES = frozenset({"OK", "NOT_ACTIVE", "UNAVAILABLE", "UNEXPECTED_RESPONSE", "EMPTY_RESULT",
-                        "SUBDOMAIN_UNSET_IN_RESPONSE", "INVALID_SUBDOMAIN_SHAPE", "HTTP_400", "HTTP_401",
-                        "HTTP_403", "HTTP_404", "HTTP_429", "HTTP_REDIRECT_BLOCKED", "HTTP_OTHER_4XX",
-                        "HTTP_5XX", "HTTP_UNEXPECTED"})
+CATEGORIES = frozenset({"OK", "OK_ACCOUNT", "OK_USER", "NOT_ACTIVE", "UNAVAILABLE", "UNEXPECTED_RESPONSE",
+                        "EMPTY_RESULT", "SUBDOMAIN_UNSET_IN_RESPONSE", "INVALID_SUBDOMAIN_SHAPE"} |
+                       set(HTTP_CATEGORIES) |
+                       {http + "+" + code for http in HTTP_CATEGORIES for code in SAFE_CF_CATEGORIES})
 MESSAGES = {
     "invocation": "Wrong repository, branch, commit, or Actions invocation; no Cloudflare request was made.",
     "debug": "Disable Actions debug logging; no Cloudflare request was made.",
@@ -204,7 +270,8 @@ def main():
         for label in ("READ", "DEPLOY"):
             verify, scripts, subdomain = results[label]
             print(f"::notice title=Push subdomain diagnostic::{label}: verify={verify}, list={scripts}, subdomain={subdomain}")
-        if any(value != "OK" for statuses in results.values() for value in statuses):
+        if any(statuses[0] not in ("OK_ACCOUNT", "OK_USER") or statuses[1:] != ("OK", "OK")
+               for statuses in results.values()):
             print("::error title=Push subdomain diagnostic::At least one read probe was not verified. A status alone does not prove its cause.")
             return 1
         print("::notice title=Push subdomain diagnostic::Read-only probes succeeded. Full token permissions and deployment are not verified.")

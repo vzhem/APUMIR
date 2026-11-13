@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 import unittest
+import urllib.error
 import urllib.request
 from unittest import mock
 
@@ -102,7 +103,7 @@ class ProviderTests(unittest.TestCase):
             calls.append((host, path, token))
             return 200, valid_response(path)
         self.assertEqual(d.collect(ACCOUNT, READ, DEPLOY, request),
-                         {"READ": ("OK", "OK", "OK"), "DEPLOY": ("OK", "OK", "OK")})
+                         {"READ": ("OK_ACCOUNT", "OK", "OK"), "DEPLOY": ("OK_ACCOUNT", "OK", "OK")})
         expected = []
         for token in (READ, DEPLOY):
             for path in (ACCOUNT_PATH + "/tokens/verify", ACCOUNT_PATH + "/workers/scripts?per_page=1&page=1",
@@ -117,7 +118,7 @@ class ProviderTests(unittest.TestCase):
                 calls.append(path)
                 return (initial, None) if len(calls) == 1 else (200, valid_response(path))
             with self.subTest(initial=initial):
-                self.assertEqual(d.verify_status(request, ACCOUNT_PATH, READ), "OK")
+                self.assertEqual(d.verify_status(request, ACCOUNT_PATH, READ), "OK_USER")
                 self.assertEqual(calls, [ACCOUNT_PATH + "/tokens/verify", "/client/v4/user/tokens/verify"])
 
     def test_other_verify_failures_do_not_try_another_kind(self):
@@ -127,11 +128,11 @@ class ProviderTests(unittest.TestCase):
                 calls.append(path)
                 return status, {"success": False}
             with self.subTest(status=status):
-                self.assertNotEqual(d.verify_status(request, ACCOUNT_PATH, READ), "OK")
+                self.assertNotIn(d.verify_status(request, ACCOUNT_PATH, READ), ("OK_ACCOUNT", "OK_USER"))
                 self.assertEqual(calls, [ACCOUNT_PATH + "/tokens/verify"])
 
     def test_known_inactive_and_malformed_verify_results(self):
-        for token_status, expected in (("active", "OK"), ("disabled", "NOT_ACTIVE"),
+        for token_status, expected in (("active", "OK_ACCOUNT"), ("disabled", "NOT_ACTIVE"),
                                        ("expired", "NOT_ACTIVE"), ("unknown", "UNEXPECTED_RESPONSE"),
                                        (None, "UNEXPECTED_RESPONSE")):
             request = lambda *_: (200, {"success": True, "result": {"status": token_status}})
@@ -145,6 +146,66 @@ class ProviderTests(unittest.TestCase):
             with self.subTest(status=status):
                 self.assertEqual(d.subdomain_status(lambda *_: (status, {"secret": READ}), ACCOUNT_PATH, READ), category)
                 self.assertEqual(d.list_status(lambda *_: (status, {"secret": READ}), ACCOUNT_PATH, READ), category)
+
+    def test_error_body_yields_only_whitelisted_numeric_codes(self):
+        def payload(errors):
+            return json.dumps({"errors": errors, "secret": READ, "message": DEPLOY}).encode()
+        cases = [(b"", "CF_NONE"), (b"not json", "CF_UNAVAILABLE"),
+                 (b'{}', "CF_NONE"), (payload([]), "CF_NONE"),
+                 (payload([{"code": 10000, "message": DEPLOY}]), "CF_10000"),
+                 (payload([{"code": 9109, "message": READ}]), "CF_9109"),
+                 (payload([{"code": 999999, "message": READ}]), "CF_OTHER"),
+                 (payload([{"code": True}]), "CF_NONE"),
+                 (payload([{"code": 10000}, {"code": 9109}]), "CF_MULTIPLE"),
+                 (b'{"errors":[],"errors":[]}', "CF_UNAVAILABLE"),
+                 (b'\xff', "CF_UNAVAILABLE"), (b'x' * (d.MAX_ERROR_BYTES + 1), "CF_UNAVAILABLE")]
+        for raw, expected in cases:
+            with self.subTest(expected=expected):
+                category = d.error_code_category(raw)
+                self.assertEqual(category, expected)
+                self.assertIn(category, d.SAFE_CF_CATEGORIES)
+                self.assertNotIn(READ, category)
+                self.assertNotIn(DEPLOY, category)
+
+    def test_http_error_is_bounded_closed_and_sanitized(self):
+        class LimitedErrorBody(io.BytesIO):
+            def read(self, maximum=-1):
+                if maximum != d.MAX_ERROR_BYTES + 1:
+                    raise AssertionError("error response limit missing")
+                return super().read(maximum)
+        body = LimitedErrorBody(json.dumps({"errors": [{"code": 10000, "message": DEPLOY}],
+                                            "secret": READ}).encode())
+        class Opener:
+            def open(self, request, timeout):
+                self_url = request.full_url
+                if request.get_method() != "GET" or request.get_header("Authorization") != "Bearer " + DEPLOY:
+                    raise AssertionError("wrong transport")
+                raise urllib.error.HTTPError(self_url, 401, DEPLOY, {}, body)
+        output = io.StringIO()
+        with mock.patch.object(d.urllib.request, "build_opener", return_value=Opener()), \
+             contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            status, safe_body = d.diagnostic_request("api.cloudflare.com", ACCOUNT_PATH + "/workers/subdomain", DEPLOY)
+        self.assertEqual((status, safe_body), (401, {"_safe_code": "CF_10000"}))
+        self.assertTrue(body.closed)
+        self.assertEqual(d.http_category(status, safe_body), "HTTP_401+CF_10000")
+        for secret in (ACCOUNT, READ, DEPLOY):
+            self.assertNotIn(secret, output.getvalue() + repr(safe_body))
+
+    def test_unrecognized_or_injected_error_category_never_leaves_the_process(self):
+        for fake in (READ, "CF_123456789", "CF_10000\n::notice::" + DEPLOY, 10000, None):
+            with self.subTest(kind=type(fake).__name__):
+                category = d.http_category(401, {"_safe_code": fake})
+                self.assertEqual(category, "HTTP_401")
+                self.assertNotIn(READ, category)
+                self.assertNotIn(DEPLOY, category)
+
+    def test_transport_rejects_untrusted_host_or_path_before_opening(self):
+        with mock.patch.object(d.urllib.request, "build_opener") as opener:
+            with self.assertRaises(d.preflight.PreflightError):
+                d.diagnostic_request("example.com", ACCOUNT_PATH + "/workers/subdomain", READ)
+            with self.assertRaises(d.preflight.PreflightError):
+                d.diagnostic_request("api.cloudflare.com", ACCOUNT_PATH + "/workers/workers", READ)
+            opener.assert_not_called()
 
     def test_subdomain_response_categories_never_return_its_value(self):
         cases = [(None, "UNEXPECTED_RESPONSE"), ({}, "UNEXPECTED_RESPONSE"),
@@ -213,6 +274,8 @@ class ProviderTests(unittest.TestCase):
                 self_method = request.get_method()
                 if not self_url.startswith("https://api.cloudflare.com/") or self_method != "GET" or timeout != 10:
                     raise AssertionError("unsafe request")
+                if request.get_header("Authorization") not in ("Bearer " + READ, "Bearer " + DEPLOY):
+                    raise AssertionError("wrong authentication scheme")
                 path = self_url.removeprefix("https://api.cloudflare.com")
                 seen.append((self_method, path))
                 return Response(path)
@@ -224,7 +287,7 @@ class ProviderTests(unittest.TestCase):
             return Opener()
         with mock.patch.object(d.preflight.urllib.request, "build_opener", side_effect=build):
             result = d.collect(ACCOUNT, READ, DEPLOY)
-        self.assertEqual(result, {"READ": ("OK", "OK", "OK"), "DEPLOY": ("OK", "OK", "OK")})
+        self.assertEqual(result, {"READ": ("OK_ACCOUNT", "OK", "OK"), "DEPLOY": ("OK_ACCOUNT", "OK", "OK")})
         self.assertEqual(len(seen), 6)
         self.assertTrue(all(method == "GET" for method, _ in seen))
 
@@ -238,35 +301,78 @@ class MainTests(unittest.TestCase):
                 self.assertNotIn(name, os.environ)
         def collect(account, read_token, deploy_token):
             self.assertEqual((account, read_token, deploy_token), (ACCOUNT, READ, DEPLOY))
-            return {"READ": ("OK", "OK", "OK"), "DEPLOY": ("OK", "OK", "OK")}
+            return {"READ": ("OK_USER", "OK", "OK"), "DEPLOY": ("OK_ACCOUNT", "OK", "OK")}
         with mock.patch.dict(os.environ, values(), clear=True), mock.patch.object(d, "check_checkout", side_effect=checkout), \
              mock.patch.object(d, "collect", side_effect=collect), contextlib.redirect_stdout(output):
             self.assertEqual(d.main(), 0)
         rendered = output.getvalue()
-        self.assertIn("READ: verify=OK, list=OK, subdomain=OK", rendered)
-        self.assertIn("DEPLOY: verify=OK, list=OK, subdomain=OK", rendered)
+        self.assertIn("READ: verify=OK_USER, list=OK, subdomain=OK", rendered)
+        self.assertIn("DEPLOY: verify=OK_ACCOUNT, list=OK, subdomain=OK", rendered)
         self.assertIn("Full token permissions and deployment are not verified", rendered)
         for secret in (ACCOUNT, READ, DEPLOY, "private-worker-name", "private-subdomain"):
             self.assertNotIn(secret, rendered)
 
     def test_probe_failures_are_reported_with_categories_not_provider_text(self):
         output = io.StringIO()
-        results = {"READ": ("OK", "OK", "HTTP_404"), "DEPLOY": ("HTTP_401", "HTTP_403", "HTTP_403")}
+        results = {"READ": ("OK_USER", "OK", "HTTP_404"),
+                   "DEPLOY": ("OK_ACCOUNT", "HTTP_401+CF_10000", "HTTP_401+CF_9109")}
         with mock.patch.dict(os.environ, values(), clear=True), mock.patch.object(d, "check_checkout"), \
              mock.patch.object(d, "collect", return_value=results), contextlib.redirect_stdout(output):
             self.assertEqual(d.main(), 1)
-        self.assertIn("READ: verify=OK, list=OK, subdomain=HTTP_404", output.getvalue())
-        self.assertIn("DEPLOY: verify=HTTP_401, list=HTTP_403, subdomain=HTTP_403", output.getvalue())
+        self.assertIn("READ: verify=OK_USER, list=OK, subdomain=HTTP_404", output.getvalue())
+        self.assertIn("DEPLOY: verify=OK_ACCOUNT, list=HTTP_401+CF_10000, subdomain=HTTP_401+CF_9109", output.getvalue())
         self.assertIn("does not prove its cause", output.getvalue())
 
     def test_invalid_category_cannot_inject_an_annotation(self):
         output = io.StringIO()
-        results = {"READ": ("OK", "OK", "::notice::" + READ), "DEPLOY": ("OK", "OK", "OK")}
+        results = {"READ": ("OK_USER", "OK", "::notice::" + READ), "DEPLOY": ("OK_ACCOUNT", "OK", "OK")}
         with mock.patch.dict(os.environ, values(), clear=True), mock.patch.object(d, "check_checkout"), \
              mock.patch.object(d, "collect", return_value=results), contextlib.redirect_stdout(output):
             self.assertEqual(d.main(), 1)
         self.assertNotIn(READ, output.getvalue())
         self.assertNotIn("READ: verify", output.getvalue())
+
+    def test_complete_fake_provider_reports_401_code_without_private_response(self):
+        calls = []
+        class Response:
+            status = 200
+            def __init__(self, path):
+                self.path = path
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                return False
+            def read(self, maximum):
+                if maximum != d.preflight.MAX_BODY + 1:
+                    raise AssertionError("response limit missing")
+                return json.dumps(valid_response(self.path)).encode()
+        class FakeOpener:
+            def open(self, request, timeout):
+                url = request.full_url
+                if not url.startswith("https://api.cloudflare.com/") or request.get_method() != "GET" or timeout != 10:
+                    raise AssertionError("unexpected request")
+                path = url.removeprefix("https://api.cloudflare.com")
+                auth = request.get_header("Authorization")
+                if auth not in ("Bearer " + READ, "Bearer " + DEPLOY):
+                    raise AssertionError("unexpected credential")
+                calls.append((path, auth))
+                if (auth == "Bearer " + READ and path == ACCOUNT_PATH + "/tokens/verify") or \
+                        (auth == "Bearer " + DEPLOY and "/workers/" in path):
+                    error_body = json.dumps({"errors": [{"code": 10000, "message": DEPLOY}],
+                                             "private_id": ACCOUNT, "subdomain": "private-subdomain"}).encode()
+                    raise urllib.error.HTTPError(url, 401, READ, {}, io.BytesIO(error_body))
+                return Response(path)
+        output = io.StringIO()
+        with mock.patch.dict(os.environ, values(), clear=True), mock.patch.object(d, "check_checkout"), \
+             mock.patch.object(d.urllib.request, "build_opener", return_value=FakeOpener()), \
+             contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            self.assertEqual(d.main(), 1)
+        rendered = output.getvalue()
+        self.assertIn("READ: verify=OK_USER, list=OK, subdomain=OK", rendered)
+        self.assertIn("DEPLOY: verify=OK_ACCOUNT, list=HTTP_401+CF_10000, subdomain=HTTP_401+CF_10000", rendered)
+        self.assertEqual(len(calls), 7)
+        for secret in (ACCOUNT, READ, DEPLOY, "private-worker-name", "private-subdomain"):
+            self.assertNotIn(secret, rendered)
 
     def test_checkout_or_unexpected_exception_cannot_expose_secrets_or_run_more_probes(self):
         for failed in ("checkout", "collect"):
