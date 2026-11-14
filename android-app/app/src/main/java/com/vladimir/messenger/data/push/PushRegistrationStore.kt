@@ -97,6 +97,18 @@ internal class PushRegistrationStore(
     fun reserve(participants: Participants, nowMs: Long): Result =
         change(participants, true, nowMs) { it.reserve() }
 
+    /**
+     * Creates the record for a newly pinned pair if it does not exist yet, and
+     * returns the current one otherwise.
+     *
+     * The epoch and device id are generated here, locally, and never leave this
+     * journal unencrypted: the peer only ever receives the sealed announcement.
+     * This does not register anything and does not prove the peer can be
+     * reached; it only makes a first `register` attempt possible.
+     */
+    fun ensure(participants: Participants, nowMs: Long): Result =
+        change(participants, true, nowMs, write = true) { it }
+
     /** Index the derived route only after the matching server operation was accepted. */
     fun registered(participants: Participants, sequence: Long, tokenFingerprint: String, nowMs: Long, route: String): Result {
         if (!ROUTE.matches(route)) return Result.Rejected

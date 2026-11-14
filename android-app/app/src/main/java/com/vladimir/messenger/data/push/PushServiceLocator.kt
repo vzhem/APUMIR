@@ -61,6 +61,10 @@ internal object PushServiceLocator {
         val crypto: PushWakeCrypto,
         internal val pins: FileExchangePeerStore,
         internal val database: AppDatabase,
+        /** Epoch offer/revoke delivery; null while no endpoint is approved. */
+        val epochs: PushEpochDelivery?,
+        /** Authenticated import of a peer's epoch announcement; null when disabled. */
+        val epochImport: PushEpochImport?,
     )
 
     private fun deps(context: Context): Deps =
@@ -106,6 +110,25 @@ internal object PushServiceLocator {
                 crypto = crypto,
                 recordFailure = { log("Wake inspection failure") },
             )
+            val delivery = endpoint(app)?.let { approved ->
+                PushEpochDelivery(
+                    context = app,
+                    outbox = PushMailboxOutbox(
+                        app,
+                        PushMailboxMessageSealer(recordFailure = { diag("Envelope seal failure") }),
+                        recordFailure = { diag("Outbox failure") },
+                    ),
+                    client = PushMailboxHttpClient(approved, recordFailure = { diag("Mailbox put failure") }),
+                    crypto = crypto,
+                    recordFailure = { diag("Epoch delivery failure") },
+                )
+            }
+            val epochImport = if (endpoint(app) == null) null else PushEpochImport(
+                context = app,
+                epochs = journals.epochs,
+                pins = pins,
+                recordFailure = { diag("Epoch import failure") },
+            )
             Shared(
                 journals = journals,
                 dispatcher = dispatcher,
@@ -119,6 +142,8 @@ internal object PushServiceLocator {
                 crypto = crypto,
                 pins = pins,
                 database = deps(app).database(),
+                epochs = delivery,
+                epochImport = epochImport,
             ).also { sharedInstance = it }
         }
     }
@@ -184,6 +209,7 @@ internal object PushServiceLocator {
                 val http = PushHttpClient(endpoint, recordFailure = { log("Registration transport failure") })
                 val runner = PushRegistrationRunner(
                     resolver = shared.resolver,
+                    journal = shared.journals.registrations,
                     flow = { participants -> PushRegistrationFlow.of(shared.journals.registrations, http) },
                     recordFailure = { log("Registration failure") },
                 )

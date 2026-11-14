@@ -1189,7 +1189,10 @@ class CoreServerService : Service() {
                             is RelayEnvelope.Parsed.Message -> {
                                 val messageId = parsed.messageId
                                 val cfContent = if (SealedWire.isSealed(parsed.content)) MessageSealer.open(applicationContext, parsed.content) else parsed.content
-                                if (PushControlIngress.isReserved(cfContent)) return@launch
+                                // The reserved push-control family stays quarantined here; the
+                                // only honest exception is a sealed epoch packet from the
+                                // pinned peer, which the push feature may import.
+                                if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, cfContent, senderId, parsed.content)) return@launch
                                 var acknowledge = false // Only a stored text or an explicitly handled service packet.
                                 // Дедупликация: сообщение уже в БД
                                 val existingMsg = chatRepository.getMessageById(messageId)
@@ -1304,7 +1307,7 @@ class CoreServerService : Service() {
                             }
 
                             is RelayEnvelope.Parsed.Other -> {
-                                if (PushControlIngress.isReserved(if (SealedWire.isSealed(parsed.raw)) MessageSealer.open(applicationContext, parsed.raw) else parsed.raw)) return@launch
+                                if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, if (SealedWire.isSealed(parsed.raw)) MessageSealer.open(applicationContext, parsed.raw) else parsed.raw, senderId, parsed.raw)) return@launch
                                 // Legacy plain-text payload (не envelope) — сохраняем как раньше.
                                 // Раунд 140: но только не служебный конверт - он
                                 // разбирается стражем, в чат ему дороги нет.
@@ -2241,14 +2244,12 @@ class CoreServerService : Service() {
             }
 
             "message_received" -> {
-                val originalTs = event.timestamp
-                val ts = originalTs ?: System.currentTimeMillis()
-                Log.i(TAG, "📨 MESSAGE_RECEIVED: sender=${event.senderId} msgId=${event.messageId} originalTs=$originalTs ts=$ts")
+                val ts = event.timestamp ?: System.currentTimeMillis()
                 val senderId = event.senderId ?: return
                 val chatId = event.chatId ?: return
                 val messageId = event.messageId ?: return
                 val rawText = event.text ?: return
-                if (PushControlIngress.isReserved(rawText)) return
+                if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, rawText, senderId, rawText)) return
                 val timestamp = ts
 
                 // Отправитель обязан быть узлом (pk_…): ядро не проверяет первое поле, и
@@ -2309,7 +2310,7 @@ class CoreServerService : Service() {
                 // ядро на каждом входящем тормозил разбор очереди.
                 val sealed = SealedWire.isSealed(rawText)
                 val preopened = if (sealed) MessageSealer.open(applicationContext, rawText) else rawText
-                if (PushControlIngress.isReserved(preopened)) return
+                if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, preopened, senderId, rawText)) return
                 val myNodeId = com.vladimir.messenger.data.mirror.MirrorHub.nodeIdCached()
                 if (myNodeId.isNotBlank() && senderId == myNodeId) {
                     Log.w(TAG, "self-addressed packet ignored msgId=$messageId text=" + rawText.take(24))

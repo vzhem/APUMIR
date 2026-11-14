@@ -25,7 +25,9 @@ import java.util.logging.Logger
  */
 internal class PushRegistrationRunner(
     private val resolver: PushTrustResolver,
+    private val journal: PushRegistrationStore,
     private val flow: (PushRegistrationStore.Participants) -> PushRegistrationFlow,
+    private val nowMs: () -> Long = System::currentTimeMillis,
     private val recordFailure: () -> Unit = {},
 ) {
     sealed interface Outcome {
@@ -55,8 +57,17 @@ internal class PushRegistrationRunner(
             val participants = PushRegistrationStore.Participants(
                 resolved.localId, resolved.peerId, resolved.localBinding, resolved.pinnedPeerBinding,
             )
-            val epoch = resolved.registration?.epochHex.orEmpty()
-            val material = resolved.derive(epoch) ?: return Outcome.NotReady
+            // A freshly pinned pair has no record yet; create the local epoch so
+            // a first registration is possible. An existing record may lack a
+            // route index after an interrupted attempt, and only `reserve`
+            // repairs that, so a create-only call is not enough here.
+            val stored = journal.read(participants).let { read ->
+                if (read is PushRegistrationStore.Result.Missing) journal.ensure(participants, nowMs()) else read
+            }
+            // The epoch is read back from the journal: a record created a moment
+            // ago was not in the trust pass that resolved this peer.
+            val state = (stored as? PushRegistrationStore.Result.Ready)?.state ?: return Outcome.NotReady
+            val material = resolved.derive(state.epochHex) ?: return Outcome.NotReady
             try {
                 return when (
                     flow(participants).register(

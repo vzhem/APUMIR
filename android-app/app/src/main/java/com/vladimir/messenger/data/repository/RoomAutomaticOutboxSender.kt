@@ -13,6 +13,12 @@ internal fun roomAutomaticOutboxSender(
 ): AutomaticOutboxSender = AutomaticOutboxSender(
     chatContact = { chats.getChatById(it)?.contactId },
     isCleared = { peer, id -> ChatClearRegistry.isCleared(context, peer, id) },
-    transport = send,
+    transport = { messageId, chatId, peerId, content ->
+        val sent = send(messageId, chatId, peerId, content)
+        // Best-effort epoch announcement for this correspondent; deliberately
+        // not part of `sent` and never able to change a message status.
+        com.vladimir.messenger.data.push.PushEpochPublish.noteCorrespondentIfEnabled(context, peerId)
+        sent
+    },
     recordFailure = { error -> Log.w("AutomaticOutboxSender", "Clear preflight failed: ${error.javaClass.simpleName}") },
 )

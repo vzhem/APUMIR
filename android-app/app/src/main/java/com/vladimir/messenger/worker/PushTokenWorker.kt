@@ -42,7 +42,13 @@ class PushTokenWorker(
                 PushTokenRegistrar.Outcome.NotConfigured,
                 PushTokenRegistrar.Outcome.NoPlayServices -> Result.success()
                 PushTokenRegistrar.Outcome.AlreadyCurrent,
-                PushTokenRegistrar.Outcome.Registered -> Result.success()
+                PushTokenRegistrar.Outcome.Registered -> {
+                    // A newly registered (or rotated) epoch is useless until the
+                    // peers know it; this is a best-effort announcement, not a
+                    // delivery claim, so its result does not change ours.
+                    com.vladimir.messenger.data.push.PushEpochPublish.noteAllRegistered(app)
+                    Result.success()
+                }
                 PushTokenRegistrar.Outcome.Partial,
                 PushTokenRegistrar.Outcome.Failed -> Result.retry()
             }
