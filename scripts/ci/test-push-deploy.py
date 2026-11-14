@@ -161,6 +161,34 @@ class DeploymentTests(unittest.TestCase):
         code, text, _ = self.run_deploy()
         self.assertIn("not delivery", text.lower())
 
+    def test_the_health_request_looks_like_the_app_not_like_a_library(self):
+        # The bare Python-urllib agent was answered by a Cloudflare edge rule, not
+        # by the Worker, which made a successful upload look like a failed one.
+        seen = {}
+
+        class Opener:
+            def __call__(self, request, timeout=None):
+                seen["agent"] = request.get_header("User-agent")
+                seen["url"] = request.full_url
+                import io as _io
+                response = _io.BytesIO(b'{"ok": true}')
+                response.status = 200
+                return contextlib.closing(response)
+
+        status, body = deploy.health(opener=Opener())
+        self.assertEqual(200, status)
+        self.assertEqual({"ok": True}, body)
+        self.assertIn("APU-Messenger/", seen["agent"])
+        self.assertEqual("https://" + deploy.REVIEWED_HOST + "/health", seen["url"])
+
+    def test_a_status_from_in_front_of_the_worker_is_not_blamed_on_a_switch(self):
+        # Only the Worker's own 503 means "I am switched off". Anything else is
+        # reported as something that answered before the Worker.
+        for status, expected in ((503, "reports itself off"), (403, "before the Worker did")):
+            code, text, _ = self.run_deploy(health_result=(status, None))
+            self.assertEqual(1, code)
+            self.assertIn(expected, text)
+
     def test_a_missing_rate_key_is_generated_once_and_never_printed(self):
         code, text, fake = self.run_deploy()
         self.assertEqual(0, code, text)

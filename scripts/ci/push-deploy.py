@@ -202,9 +202,16 @@ def deploy(env, enabled):
     return True
 
 
+# What the app itself sends: a normal client, not a library default.
+HEALTH_HEADERS = {
+    "Accept": "application/json",
+    "User-Agent": "APU-Messenger/" + WORKER_NAME + " (deployment check)",
+}
+
+
 def health(host=REVIEWED_HOST, opener=urllib.request.urlopen):
     """One public GET: the deployed service describing itself. No credentials."""
-    request = urllib.request.Request("https://" + host + "/health", headers={"Accept": "application/json"})
+    request = urllib.request.Request("https://" + host + "/health", headers=HEALTH_HEADERS)
     try:
         with opener(request, timeout=30) as response:
             body = __import__("json").loads(response.read(4096).decode("utf-8"))
@@ -308,9 +315,16 @@ def main(values, environ=None):
         healthy = status == 200 and isinstance(body, dict) and body.get("ok") is True
         if not healthy:
             print("HEALTH=UNEXPECTED status=" + str(status))
-            # Both the requested switches and the Worker's own idea of "enabled"
-            # are what /health reports, so a switch is the first thing to check.
-            print("A switch or a credential binding is not in effect; the service reports itself off.")
+            if status == 503:
+                # The Worker's own answer: it is running and says it is off.
+                print("A switch or a credential binding is not in effect; the service reports itself off.")
+                trace("Health check: the service answered 503 and reports itself off.")
+            else:
+                # Something in front of the Worker answered. The upload itself is
+                # not evidence of failure, so say so plainly instead of blaming a
+                # switch that was never tested.
+                print("The health request was answered before the Worker did; the upload is not in question.")
+                trace("Health check: answered with status " + str(status) + " before reaching the Worker.")
             return 1
         print("HEALTH=OK")
         print("This is not delivery: no device registered and no provider message was sent.")
