@@ -13,6 +13,7 @@ import dagger.hilt.components.SingletonComponent
 import java.util.concurrent.CancellationException
 import java.util.logging.Logger
 import kotlinx.coroutines.CancellationException as CoroutineCancellation
+import kotlinx.coroutines.launch
 
 /**
  * Process-wide construction point for the remote-push runtime. It exists so the
@@ -49,8 +50,9 @@ internal object PushServiceLocator {
     private val LOCK = Any()
 
     /** Process-lifetime scope for one-shot startup wiring; nothing is retried here. */
-    private val startupScope =
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+    private val startupScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO,
+    )
     private var sharedInstance: Shared? = null
     private var receiverInstance: PushMailboxReceiver? = null
     private var fullScanInstance: PushFullScan? = null
