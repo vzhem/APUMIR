@@ -256,25 +256,52 @@ object TransferDiagnostics {
         }
     }
 
+    /** Где именно обнаружилось расхождение ключа: это разные поломки. */
+    enum class KeyChangedPath { HELLO, OPENED, UNKNOWN }
+
     /**
      * Собеседник прислал новый ключ обмена, а у нас закреплён старый (он
      * переустановил приложение или восстановил профиль). Переписка с ним
      * ломается в обе стороны — и именно так выглядит жалоба «от него ко мне не
      * приходят», хотя внешне ничего не сломано. Пишем предупреждением один раз
      * и каждое пятое: подсказка «отсканируйте QR заново» должна быть на виду.
+     *
+     * [path] называет, ГДЕ поймали расхождение: `hello` — файловый обмен
+     * ключами, `opened` — ключ из уже вскрытого сообщения. Без этого отчёт
+     * говорил «ключ не совпал», хотя сообщения от собеседника при этом
+     * открывались, и понять, какая из двух дорог сломана, было нельзя
+     * (владелец 2026-11-14: «этот телефон у кого-то не видит VIP-статус»).
      */
-    fun notePeerKeyChanged() {
+    fun notePeerKeyChanged(path: KeyChangedPath = KeyChangedPath.UNKNOWN) {
         peerKeyChangedAtMs = System.currentTimeMillis()
+        when (path) {
+            KeyChangedPath.HELLO -> helloKeyMismatch = (helloKeyMismatch ?: 0L) + 1L
+            KeyChangedPath.OPENED -> openedKeyMismatch = (openedKeyMismatch ?: 0L) + 1L
+            KeyChangedPath.UNKNOWN -> Unit
+        }
         val total = bump(Counters.MSG_PEER_KEY_CHANGED)
         if (total == 1L || total % 5L == 0L) {
             append(
                 DiagnosticsLevel.WARN,
                 "msg",
-                "подписанный HELLO не совпал с закреплённым ключом собеседника; " +
-                    "проверьте его личность по другому каналу, прежде чем обновлять QR",
+                "подписанный HELLO не совпал с закреплённым ключом собеседника" +
+                    when (path) {
+                        KeyChangedPath.HELLO -> " (проверка HELLO)"
+                        KeyChangedPath.OPENED -> " (ключ из вскрытого сообщения)"
+                        KeyChangedPath.UNKNOWN -> ""
+                    } +
+                    "; проверьте его личность по другому каналу, прежде чем обновлять QR",
             )
         }
     }
+
+    /** Сколько расхождений поймано на каждой дороге; null — таких не было. */
+    @Volatile
+    var helloKeyMismatch: Long? = null
+        private set
+    @Volatile
+    var openedKeyMismatch: Long? = null
+        private set
 
     /** Пакет без узла-отправителя: обрывок служебной строки, в переписку нельзя. */
     fun noteBadSender() {
@@ -552,6 +579,8 @@ object TransferDiagnostics {
             lastOutgoingAtMs = lastOutgoingAtMs,
             lastAckAtMs = lastAckAtMs,
             peerKeyChangedAtMs = peerKeyChangedAtMs,
+            helloKeyMismatch = helloKeyMismatch,
+            openedKeyMismatch = openedKeyMismatch,
             coreMessageSignals = logcat.coreMessageSignals,
             relayQueueFull = logcat.relayQueueFull,
             relayQueueOwn = logcat.queueOwn,

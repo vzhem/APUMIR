@@ -699,7 +699,9 @@ class DiagnosticsContractsTest(unittest.TestCase):
 
     def test_messages_report_both_directions_and_reasons(self):
         """Жалоба «от него не приходит» должна разбираться по отчёту, а не на слух."""
-        report = source(DIAG / "DiagnosticsReport.kt")
+        # Строка про несовпавший ключ переехала в отдельный файл рядом
+        # (правило god-файлов), поэтому контракт смотрит на оба файла.
+        report = source(DIAG / "DiagnosticsReport.kt") + source(DIAG / "KeyMismatchReport.kt")
         for marker in (
             "const val MSG_IN = ",
             "const val MSG_OUT = ",
@@ -791,7 +793,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
         for marker in (
             "HelloResult.REJECTED_KEY_CHANGED",
             "TransferDiagnostics",
-            "notePeerKeyChanged()",
+            "notePeerKeyChanged(",
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, receiver)

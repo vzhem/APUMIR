@@ -197,6 +197,10 @@ data class DiagnosticsFacts(
     val relayQueueOwnEvictions: Long = 0L,
     val relayQueueOwnDrained: Long? = null,
     val relayQueueOwnEvictionsAreCumulative: Boolean = false,
+    /** Расхождений ключа обмена поймано на HELLO; null — таких не было. */
+    val helloKeyMismatch: Long? = null,
+    /** Расхождений поймано на ключе из вскрытого сообщения; null — не было. */
+    val openedKeyMismatch: Long? = null,
     /** Полные циклы STUN, в которых ни один сервер не ответил. */
     val stunFailedCycles: Long = 0L,
     /** Успешные ответы STUN в выборке системного журнала. */
@@ -1206,12 +1210,7 @@ object DiagnosticsReport {
                     "не было"
                 },
         )
-        if (facts.peerKeyChangedAtMs > 0L) {
-            appendLine(
-                "  ↳ подписанный HELLO не совпал с закреплённым ключом; проверьте " +
-                    "личность собеседника вне приложения перед обновлением QR",
-            )
-        }
+        appendKeyMismatch(facts)
         if (notOpened > 0L) {
             appendLine(
                 "  ↳ это попытки, не число уникальных сообщений: неизвестно, кому " +
