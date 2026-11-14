@@ -3242,8 +3242,9 @@ uCoz рвёт большую FTP-передачу. Владелец: «дела�
   выбирается только из константы и что `p2p-relay` им не является.
 - **Появился конфиг, который можно развернуть:** `wrangler.push.toml` (Worker
   `apu-push`, SQLite DO `PushShard`, миграция `v1`, флаги `"false"` в файле) и
-  `scripts/ci/push-deploy.py` (один идемпотентный PUT, креды только как
-  secret-bindings, без повторов и удалений). `deploy-push.yml` ставит загрузку
+  `scripts/ci/push-deploy.py` (деплой через закреплённый Wrangler: три
+  `secret put` со значением на stdin, затем один `deploy` с обоими флагами;
+  креды только как secret-bindings, без повторов и удалений). `deploy-push.yml` ставит загрузку
   в окружение `apu-push-staging`, то есть GitHub останавливается на review
   владельца до выдачи секретов.
 - **Исправлен дефект очереди:** shard ставил recovery-alarm до проверки

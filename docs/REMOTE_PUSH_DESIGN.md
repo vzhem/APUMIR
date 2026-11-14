@@ -830,14 +830,19 @@ APK), а не среда выполнения Worker. Нужен Cloudflare Work
   ровно тот хост, что в allowlist): SQLite Durable Object `PushShard`, миграция
   `v1`, `workers_dev = true`. Флаги в файле по-прежнему `"false"`: развернуть
   скелет и включить доставку — два разных решения.
-- `scripts/ci/push-deploy.py` — один идемпотентный PUT на одно имя: шесть
-  модулей, DO-binding, FCM-креды и `PUSH_RATE_KEY` как **secret_text**,
-  `PUSH_ENABLED="true"` и `MAILBOX_ENABLED="true"`. Без повторов, без
-  `DELETE`, ответы провайдера не печатаются. Миграция не повторяется, если
-  класс уже существует (повтор Cloudflare отвергает). В конце — один публичный
-  `GET /health`, и это единственный честный сигнал оттуда.
-- `.github/workflows/deploy-push.yml` — офлайн-тесты (9 сценариев деплоя, 25
-  preflight, 31 создание, 66 Worker в workerd) → проверка защиты окружения →
+- `scripts/ci/push-deploy.py` — деплой через закреплённый Wrangler, а не через
+  ручные вызовы API: три `wrangler secret put` (значение подаётся на stdin и
+  никогда не попадает в argv), затем один `wrangler deploy` по
+  `wrangler.push.toml` с `--var PUSH_ENABLED:true --var MAILBOX_ENABLED:true` и
+  утверждённым именем Worker. Так Durable Object namespace, миграция и
+  secret-bindings проходят ровно тем путём, который проверен на аккаунте
+  (`--dry-run` даёт ровно нужные биндинги). Вывод Wrangler перехватывается и
+  отбрасывается — он может печатать аккаунт и маршруты; через границу идут
+  только код возврата и один публичный ответ `/health`. Дочернему процессу
+  передаются ровно три переменные, поэтому JSON сервисного аккаунта не утечёт в
+  инструмент, который логирует окружение. Без повторов, без `DELETE`.
+- `.github/workflows/deploy-push.yml` — офлайн-тесты (11 сценариев деплоя, 25
+  preflight, 31 создание, 67 Worker в workerd) → проверка защиты окружения →
   job **в окружении `apu-push-staging`**, то есть GitHub сам останавливается на
   review владельца, прежде чем выдать секреты.
 - `scripts/ci/push-infra-preflight.py` теперь принимает и текущую линию работ
