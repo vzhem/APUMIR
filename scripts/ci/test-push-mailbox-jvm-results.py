@@ -81,6 +81,7 @@ class MailboxResultsTest(unittest.TestCase):
                                    "PushFullScanTest", "PushSignalSinkTest", "PushTargetsTest",
                                    "PushTrustResolverTest", "PushTokenRegistrarTest",
                                    "PushMailboxTextPolicyTest", "PushMailboxMessageSealerTest", "PushMailboxMessageOpenerTest",
+                                   "PushEpochImportTest",
                                ))):
             source = (tests / (name + ".kt")).read_text(encoding="utf-8")
             methods = re.findall(r"@Test\s+fun\s+([A-Za-z_]\w*)\s*\(", source)

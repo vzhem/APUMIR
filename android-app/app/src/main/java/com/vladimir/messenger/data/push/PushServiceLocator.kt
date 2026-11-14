@@ -123,7 +123,7 @@ internal object PushServiceLocator {
                     recordFailure = { diag("Epoch delivery failure") },
                 )
             }
-            val epochImport = if (endpoint(app) == null) null else PushEpochImport(
+            val epochImport = if (endpoint(app) == null) null else PushEpochImport.of(
                 context = app,
                 epochs = journals.epochs,
                 pins = pins,

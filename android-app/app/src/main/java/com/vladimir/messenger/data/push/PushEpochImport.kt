@@ -8,6 +8,7 @@ import com.vladimir.messenger.data.security.SealedWire
 import java.security.MessageDigest
 import java.util.concurrent.CancellationException
 import java.util.logging.Logger
+import uniffi.p2p_core.fileExchangeBindingNodeId
 
 /**
  * The only place where a peer's epoch announcement may stop being quarantined.
@@ -27,12 +28,26 @@ import java.util.logging.Logger
  * unreadable journal — leaves the text in quarantine and changes nothing. A
  * successful accept means "the peer offered an epoch", not "a message arrived"
  * and not "this device may now reach the peer".
+ *
+ * The dependencies are seams, not stores: production wiring lives in [of], so the
+ * decision order above is exercised without an emulator, a Keystore or the Rust
+ * library. Nothing here is a policy variable — every seam is a read of live state
+ * or the single journal write.
  */
 internal class PushEpochImport(
-    private val context: Context,
-    private val epochs: PushEpochStore,
-    private val pins: FileExchangePeerStore,
-    private val open: (Context, String) -> String? = MessageSealer::open,
+    private val localNodeId: () -> String,
+    private val pinnedPeer: suspend (peerId: String) -> ByteArray?,
+    private val localBinding: () -> ByteArray?,
+    private val open: (wire: String) -> String?,
+    private val accept: (
+        localId: String,
+        peerId: String,
+        packet: PushEpochProtocol.Announcement,
+        pinned: ByteArray,
+        local: ByteArray,
+    ) -> PushEpochStore.WriteResult,
+    private val senderBinding: (wire: String) -> ByteArray? = SealedWire::senderBinding,
+    private val nodeIdOfBinding: (binding: ByteArray) -> String = ::fileExchangeBindingNodeId,
     private val recordFailure: () -> Unit = {},
 ) {
     /** What happened to one reserved-looking text. Never carries the text itself. */
@@ -50,52 +65,74 @@ internal class PushEpochImport(
     }
 
     suspend fun import(senderId: String, wire: String): Outcome {
+        if (senderId.isBlank() || wire.isBlank()) return Outcome.NOT_APPLICABLE
         if (!SealedWire.isSealed(wire)) return Outcome.NOT_APPLICABLE
-        // Base64 decoding happens outside the Room/service hot path; the sealed
-        // text is all we need to abort early on a sender mismatch.
-        if (!MessageSealer.openedByExpectedSender(wire, senderId)) return Outcome.NOT_APPLICABLE
-        val localId = runCatching {
-            context.applicationContext
-                .getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
-                .getString("node_id", "")
-                .orEmpty()
-        }.getOrNull().orEmpty()
-        if (localId.isBlank() || localId == senderId) return Outcome.NOT_APPLICABLE
-
-        val pinned = try {
-            pins.withPinnedBinding(senderId) { it }
+        // The envelope must name the pinned sender. This is a header check only:
+        // it decides nothing until the pin itself is compared below.
+        val claimed = try {
+            senderBinding(wire)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
             diag()
             null
         } ?: return Outcome.NOT_APPLICABLE
-
-        val local = try {
-            FileExchangeKeyStore.publicBinding(context.applicationContext)
+        val claimedSender = try {
+            nodeIdOfBinding(claimed)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
             diag()
             null
-        } ?: run {
+        } finally {
+            claimed.fill(0)
+        }
+        if (claimedSender == null || claimedSender != senderId) return Outcome.NOT_APPLICABLE
+
+        val localId = try {
+            localNodeId()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            diag()
+            ""
+        }
+        if (localId.isBlank() || localId == senderId) return Outcome.NOT_APPLICABLE
+
+        val pinned = try {
+            pinnedPeer(senderId)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            diag()
+            null
+        }
+        if (pinned == null || pinned.isEmpty()) return Outcome.NOT_APPLICABLE
+
+        val local = try {
+            localBinding()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            diag()
+            null
+        }
+        if (local == null || local.isEmpty()) {
             pinned.fill(0)
             return Outcome.NOT_APPLICABLE
         }
 
         return try {
-            val plaintext = open(context.applicationContext, wire) ?: return Outcome.NOT_APPLICABLE
+            val plaintext = open(wire) ?: return Outcome.NOT_APPLICABLE
             if (!PushEpochProtocol.isPacket(plaintext)) return Outcome.NOT_APPLICABLE
             val packet = PushEpochProtocol.parse(plaintext) ?: return Outcome.REJECTED
-            // Re-check the pin against the sender binding actually used by the
-            // envelope: the two must be the same key, not merely both valid.
-            val embedded = SealedWire.senderBinding(wire)
-            if (embedded == null || !MessageDigest.isEqual(embedded, pinned)) {
-                embedded?.fill(0)
-                return Outcome.REJECTED
-            }
+            // Re-check the key the envelope actually carries against the pin that
+            // is stored right now: both must be the same bytes, not merely valid.
+            val embedded = senderBinding(wire) ?: return Outcome.REJECTED
+            val matches = MessageDigest.isEqual(embedded, pinned)
             embedded.fill(0)
-            when (epochs.accept(localId, senderId, packet, true, pinned, pinned, local)) {
+            if (!matches) return Outcome.REJECTED
+            when (accept(localId, senderId, packet, pinned, local)) {
                 PushEpochStore.WriteResult.Applied -> Outcome.APPLIED
                 PushEpochStore.WriteResult.Duplicate -> Outcome.DUPLICATE
                 PushEpochStore.WriteResult.Rejected -> Outcome.REJECTED
@@ -121,6 +158,30 @@ internal class PushEpochImport(
         } catch (_: Exception) {
             // Never log the sender, the packet or exception text.
             Logger.getLogger("PushEpochImport").warning("Epoch import diagnostics unavailable")
+        }
+    }
+
+    companion object {
+        /** Production wiring: every value is re-read from the live stores. */
+        fun of(
+            context: Context,
+            epochs: PushEpochStore,
+            pins: FileExchangePeerStore,
+            recordFailure: () -> Unit = {},
+        ): PushEpochImport {
+            val app = context.applicationContext
+            return PushEpochImport(
+                localNodeId = {
+                    com.vladimir.messenger.data.schedule.DeferredInboxStore.owner(app)
+                },
+                pinnedPeer = { peerId -> pins.bindingFor(peerId) },
+                localBinding = { FileExchangeKeyStore.publicBinding(app) },
+                open = { wire -> MessageSealer.open(app, wire) },
+                accept = { localId, peerId, packet, pinned, local ->
+                    epochs.accept(localId, peerId, packet, true, pinned, pinned, local)
+                },
+                recordFailure = recordFailure,
+            )
         }
     }
 }

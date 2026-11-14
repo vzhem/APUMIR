@@ -158,6 +158,9 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "recoveryRejectsAnOversizedJournalInsteadOfSkippingItsTail",
     "concurrentCreatorsCannotExceedTheRegistrationQuota",
     "quotaAndFailedEntropyDoNotEvictOrCreateARegistration",
+    "ensureCreatesTheFirstEpochOnceAndNeverReplacesAnExistingOne",
+    "ensureDoesNotCreateForChangedIdentityOrPinOrAfterARevoke",
+    "ensureRespectsTheQuotaAndFailedEntropyWithoutCreatingARow",
 }, PUSH_INTEGRATION_CLASS: {
     "realFfiAndDeviceJournalsMatchWorkerVectorsWithoutProviderNetwork",
     "mailboxRoundTripAuthenticatesRealFfiAndPreviouslyPinnedParticipants",
