@@ -234,7 +234,13 @@ internal object PushServiceLocator {
                     },
                     peers = targets(app),
                     register = { peerId, token -> runner.register(peerId, token) },
-                    revoke = { peerId -> runner.revoke(peerId) },
+                    revoke = { peerId ->
+                        // The local index is cleared first by the runner; the
+                        // announcement only tells the peer to stop using it.
+                        val revoked = runner.revoke(peerId)
+                        if (revoked) PushEpochPublish.noteRevoked(app, peerId)
+                        revoked
+                    },
                     forgetToken = { shared.journals.tokens.forget() },
                     recordFailure = { log("Registration attempt failure") },
                 )

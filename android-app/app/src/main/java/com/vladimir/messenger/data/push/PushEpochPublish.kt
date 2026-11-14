@@ -74,6 +74,43 @@ internal object PushEpochPublish {
     }
 
     /**
+     * Tells every live peer that this epoch must no longer be used, after the
+     * route was revoked. A peer that keeps the old offer would keep writing into
+     * a mailbox whose row the server just removed, so the revoke has to travel
+     * the same way the offer did.
+     *
+     * A failed revoke announcement is not a failed local revocation: the local
+     * index is already cleared and the server operation already happened.
+     */
+    suspend fun noteRevoked(context: Context, peerId: String) {
+        if (peerId.isBlank()) return
+        val app = context.applicationContext
+        if (!PushServiceLocator.enabled(app)) return
+        try {
+            val shared = PushServiceLocator.shared(app)
+            val delivery = shared.epochs ?: return
+            shared.resolver.resolveForRegistration(peerId)?.use { pass ->
+                val state = pass.registration ?: return@use
+                if (state.phase != PushRegistrationState.Phase.REVOKING &&
+                    state.phase != PushRegistrationState.Phase.REVOKED
+                ) {
+                    diag("Epoch revoke skipped: the record is not revoking")
+                    return@use
+                }
+                when (delivery.revoke(state, peerId, pass.localBinding, pass.pinnedPeerBinding, pass.localSecret)) {
+                    PushEpochDelivery.Outcome.Handled,
+                    PushEpochDelivery.Outcome.Stored -> Unit
+                    else -> diag("Epoch revoke not accepted")
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            diag("Epoch revoke failed")
+        }
+    }
+
+    /**
      * Non-suspending variant for transport wrappers: it only starts the offer on
      * a background scope when the gate is open, so a caller on a hot path never
      * waits for the network and never sees its failure.
