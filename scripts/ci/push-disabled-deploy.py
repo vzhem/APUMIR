@@ -100,12 +100,16 @@ def check_branch_head(values, request=preflight.request_json):
     token = values.get("GH_TOKEN", "")
     if not re.fullmatch(r"[0-9a-f]{40}", sha) or not token:
         raise DeployError("head")
+    branch = preflight.BRANCHES[0]
     try:
-        status, body = request("api.github.com", f"/repos/{preflight.REPO}/git/ref/heads/{preflight.BRANCH}", token)
+        status, body = request("api.github.com", f"/repos/{preflight.REPO}/git/ref/heads/{branch}", token)
     except preflight.PreflightError:
         raise DeployError("head") from None
     obj = body.get("object") if isinstance(body, dict) else None
-    if (status != 200 or not isinstance(body, dict) or body.get("ref") != "refs/heads/" + preflight.BRANCH or
+    # The creation script is still pinned to the branch that owns the prototype:
+    # it must not be reusable from any other line of work just because the shared
+    # preflight learned to accept a second branch.
+    if (status != 200 or not isinstance(body, dict) or body.get("ref") != "refs/heads/" + branch or
             not isinstance(obj, dict) or obj.get("type") != "commit" or obj.get("sha") != sha):
         raise DeployError("head")
 
