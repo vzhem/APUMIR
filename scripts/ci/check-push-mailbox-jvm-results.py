@@ -274,6 +274,14 @@ EXPECTED = {
         "recallersThatAreNotRevokingNeverSend",
         "cancellationFromTheTransportIsNotConvertedIntoAnOutcome",
     },
+    PREFIX + "PushWakeSignalTest": {
+        "aPeerWithoutARegisteredCapabilityIsNeverAddressed",
+        "aReceiverCapabilityCannotBeTurnedIntoAWake",
+        "aSenderCapabilityProducesOneWakeAndOnlyOutsideTheInterval",
+        "onlyAnAcceptedAnswerCountsAndItIsNotDelivery",
+        "thePerPeerIntervalIsBoundedAndNotZero",
+        "closedMaterialIsNotAddressed",
+    },
     PREFIX + "PushEpochImportTest": {
         "aPlaintextPacketNeverBecomesAnEpoch",
         "anEnvelopeFromSomeoneElseThanTheClaimedSenderIsNeverOpened",
