@@ -709,6 +709,7 @@ object DiagnosticsReport {
         appendLine()
         appendTransfers(facts)
         appendSession(facts)
+        appendPresence(facts) // <<< НОВАЯ СТРОКА: присутствие
         appendJournal(journal, facts)
         appendLogcat(facts, logcat)
     }
@@ -1337,6 +1338,11 @@ object DiagnosticsReport {
         c.entries.filter { it.key !in known }.sortedBy { it.key }
             .forEach { (key, value) -> appendLine("$key=$value") }
         appendLine()
+    }
+
+    /** Добавление строки присутствия из PresenceReportStrings.kt */
+    private fun StringBuilder.appendPresence(facts: DiagnosticsFacts) {
+        appendLine(com.vladimir.messenger.data.diagnostics.PresenceReportStrings.appendPresenceLine(facts, null))
     }
 
     private fun StringBuilder.appendJournal(

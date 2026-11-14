@@ -47,6 +47,18 @@ class PeerRankBroadcaster @Inject constructor(
 ) {
 
     /**
+     * Причины отказа в запросе ранга для записи в диагностику.
+     */
+    enum class RankRefusalReason {
+        /** Гейт суток (REQUEST_MIN_INTERVAL_MS) исчерпан, но запрос не ушёл. */
+        GATE_DAILY,
+        /** Чат с собеседником не найден (resolveChatId вернул null). */
+        NO_CHAT,
+        /** Ядро отказало (RustBridge.sendMessage вернул false или исключение, не офлайн-очередь). */
+        NO_OWN_NODE
+    }
+
+    /**
      * Разослать свой ранг, если это нужно: ранг изменился с прошлой рассылки или
      * прошла неделя с неё. Вызывать можно часто — решение о самой отправке здесь.
      *
@@ -183,8 +195,17 @@ class PeerRankBroadcaster @Inject constructor(
         val prefs = app.getSharedPreferences(REPLY_PREFS, Context.MODE_PRIVATE)
         val key = "ask_" + peer.hashCode()
         val nowMs = System.currentTimeMillis()
-        if (nowMs - prefs.getLong(key, 0L) < REQUEST_MIN_INTERVAL_MS) return@withContext false
-        val chatId = resolveChatId(peerId) ?: return@withContext false
+        if (nowMs - prefs.getLong(key, 0L) < REQUEST_MIN_INTERVAL_MS) {
+            com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                .noteRankRefusal(com.vladimir.messenger.data.rank.PeerRankBroadcaster.RankRefusalReason.GATE_DAILY)
+            return@withContext false
+        }
+        val chatId = resolveChatId(peerId)
+        if (chatId == null) {
+            com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                .noteRankRefusal(com.vladimir.messenger.data.rank.PeerRankBroadcaster.RankRefusalReason.NO_CHAT)
+            return@withContext false
+        }
         // Три исхода, а не два. `RustBridge.sendMessage` сообщает только
         // «доставлено напрямую сейчас»; письмо, положенное в офлайн-очередь
         // ядра, тоже уйдёт - как только собеседник появится. Пока этот случай
@@ -219,6 +240,8 @@ class PeerRankBroadcaster @Inject constructor(
         }
         com.vladimir.messenger.data.diagnostics.TransferDiagnostics
             .recordWarning("rank", "запрос ранга не ушёл: нет чата с собеседником или ядро отказало")
+        com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+            .noteRankRefusal(com.vladimir.messenger.data.rank.PeerRankBroadcaster.RankRefusalReason.GATE_OR_CHAT_OR_NODE)
         false
     }
 
