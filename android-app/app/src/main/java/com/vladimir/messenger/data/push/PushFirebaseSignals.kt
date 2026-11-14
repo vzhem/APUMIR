@@ -74,8 +74,11 @@ internal object PushFirebaseSignals {
             }
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
-            // Never log the token, identifiers or the exception text.
+        } catch (error: Exception) {
+            // Never log the token, identifiers or the exception text. The code is
+            // a fixed public name, and it is what the report needs: "no token"
+            // without a reason is not a diagnosis.
+            PushDiagnostics.noteTokenError(PushTokenErrorCode.classify(error))
             Log.w(TAG, "token request failed")
             Outcome.Failed
         }

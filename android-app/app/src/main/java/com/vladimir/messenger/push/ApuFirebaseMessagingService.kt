@@ -3,6 +3,7 @@ package com.vladimir.messenger.push
 import android.util.Log
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import com.vladimir.messenger.data.push.PushCoreWake
 import com.vladimir.messenger.data.push.PushServiceLocator
 import com.vladimir.messenger.data.push.PushSignalPolicy
 import com.vladimir.messenger.data.push.PushSignalSink
@@ -109,10 +110,21 @@ class ApuFirebaseMessagingService : FirebaseMessagingService() {
             // travels through the ordinary transport, so the transport has to be
             // up for anything to arrive. Best effort, bounded, never a promise of
             // delivery.
-            try {
-                RelayWakeWorker.enqueueOnce(context)
-            } catch (_: Exception) {
-                Log.w(TAG, "bounded relay wake not scheduled")
+            //
+            // A running engine is nudged in-process: a WorkManager job can sit in
+            // the queue for hours under Doze, which is exactly the case this
+            // signal exists for. Only when there is no engine to nudge (the usual
+            // "phone was killed" case) does the bounded worker take over.
+            val nudged = PushCoreWake.nudge(context)
+            if (nudged) {
+                com.vladimir.messenger.data.push.PushDiagnostics.noteInProcessWake()
+            } else {
+                try {
+                    RelayWakeWorker.enqueueOnce(context)
+                    com.vladimir.messenger.data.push.PushDiagnostics.noteWorkerWake()
+                } catch (_: Exception) {
+                    Log.w(TAG, "bounded relay wake not scheduled")
+                }
             }
         }
     }

@@ -80,6 +80,7 @@ class MailboxResultsTest(unittest.TestCase):
                                    "PushSignalInboxTest", "PushReceiveWindowTest", "PushWakeSyncTest",
                                    "PushFullScanTest", "PushSignalSinkTest", "PushTargetsTest",
                                    "PushTrustResolverTest", "PushTokenRegistrarTest",
+                                   "PushTokenErrorCodeTest",
                                    "PushMailboxTextPolicyTest", "PushMailboxMessageSealerTest", "PushMailboxMessageOpenerTest",
                                    "PushEpochImportTest", "PushWakeSignalTest",
                                ))):

@@ -48,6 +48,25 @@ object PushDiagnostics {
         "lastWakeAt=${System.currentTimeMillis()}",
     )
 
+    /**
+     * A signal found a live engine and nudged it in place.
+     *
+     * Recorded apart from the worker counter, because the two answers are
+     * different diagnoses: "nudged now" means the message should arrive in
+     * seconds, "went to the worker" means the phone was dead and the scheduler
+     * decides when it looks.
+     */
+    fun noteInProcessWake() = write("inProcessWakeAt=${System.currentTimeMillis()}")
+
+    /** A signal had no live engine, so the bounded worker was scheduled instead. */
+    fun noteWorkerWake() = write("workerWakeAt=${System.currentTimeMillis()}")
+
+    /**
+     * Why no provider token could be obtained. A fixed code name from
+     * [PushTokenErrorCode]; never a message, a token or a project id.
+     */
+    fun noteTokenError(code: String) = write("tokenError=${code.take(40)}")
+
     fun noteInbox(pending: String) = write("inbox=$pending")
 
     /** Whether the public health route answered; null until it was probed. */
@@ -91,6 +110,8 @@ object PushDiagnostics {
             lastWake = runCatching { PushWakeOutcome.valueOf(text("lastWake") ?: "NONE") }
                 .getOrDefault(PushWakeOutcome.NONE),
             lastWakeAtMs = number("lastWakeAt"),
+            inProcessWakeAtMs = number("inProcessWakeAt"),
+            workerWakeAtMs = number("workerWakeAt"),
             inboxPending = text("inbox") ?: "?",
             endpointReachable = when (text("endpoint")) {
                 "ok" -> true
@@ -98,6 +119,7 @@ object PushDiagnostics {
                 else -> null
             },
             lastError = text("lastError") ?: "-",
+            tokenError = text("tokenError"),
         )
     }
 
@@ -146,7 +168,10 @@ object PushDiagnostics {
         }
     }
 
-    private val KEY_IS_NUMBER = setOf("lastRegisterAt", "lastSignalAt", "lastWakeAt")
+    private val KEY_IS_NUMBER = setOf(
+        "lastRegisterAt", "lastSignalAt", "lastWakeAt",
+        "inProcessWakeAt", "workerWakeAt",
+    )
 
     /**
      * Set once per process by [install]; the writers are called from deep inside

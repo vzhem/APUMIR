@@ -1294,6 +1294,64 @@ class DiagnosticsReportTest {
         assertFalse(report.contains("маршрут="))
     }
 
+    @Test fun aTokenThatNeverArrivedSaysWhy() {
+        // Отчёт 514 с телефона Б: гейт открыт, приём on, а токена нет — и ни
+        // слова о причине. «нет» без причины не диагноз.
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = false,
+            endpointConfigured = true,
+            registeredRoutes = 0,
+            phase = PushPhase.NO_TARGETS,
+            lastRegisterAtMs = 1_700_000_000_000L,
+            signalsReceived = 0,
+            signalsRejected = 0,
+            lastSignalAtMs = 0L,
+            wakeAttempts = 0,
+            lastWake = PushWakeOutcome.NONE,
+            lastWakeAtMs = 0L,
+            tokenError = "SERVICE_NOT_AVAILABLE",
+            inboxPending = "0",
+            endpointReachable = true,
+            lastError = "-",
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        assertTrue(report.contains("причина_отказа_токена=SERVICE_NOT_AVAILABLE"))
+        assertTrue(report.contains("фаза=no_targets"))
+        // Пустая очередь регистрации объясняется словами, а не «failed».
+        assertTrue(report.contains("регистрировать некого"))
+    }
+
+    @Test fun aLiveEngineNudgeIsReportedSeparatelyFromTheWorker() {
+        // Сигнал, нашедший живой процесс, обязан быть виден: «разбудили на
+        // месте» и «ушли в фоновую задачу» — разные ответы на вопрос владельца.
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = true,
+            endpointConfigured = true,
+            registeredRoutes = 1,
+            phase = PushPhase.REGISTERED,
+            lastRegisterAtMs = 1_700_000_000_000L,
+            signalsReceived = 3,
+            signalsRejected = 0,
+            lastSignalAtMs = 1_700_000_500_000L,
+            wakeAttempts = 0,
+            lastWake = PushWakeOutcome.NONE,
+            lastWakeAtMs = 0L,
+            inProcessWakeAtMs = 1_700_000_500_000L,
+            workerWakeAtMs = 0L,
+            inboxPending = "0",
+            endpointReachable = true,
+            lastError = "-",
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        assertTrue(report.contains("разбудили_на_месте=да"))
+        // Фоновая задача не ставилась — строки о ней быть не должно.
+        assertFalse(report.contains("фоновая_задача_пробуждения="))
+    }
+
     @Test fun aStalledOwnQueueIsNamedAsStalledNotAsSlow() {
         // Владелец 2026-11-14: очередь стоит на пределе двое суток, и по отчёту
         // нельзя было понять, разгружается она или застряла.

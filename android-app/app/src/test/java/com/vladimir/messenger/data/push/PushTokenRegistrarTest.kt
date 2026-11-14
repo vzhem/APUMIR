@@ -83,8 +83,9 @@ class PushTokenRegistrarTest {
         assertEquals(PushTokenRegistrar.Outcome.Failed, partial.build().run())
         assertEquals(0, partial.calls.count { it.startsWith("register:") })
 
+        // Пустой список — не отказ сервера: регистрировать было некого.
         val none = Harness(targets = PushTargets.Outcome.COMPLETED to emptyList())
-        assertEquals(PushTokenRegistrar.Outcome.Failed, none.build().run())
+        assertEquals(PushTokenRegistrar.Outcome.NoTargets, none.build().run())
     }
 
     @Test fun oneRefusalFailsTheAttemptInsteadOfPretendingSuccess() = runBlocking {

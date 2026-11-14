@@ -111,6 +111,31 @@ class DiagnosticsContractsTest(unittest.TestCase):
         collector = source(DIAG / "TransferDiagnostics.kt")
         self.assertIn("DiagnosticsPrivacy.redact", collector)
 
+    def test_wake_path_is_visible_in_the_report_and_wired(self):
+        """Сигнал обязан быть видно: разбудили на месте или ушли в задачу.
+
+        Ровно этот класс ошибки стоил трёх выпусков: путь существовал в коде, но
+        в отчёте его не было, поэтому «ничего не пришло» одинаково выглядело и
+        при отсутствии сигнала, и при сигнале без пробуждения.
+        """
+        report = source(DIAG / "PushDiagnosticsReport.kt")
+        for marker in ("разбудили_на_месте=", "inProcessWakeAtMs", "workerWakeAtMs"):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, report)
+        service = source(MAIN / "push/ApuFirebaseMessagingService.kt")
+        # Живой процесс подталкивается на месте, и только без ядра ставится задача.
+        nudge = service.find("PushCoreWake.nudge(")
+        worker = service.find("RelayWakeWorker.enqueueOnce(")
+        self.assertTrue(nudge >= 0, "сигнал больше не будит живой процесс")
+        self.assertTrue(worker > nudge, "фоновая задача обязана быть запасным путём, а не первым")
+        self.assertIn("noteInProcessWake()", service)
+        self.assertIn("noteWorkerWake()", service)
+        wake = source(MAIN / "data/push/PushCoreWake.kt")
+        for marker in ("RustBridge.isRunning()", "triggerGossipDiscovery()", "onForegroundRecovery()"):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, wake)
+        self.assertNotIn("startForegroundService", wake, "пробуждение не поднимает службу само")
+
     def test_report_has_every_section_the_owner_reads(self):
         report = (source(DIAG / "DiagnosticsReport.kt") + source(DIAG / "UpdateDiagnosticsReport.kt")
                   + source(DIAG / "CoreDiagnosticStage.kt") + source(DIAG / "PushDiagnosticsReport.kt"))

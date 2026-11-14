@@ -58,6 +58,7 @@ cd android-app || exit 1
     --tests '*PushRegistrationFlowTest*' --tests '*PushEpochImportTest*' --tests '*PushWakeSignalTest*' --tests '*PushSignalInboxTest*' --tests '*PushReceiveWindowTest*' \
     --tests '*PushWakeSyncTest*' --tests '*PushFullScanTest*' --tests '*PushSignalSinkTest*' \
     --tests '*PushTargetsTest*' --tests '*PushTrustResolverTest*' --tests '*PushTokenRegistrarTest*' \
+    --tests '*PushTokenErrorCodeTest*' \
     --tests '*MirrorPendingOutgoingTest*' --tests '*MirrorPendingScheduleIntegrationTest*' --tests '*MirrorPendingFlusherTest*' \
     --tests '*MirrorOutgoingFrameTest*' --tests '*MirrorOutgoingDispatcherTest*' --tests '*ReplyAwareOutboxSenderTest*' --tests '*DeletionOutboxTest*' \
     --tests '*IncomingNotificationProcessorTest*' --tests '*IncomingNotificationSweepTest*' --tests '*NotificationRecoveryScheduleGateTest*' --tests '*NotificationRecoveryOperationObserverTest*'

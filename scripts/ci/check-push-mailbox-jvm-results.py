@@ -256,6 +256,13 @@ EXPECTED = {
         "aSnapshotIsTheSameLiveReadsWithoutDerivation",
         "cancellationPropagatesFromEveryReader",
     },
+    PREFIX + "PushTokenErrorCodeTest": {
+        "aKnownCodeIsNamed",
+        "theCodeIsFoundThroughTheWrappersFirebaseAdds",
+        "aCodeWithExtraTextIsNotAccepted",
+        "anUnknownMessageNeverReachesTheReport",
+        "noExceptionAtAllIsStillAValue",
+    },
     PREFIX + "PushTokenRegistrarTest": {
         "disabledOrUnconfiguredBuildsTouchNothing",
         "anUnchangedTokenMakesNoNetworkCall",

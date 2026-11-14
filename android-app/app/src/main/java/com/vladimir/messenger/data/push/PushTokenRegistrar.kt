@@ -45,7 +45,19 @@ internal class PushTokenRegistrar(
         object Registered : Outcome
         object Partial : Outcome
         object Failed : Outcome
+        /**
+         * There was nothing to register: no pin and no indexed route at all.
+         *
+         * Kept apart from [Failed] on purpose. A device with no correspondent yet
+         * must not look like a broken registration, and a device that does have
+         * one must not look idle — those are different diagnoses for the owner.
+         */
+        object NoTargets : Outcome
     }
+
+    /** Set by [registerAll] when the peer set was complete and empty. */
+    @Volatile
+    private var noTargets = false
 
     suspend fun run(): Outcome = runSafely()
 
@@ -53,13 +65,19 @@ internal class PushTokenRegistrar(
         return try {
             if (!enabled()) Outcome.Disabled else {
                 when (val provider = token()) {
-                    is PushFirebaseSignals.Outcome.Token ->
+                    is PushFirebaseSignals.Outcome.Token -> {
+                        noTargets = false
                         when (coordinator({ issued -> registerAll(issued) }, { false }).onToken(provider.value, nowMs())) {
                             PushRuntimeCoordinator.TokenOutcome.Disabled -> Outcome.Disabled
-                            PushRuntimeCoordinator.TokenOutcome.AlreadyCurrent -> Outcome.AlreadyCurrent
+                            PushRuntimeCoordinator.TokenOutcome.AlreadyCurrent ->
+                                // Nothing was re-sent, so the previous registration
+                                // still stands; an empty peer set never reaches here.
+                                Outcome.AlreadyCurrent
                             is PushRuntimeCoordinator.TokenOutcome.Registered -> Outcome.Registered
-                            PushRuntimeCoordinator.TokenOutcome.Failed -> Outcome.Failed
+                            PushRuntimeCoordinator.TokenOutcome.Failed ->
+                                if (noTargets) Outcome.NoTargets else Outcome.Failed
                         }
+                    }
                     PushFirebaseSignals.Outcome.NotConfigured -> Outcome.NotConfigured
                     PushFirebaseSignals.Outcome.NoPlayServices -> Outcome.NoPlayServices
                     PushFirebaseSignals.Outcome.Failed -> Outcome.Failed
@@ -89,7 +107,12 @@ internal class PushTokenRegistrar(
         }
         // An unreadable index must not be mistaken for "no peers".
         if (state != PushTargets.Outcome.COMPLETED) return false
-        if (list.isEmpty()) return false
+        // Nothing to address: no pin and no indexed route. Recorded as its own
+        // outcome by [runSafely] rather than as a failure of the server.
+        if (list.isEmpty()) {
+            noTargets = true
+            return false
+        }
         var registered = 0
         for (peer in list) {
             when (register(peer.peerId, token)) {

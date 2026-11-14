@@ -53,12 +53,19 @@ class PushTokenWorker(
                         com.vladimir.messenger.data.diagnostics.PushPhase.PARTIAL
                     PushTokenRegistrar.Outcome.Failed ->
                         com.vladimir.messenger.data.diagnostics.PushPhase.FAILED
+                    // Not a failure of the service: there was simply nobody to
+                    // register yet. A distinct phase keeps the report honest.
+                    PushTokenRegistrar.Outcome.NoTargets ->
+                        com.vladimir.messenger.data.diagnostics.PushPhase.NO_TARGETS
                 },
             )
             when (outcome) {
                 PushTokenRegistrar.Outcome.Disabled,
                 PushTokenRegistrar.Outcome.NotConfigured,
-                PushTokenRegistrar.Outcome.NoPlayServices -> Result.success()
+                PushTokenRegistrar.Outcome.NoPlayServices,
+                // Retrying cannot help: the peer set is empty until a contact
+                // exists, and a retry loop would only burn battery.
+                PushTokenRegistrar.Outcome.NoTargets -> Result.success()
                 PushTokenRegistrar.Outcome.AlreadyCurrent,
                 PushTokenRegistrar.Outcome.Registered -> {
                     // A newly registered (or rotated) epoch is useless until the

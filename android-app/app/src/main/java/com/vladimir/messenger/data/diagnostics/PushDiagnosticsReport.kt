@@ -18,7 +18,11 @@ package com.vladimir.messenger.data.diagnostics
 /**
  * Грубая фаза регистрации в push-службе: только эти значения, без адресов и кодов.
  */
-enum class PushPhase { UNKNOWN, DISABLED, NOT_CONFIGURED, NO_PLAY_SERVICES, REGISTERED, PARTIAL, FAILED }
+enum class PushPhase {
+    UNKNOWN, DISABLED, NOT_CONFIGURED, NO_PLAY_SERVICES, REGISTERED, PARTIAL, FAILED,
+    /** Регистрировать было некого: ни одного собеседника с закреплением. */
+    NO_TARGETS,
+}
 
 /** Итог последней попытки разбудить собеседника. */
 enum class PushWakeOutcome { NONE, ACCEPTED, WITHIN_BUDGET, NOT_REGISTERED, UNAVAILABLE, SKIPPED }
@@ -52,6 +56,23 @@ data class PushSnapshot(
     val wakeAttempts: Long,
     val lastWake: PushWakeOutcome,
     val lastWakeAtMs: Long,
+    /**
+     * Когда входящий сигнал нашёл ЖИВОЙ процесс и ядро подтолкнули на месте.
+     *
+     * Отдельно от [lastWakeAtMs] намеренно: «пробуждение» в этом разделе — это
+     * запрос к службе ради СОБЕСЕДНИКА (исходящее), а здесь — вход на своём
+     * телефоне. Ноль значит «не случалось».
+     */
+    val inProcessWakeAtMs: Long = 0L,
+    /** Когда вместо этого пришлось ставить фоновую задачу (ядра не было). */
+    val workerWakeAtMs: Long = 0L,
+    /**
+     * Код последней неудачи с токеном провайдера, если она была.
+     *
+     * Только фиксированное имя (`SERVICE_NOT_AVAILABLE`, `unknown`, …): причина
+     * в виде текста исключения унесла бы в отчёт идентификаторы проекта.
+     */
+    val tokenError: String? = null,
     val inboxPending: String,
     /** null — проверка доступности службы не проводилась. */
     val endpointReachable: Boolean?,
@@ -75,11 +96,37 @@ internal fun StringBuilder.appendPush(facts: DiagnosticsFacts) {
     appendLine("приём=${if (push.receiveEnabled) "on" else "off"}")
     appendLine("адрес_службы=${if (push.endpointConfigured) "задан" else "НЕ ЗАДАН"}")
     appendLine("токен=${if (push.tokenRecorded) "записан" else "нет"}")
+    if (!push.tokenRecorded && !push.tokenError.isNullOrBlank()) {
+        appendLine("причина_отказа_токена=${push.tokenError}")
+    }
     appendLine("маршрутов=${push.registeredRoutes ?: "не читается"}")
     appendLine("фаза=${push.phase.name.lowercase()}")
+    // Одна подсказка на самую частую путаницу: «failed» без пояснения читается
+    // и как «сервер отказал», и как «регистрировать было некого».
+    when (push.phase) {
+        PushPhase.NO_TARGETS -> appendLine(
+            "  ↳ регистрировать некого: ни у одного собеседника нет закрепления",
+        )
+        PushPhase.FAILED -> appendLine(
+            "  ↳ сервер не принял ни одного маршрута: сеть, отказ или неготовый ключ обмена",
+        )
+        else -> Unit
+    }
     appendLine("регистрация_назад=${agoOrNever(facts.createdAtMs, push.lastRegisterAtMs)}")
     appendLine("сигналов=${push.signalsReceived} · отклонено=${push.signalsRejected}")
     appendLine("сигнал_назад=${agoOrNever(facts.createdAtMs, push.lastSignalAtMs)}")
+    // Прямой ответ на вопрос «разбудили или нет»: раньше этот факт нигде не
+    // печатался, и по отчёту нельзя было отличить «сигнала не было» от
+    // «сигнал пришёл, но разбудить не удалось».
+    appendLine(
+        "разбудили_на_месте=" + when (push.inProcessWakeAtMs) {
+            0L -> "нет (ядра не было — ставили фоновую задачу)"
+            else -> "да (${agoOrNever(facts.createdAtMs, push.inProcessWakeAtMs)})"
+        },
+    )
+    if (push.workerWakeAtMs > 0L) {
+        appendLine("фоновая_задача_пробуждения=${agoOrNever(facts.createdAtMs, push.workerWakeAtMs)} назад")
+    }
     appendLine(
         "пробуждения=${push.wakeAttempts} · последнее=${push.lastWake.name.lowercase()} " +
             "(${agoOrNever(facts.createdAtMs, push.lastWakeAtMs)})",
@@ -106,6 +153,9 @@ internal fun agoOrNever(nowMs: Long, atMs: Long): String =
  * Зеркалит `numericValueAfter` отчёта, потому что это поле читается там же, где
  * печатается, а сам парсер живёт в отдельном файле из-за потолка god-файла.
  */
+/** Порог «старейшая своя запись старая»: сутки. */
+private const val SLOW_DRAIN_SECS = 24L * 60L * 60L
+
 internal fun relayQueueOwnDrained(lines: List<String>): Long? {
     for (line in lines.asReversed()) {
         if (!line.contains("Relay-очередь: своих=")) continue
@@ -125,10 +175,21 @@ internal fun relayQueueOwnDrained(lines: List<String>): Long? {
  */
 internal fun StringBuilder.appendOwnQueueDrain(facts: DiagnosticsFacts) {
     val drained = facts.relayQueueOwnDrained ?: return
-    val stuck = facts.relayQueueOwn != null && facts.relayQueueOwn == facts.relayQueueOwnLimit && drained == 0L
+    val oldest = facts.relayQueueOwnOldestSecs
+    // Три разных состояния, которые раньше читались одинаково:
+    //  * снято=0 при пределе — не разгружается ни одна запись;
+    //  * снято>0, но старейшее сутками — разгружается медленнее, чем прибывает;
+    //  * снято>0 и старейшее свежее — очередь живая.
+    val stalled = facts.relayQueueOwn != null && facts.relayQueueOwn == facts.relayQueueOwnLimit && drained == 0L
+    val slowerThanArrival = !stalled && oldest != null && oldest >= SLOW_DRAIN_SECS
     appendLine(
         "очередь ядра: снято по подтверждению=$drained " +
-            if (stuck) "(стоит на пределе и не разгружается — собеседник не подтверждает)"
-            else "(подтверждение снимает запись; это не прочтение)",
+            when {
+                stalled -> "(не разгружается: собеседник не подтверждает ни одной записи)"
+                slowerThanArrival ->
+                    "(разгружается медленнее, чем прибывает: старейшая своя запись " +
+                        "${DiagnosticsReport.formatDuration(oldest * 1000L)})"
+                else -> "(подтверждение снимает запись; это не прочтение)"
+            },
     )
 }
