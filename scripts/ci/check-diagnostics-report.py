@@ -902,7 +902,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
         cf_duplicate = service.index("if (existingMsg != null && cfContent != null) {", cf_start)
         cf_new = service.index("if (cfContent == null) {", cf_duplicate)
         cf = service[cf_duplicate:cf_new]
-        self.assertLess(service.index("PushControlIngress.isReserved(cfContent)", cf_start), cf_duplicate)
+        self.assertLess(service.index("PushControlIngress.reservedUnlessEpochAvailable(applicationContext, cfContent", cf_start), cf_duplicate)
         self.assertIn("classifyCfDuplicate(existingMsg.isFromMe, existingMsg.senderId, existingMsg.content, senderId", cf)
         self.assertIn("MessageSealer.openedByExpectedSender(parsed.content, senderId)", cf)
         self.assertIn("if (DeliveryAckWire.isPacket(incomingText)) incomingText else storedText", coordinator)
