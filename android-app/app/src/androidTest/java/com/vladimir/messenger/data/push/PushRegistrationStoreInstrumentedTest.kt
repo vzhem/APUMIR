@@ -463,7 +463,8 @@ class PushRegistrationStoreInstrumentedTest {
         assertEquals(PushRegistrationState.Phase.ACTIVE, created.phase)
         assertEquals(0L, created.registeredAtMs)
         assertTrue(created.epochHex.isNotEmpty())
-        assertEquals(1L, created.sequence)
+        // Creating a record is not a reservation: nothing was sent yet.
+        assertEquals(0L, created.sequence)
         // A second call is a read: same epoch, same device, same sequence.
         val again = ready(journal.ensure(participants(), 2_000))
         assertEquals(created.epochHex, again.epochHex)
@@ -471,8 +472,8 @@ class PushRegistrationStoreInstrumentedTest {
         assertEquals(created.sequence, again.sequence)
         assertEquals(created.ownerHash, again.ownerHash)
         // The created record is usable by the real reserve path.
-        assertEquals(2L, ready(journal.reserve(participants(), 3_000)).sequence)
-        assertEquals(2L, ready(journal.read(participants())).sequence)
+        assertEquals(1L, ready(journal.reserve(participants(), 3_000)).sequence)
+        assertEquals(1L, ready(journal.read(participants())).sequence)
     }
 
     @Test fun ensureDoesNotCreateForChangedIdentityOrPinOrAfterARevoke() {
@@ -484,7 +485,13 @@ class PushRegistrationStoreInstrumentedTest {
         assertEquals(PushRegistrationStore.Result.Rejected,
             journal.ensure(participants(localBinding = changedLocal), 2_000))
         assertEquals(created.epochHex, ready(journal.read(participants())).epochHex)
-        // Rotation is a new epoch for the same pair and must survive `ensure`.
+        // A completed revoke + rotation is a new epoch for the same pair: ensure
+        // reads it back and must never fall back to the previous one.
+        ready(journal.beginRevocation(participants()))
+        val revokeSequence = ready(journal.reserve(participants(), 2_000)).sequence
+        assertEquals(PushRegistrationState.Phase.REVOKED,
+            ready(journal.revoked(participants(), revokeSequence)).phase)
+        assertEquals(1L, ready(journal.announced(participants(), 1)).announcedGeneration)
         val rotated = ready(journal.rotate(participants()))
         assertFalse(rotated.epochHex == created.epochHex)
         assertEquals(rotated.epochHex, ready(journal.ensure(participants(), 3_000)).epochHex)
