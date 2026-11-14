@@ -33,6 +33,8 @@ jobs:
         run: python3 scripts/ci/check-push-ingress.py
       - name: Test disabled deployment client with a fake provider
         run: python3 scripts/ci/test-push-disabled-deploy.py
+      - name: Test the working deployment client with a fake Wrangler
+        run: python3 scripts/ci/test-push-deploy.py
       - name: Check isolated disabled deployment bundle without deploying
         env:
           WRANGLER_SEND_METRICS: 'false'
