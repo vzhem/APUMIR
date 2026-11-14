@@ -485,21 +485,23 @@ class PushRegistrationStoreInstrumentedTest {
         assertEquals(PushRegistrationStore.Result.Rejected,
             journal.ensure(participants(localBinding = changedLocal), 2_000))
         assertEquals(created.epochHex, ready(journal.read(participants())).epochHex)
-        // A completed revoke + rotation is a new epoch for the same pair: ensure
-        // reads it back and must never fall back to the previous one.
-        ready(journal.beginRevocation(participants()))
-        val revokeSequence = ready(journal.reserve(participants(), 2_000)).sequence
-        assertEquals(PushRegistrationState.Phase.REVOKED,
-            ready(journal.revoked(participants(), revokeSequence)).phase)
-        assertEquals(1L, ready(journal.announced(participants(), 1)).announcedGeneration)
-        val rotated = ready(journal.rotate(participants()))
-        assertFalse(rotated.epochHex == created.epochHex)
-        assertEquals(rotated.epochHex, ready(journal.ensure(participants(), 3_000)).epochHex)
         // A revoking pair is not resurrected into a new registration attempt.
-        journal.beginRevocation(participants())
-        val revoking = ready(journal.ensure(participants(), 4_000))
+        val revoking = ready(journal.beginRevocation(participants()))
         assertEquals(PushRegistrationState.Phase.REVOKING, revoking.phase)
         assertNull(revoking.announcement())
+        val kept = ready(journal.ensure(participants(), 2_000))
+        assertEquals(revoking.generation, kept.generation)
+        assertEquals(PushRegistrationState.Phase.REVOKING, kept.phase)
+        // A completed revoke plus a rotation is a new epoch for the same pair:
+        // ensure reads it back and never falls back to the previous one.
+        val revokeSequence = ready(journal.reserve(participants(), 3_000)).sequence
+        val revoked = ready(journal.revoked(participants(), revokeSequence))
+        assertEquals(PushRegistrationState.Phase.REVOKED, revoked.phase)
+        ready(journal.announced(participants(), revoked.generation))
+        val rotated = ready(journal.rotate(participants()))
+        assertFalse(rotated.epochHex == created.epochHex)
+        assertEquals(rotated.epochHex, ready(journal.ensure(participants(), 4_000)).epochHex)
+        assertEquals(PushRegistrationState.Phase.ACTIVE, ready(journal.read(participants())).phase)
     }
 
     @Test fun ensureRespectsTheQuotaAndFailedEntropyWithoutCreatingARow() {
