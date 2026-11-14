@@ -1,8 +1,8 @@
 package com.vladimir.messenger.data.push
 
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertFalse
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Test
 
 /**
  * The report may name a known failure, never quote one.
