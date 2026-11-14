@@ -1,0 +1,109 @@
+name: Deploy the push service
+
+# This is the one workflow that turns remote push on for real: it uploads the
+# dedicated Worker with storage, provider credentials and both switches set to
+# "true". It therefore inherits every protection the staging environment has:
+# a required owner review, no admin bypass, and a branch restriction.
+#
+# It never publishes a release or a tag, never touches the MQTT relay, and never
+# prints a credential. The first job is fully offline and re-runnable; the
+# second receives the environment secrets only after GitHub's own approval.
+on:
+  push:
+    branches:
+      - 'arena/2d5de8a6-apumir'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never cancel a deployment mid-upload: a half-applied version is inspected by a
+# human, not raced by the next push.
+concurrency:
+  group: push-service-deployment
+  cancel-in-progress: false
+
+jobs:
+  offline-tests:
+    if: >-
+      github.repository == 'vzhem/APUMIR' &&
+      github.ref == 'refs/heads/arena/2d5de8a6-apumir' &&
+      (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[deploy-push]'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out this exact commit without retaining Git credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test the deployment path with a fabricated provider
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/test-push-deploy.py
+          python3 scripts/ci/test-push-infra-preflight.py
+          python3 scripts/ci/test-push-disabled-deploy.py
+      - name: Test the Worker with fake FCM in workerd
+        run: |
+          set -euo pipefail
+          npm ci --prefix tools/worker/push --no-audit --no-fund
+          npm test --prefix tools/worker/push
+
+  protection-check:
+    needs: offline-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out this exact commit without retaining Git credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Confirm the environment still requires an owner review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/push-infra-preflight.py --check-protection
+
+  deploy:
+    needs: protection-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The environment is what makes GitHub stop and ask the owner. Removing this
+    # line would deploy without review.
+    environment: apu-push-staging
+    steps:
+      - name: Check out this exact commit without retaining Git credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Reconfirm protection on the approved commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/push-infra-preflight.py --check-protection
+      - name: Upload the service, its storage and its credentials
+        env:
+          GITHUB_ACTIONS: 'true'
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF: ${{ github.ref }}
+          APU_PUSH_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.APU_PUSH_CLOUDFLARE_ACCOUNT_ID }}
+          APU_PUSH_CLOUDFLARE_DEPLOY_TOKEN: ${{ secrets.APU_PUSH_CLOUDFLARE_DEPLOY_TOKEN }}
+          APU_PUSH_FCM_SERVICE_ACCOUNT: ${{ secrets.APU_PUSH_FCM_SERVICE_ACCOUNT }}
+          APU_PUSH_RATE_KEY: ${{ secrets.APU_PUSH_RATE_KEY }}
+        run: python3 scripts/ci/push-deploy.py
+      - name: Ask the deployed service to describe itself
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, sys, urllib.request
+          host = "apu-push.apuchat.workers.dev"
+          try:
+              with urllib.request.urlopen("https://" + host + "/health", timeout=30) as response:
+                  body = json.loads(response.read(4096).decode("utf-8"))
+                  print("HEALTH=OK" if response.status == 200 and body.get("ok") is True
+                        else "HEALTH=UNEXPECTED status=%d" % response.status)
+          except urllib.error.HTTPError as error:
+              print("HEALTH=UNEXPECTED status=%d" % error.code)
+          except Exception:
+              print("HEALTH=UNREACHABLE")
+          PY

@@ -19,7 +19,10 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[2]
 REPO = "vzhem/APUMIR"
-BRANCH = "arena/1266946d-apumir"
+# The protected environment may be restricted to one branch. Both the branch
+# that created the disabled prototype and the current line are accepted, so the
+# check does not need to be weakened when the work continues elsewhere.
+BRANCHES = ("arena/1266946d-apumir", "arena/2d5de8a6-apumir")
 ENVIRONMENT = "apu-push-staging"
 OWNER_ID = 314380434
 MAX_BODY = 128 * 1024
@@ -163,6 +166,21 @@ def request_json(host, path, token):
         raise PreflightError("unavailable") from None
 
 
+def deployment_target(values):
+    """Return (account, deploy token) for a reviewed deployment of this branch.
+
+    Only fixed codes leave this function: no token, account, or provider text.
+    """
+    invocation(values)
+    account = values.get(CF_ACCOUNT_NAME, "")
+    token = values.get("APU_PUSH_CLOUDFLARE_DEPLOY_TOKEN", "")
+    if not isinstance(account, str) or not re.fullmatch(r"[0-9a-f]{32}", account):
+        raise PreflightError("cloudflare_account_invalid")
+    if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9._-]{16,512}", token):
+        raise PreflightError("cloudflare_token_invalid")
+    return account, token
+
+
 def check_environment(token, request=request_json):
     if not isinstance(token, str) or not token:
         raise PreflightError("environment")
@@ -195,7 +213,7 @@ def check_environment(token, request=request_json):
     policies = body.get("branch_policies")
     if not isinstance(policies, list) or len(policies) != 1 or not isinstance(policies[0], dict):
         raise PreflightError("environment")
-    if policies[0].get("name") != BRANCH or policies[0].get("type") != "branch":
+    if policies[0].get("name") not in BRANCHES or policies[0].get("type") != "branch":
         raise PreflightError("environment")
 
 
@@ -218,7 +236,8 @@ def check_cloudflare(credentials, request=request_json):
 
 
 def invocation(values):
-    if values.get("GITHUB_ACTIONS") != "true" or values.get("GITHUB_REPOSITORY") != REPO or values.get("GITHUB_REF") != "refs/heads/" + BRANCH:
+    if values.get("GITHUB_ACTIONS") != "true" or values.get("GITHUB_REPOSITORY") != REPO or \
+            values.get("GITHUB_REF") not in {"refs/heads/" + branch for branch in BRANCHES}:
         raise PreflightError("invocation")
     debug_flags = ("APU_GITHUB_STEP_DEBUG", "APU_GITHUB_RUNNER_DEBUG")
     if values.get("RUNNER_DEBUG") == "1" or any(values.get(name, "").lower() == "true" for name in debug_flags):
