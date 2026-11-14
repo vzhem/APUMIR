@@ -60,7 +60,12 @@ object PushDiagnostics {
      * Read the stored record plus the facts that can be read live. Never throws:
      * a report built while the push files are unreadable must still render.
      */
-    fun snapshot(context: Context, gateOpen: Boolean, receiveEnabled: Boolean): PushSnapshot {
+    fun snapshot(
+        context: Context,
+        gateOpen: Boolean,
+        receiveEnabled: Boolean,
+        endpointConfigured: Boolean,
+    ): PushSnapshot {
         val app = context.applicationContext
         val stored = try {
             app.getSharedPreferences(FILE, Context.MODE_PRIVATE).all
@@ -75,6 +80,7 @@ object PushDiagnostics {
             gateOpen = gateOpen,
             receiveEnabled = receiveEnabled,
             tokenRecorded = tokenPresent(app),
+            endpointConfigured = endpointConfigured,
             registeredRoutes = routeCount(app),
             phase = runCatching { PushPhase.valueOf(text("phase") ?: "UNKNOWN") }.getOrDefault(PushPhase.UNKNOWN),
             lastRegisterAtMs = number("lastRegisterAt"),

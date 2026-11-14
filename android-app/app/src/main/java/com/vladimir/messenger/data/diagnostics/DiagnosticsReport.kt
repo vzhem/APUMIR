@@ -194,8 +194,8 @@ data class DiagnosticsFacts(
     val relayQueueOwnLimit: Long? = null,
     /** Возраст старейшей своей записи, секунды: хвост суток и хвост минут — разные диагнозы. */
     val relayQueueOwnOldestSecs: Long? = null,
-    /** Вытеснения своей переписки из RAM-кэша: накопительный счётчик либо выборка старых логов. */
     val relayQueueOwnEvictions: Long = 0L,
+    val relayQueueOwnDrained: Long? = null,
     val relayQueueOwnEvictionsAreCumulative: Boolean = false,
     /** Полные циклы STUN, в которых ни один сервер не ответил. */
     val stunFailedCycles: Long = 0L,
@@ -512,9 +512,7 @@ object DiagnosticsPrivacy {
     }
 
     /**
-     * Берёт самый свежий queue counter из текущего запуска ядра. Startup summary
-     * сбрасывает старый cumulative value после перезапуска; periodic summary
-     * обновляет его. Older builds fall back to the bounded legacy warning sample.
+     * Берёт самый свежий queue counter из текущего запуска ядра.
      */
     fun parseRelayQueueOwnEvictions(lines: List<String>): RelayQueueEvictionDiagnostics {
         for (line in lines.asReversed()) {
@@ -1177,6 +1175,7 @@ object DiagnosticsReport {
                 } ?: "") +
                 (if (facts.relayQueueOwn != null) " (последняя сводка logcat)" else ""),
         )
+        appendOwnQueueDrain(facts)
         appendLine(
             "очередь ядра: чужая пересылка=" +
                 (facts.relayQueueForeign?.toString() ?: "нет данных") +

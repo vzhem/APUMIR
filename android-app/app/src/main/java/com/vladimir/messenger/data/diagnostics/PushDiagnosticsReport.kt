@@ -33,6 +33,15 @@ data class PushSnapshot(
     val receiveEnabled: Boolean,
     /** Записан ли отпечаток токена (сам токен сюда не попадает). */
     val tokenRecorded: Boolean,
+    /**
+     * Задан ли адрес службы в этой сборке.
+     *
+     * Факт сборки, а не состояние: если он ложен, гейт открыт быть не может, и
+     * никакая регистрация не состоится. Отдельная строка нужна потому, что
+     * «гейт закрыт» и «адрес не задан» — разные причины, и обе выглядят как
+     * пустой раздел.
+     */
+    val endpointConfigured: Boolean,
     /** Сколько маршрутов в индексе; null — индекс не читается. */
     val registeredRoutes: Int?,
     val phase: PushPhase,
@@ -64,6 +73,7 @@ internal fun StringBuilder.appendPush(facts: DiagnosticsFacts) {
     }
     appendLine("гейт=${if (push.gateOpen) "открыт" else "закрыт"}")
     appendLine("приём=${if (push.receiveEnabled) "on" else "off"}")
+    appendLine("адрес_службы=${if (push.endpointConfigured) "задан" else "НЕ ЗАДАН"}")
     appendLine("токен=${if (push.tokenRecorded) "записан" else "нет"}")
     appendLine("маршрутов=${push.registeredRoutes ?: "не читается"}")
     appendLine("фаза=${push.phase.name.lowercase()}")
@@ -89,3 +99,36 @@ internal fun StringBuilder.appendPush(facts: DiagnosticsFacts) {
 /** «5 мин назад» или «не было»: отсутствие события — тоже факт. */
 internal fun agoOrNever(nowMs: Long, atMs: Long): String =
     if (atMs <= 0L) "не было" else "${DiagnosticsReport.formatDuration((nowMs - atMs).coerceAtLeast(0L))} назад"
+
+/**
+ * «Своих снято-по-ACK=N» из самой свежей сводки очереди; null — сводки нет.
+ *
+ * Зеркалит `numericValueAfter` отчёта, потому что это поле читается там же, где
+ * печатается, а сам парсер живёт в отдельном файле из-за потолка god-файла.
+ */
+internal fun relayQueueOwnDrained(lines: List<String>): Long? {
+    for (line in lines.asReversed()) {
+        if (!line.contains("Relay-очередь: своих=")) continue
+        val marker = "снято-по-ACK="
+        val at = line.indexOf(marker).takeIf { it >= 0 } ?: continue
+        val digits = line.substring(at + marker.length).takeWhile { it.isDigit() }
+        digits.toLongOrNull()?.let { return it }
+    }
+    return null
+}
+
+/**
+ * Одна строка о разгрузке своей очереди ядра — рядом с push, потому что это тот
+ * же вопрос «дойдёт ли до спящего телефона».
+ *
+ * «Своих=предел» при «снято=0» означает застрявшую очередь, а не медленную.
+ */
+internal fun StringBuilder.appendOwnQueueDrain(facts: DiagnosticsFacts) {
+    val drained = facts.relayQueueOwnDrained ?: return
+    val stuck = facts.relayQueueOwn != null && facts.relayQueueOwn == facts.relayQueueOwnLimit && drained == 0L
+    appendLine(
+        "очередь ядра: снято по подтверждению=$drained " +
+            if (stuck) "(стоит на пределе и не разгружается — собеседник не подтверждает)"
+            else "(подтверждение снимает запись; это не прочтение)",
+    )
+}

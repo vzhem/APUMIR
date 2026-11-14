@@ -26,7 +26,7 @@ internal class PushTokenRegistrar(
     private val enabled: () -> Boolean,
     private val token: suspend () -> PushFirebaseSignals.Outcome,
     private val coordinator: (register: suspend (String) -> Boolean, record: () -> Boolean) -> PushRuntimeCoordinator,
-    private val peers: () -> Pair<PushTargets.Outcome, List<PushTargets.Peer>>,
+    private val peers: suspend () -> Pair<PushTargets.Outcome, List<PushTargets.Peer>>,
     /** One signed `register` operation for one peer; see [PushRegistrationRunner]. */
     private val register: suspend (peerId: String, token: String) -> PushRegistrationRunner.Outcome,
     /** Revoke the route of one peer; false keeps the caller retrying. */

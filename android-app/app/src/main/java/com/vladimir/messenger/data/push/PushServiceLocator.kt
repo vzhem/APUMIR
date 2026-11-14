@@ -255,13 +255,51 @@ internal object PushServiceLocator {
     }
 
     /** Enumerator of live peers, shared by registration and revocation. */
-    fun targets(context: Context): () -> Pair<PushTargets.Outcome, List<PushTargets.Peer>> {
-        val registrations = shared(context).journals.registrations
+    fun targets(context: Context): suspend () -> Pair<PushTargets.Outcome, List<PushTargets.Peer>> {
+        val shared = shared(context)
+        val registrations = shared.journals.registrations
         val enumerator = PushTargets(
             page = { after, limit -> registrations.recoveryPage(after, limit) },
             find = { hint -> registrations.findRoute(hint) },
+            // Without seeds the index can never leave zero: it only stores routes
+            // the server already confirmed, and confirmation needs a registration.
+            seededPeers = { pinnedSeeds(context, registrations) },
         )
-        return { enumerator.enumerate() }
+        return { enumerator.candidates() }
+    }
+
+    /**
+     * Pinned peers that have no indexed route: the bootstrap set.
+     *
+     * A pin is strict TOFU state created by the file-exchange handshake, never
+     * by this class, and it is only a candidate - the runner resolves the pair
+     * again before signing anything. A peer already in the index is skipped, so
+     * a healthy device does no extra work.
+     */
+    private suspend fun pinnedSeeds(
+        context: Context,
+        registrations: PushRegistrationStore,
+    ): Pair<PushTargets.Outcome, List<PushTargets.Peer>> {
+        val localId = com.vladimir.messenger.data.schedule.DeferredInboxStore.owner(context)
+        if (localId.isBlank()) return PushTargets.Outcome.RETRY to emptyList()
+        val pins = try {
+            deps(context).pins().allBindings()
+        } catch (cancelled: CoroutineCancellation) {
+            throw cancelled
+        } catch (_: Exception) {
+            diag("Pin enumeration failed")
+            return PushTargets.Outcome.RETRY to emptyList()
+        }
+        val seeds = pins.mapNotNull { (nodeId, binding) ->
+            try {
+                if (nodeId == localId || nodeId.isBlank()) null
+                else PushTargets.seed(nodeId, localId)
+            } finally {
+                // The binding itself is not needed here; do not keep a copy.
+                binding.fill(0)
+            }
+        }
+        return PushTargets.Outcome.COMPLETED to seeds
     }
 
     /** The real registrar, or null while disabled. */

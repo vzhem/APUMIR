@@ -39,6 +39,7 @@ class DiagnosticsReportTest {
         relayQueueOwnSignals: Long? = null,
         relayQueueRecipients: Long? = null,
         relayQueueOwnLimit: Long? = null,
+        relayQueueOwnDrained: Long? = null,
         relayQueueOwnOldestSecs: Long? = null,
         relayQueueOwnEvictions: Long = 0L,
         relayQueueOwnEvictionsAreCumulative: Boolean = false,
@@ -110,6 +111,7 @@ class DiagnosticsReportTest {
         relayQueueOwnSignals = relayQueueOwnSignals,
         relayQueueRecipients = relayQueueRecipients,
         relayQueueOwnLimit = relayQueueOwnLimit,
+        relayQueueOwnDrained = relayQueueOwnDrained,
         relayQueueOwnOldestSecs = relayQueueOwnOldestSecs,
         relayQueueOwnEvictions = relayQueueOwnEvictions,
         relayQueueOwnEvictionsAreCumulative = relayQueueOwnEvictionsAreCumulative,
@@ -1258,6 +1260,7 @@ class DiagnosticsReportTest {
             gateOpen = true,
             receiveEnabled = false,
             tokenRecorded = true,
+            endpointConfigured = true,
             registeredRoutes = 0,
             phase = PushPhase.FAILED,
             lastRegisterAtMs = 1_700_000_000_000L,
@@ -1276,6 +1279,7 @@ class DiagnosticsReportTest {
             "[push]",
             "гейт=открыт",
             "приём=off",
+            "адрес_службы=задан",
             "токен=записан",
             "маршрутов=0",
             "фаза=failed",
@@ -1288,6 +1292,34 @@ class DiagnosticsReportTest {
         }
         // Значение токена и маршрут в раздел не попадают — только «записан»/«нет».
         assertFalse(report.contains("маршрут="))
+    }
+
+    @Test fun aStalledOwnQueueIsNamedAsStalledNotAsSlow() {
+        // Владелец 2026-11-14: очередь стоит на пределе двое суток, и по отчёту
+        // нельзя было понять, разгружается она или застряла.
+        val stalled = facts(
+            relayQueueOwn = 1000,
+            relayQueueOwnLimit = 1000,
+            relayQueueOwnDrained = 0,
+        )
+        val report = DiagnosticsReport.render(stalled, emptyList(), emptyList())
+        assertTrue(report.contains("снято по подтверждению=0"))
+        assertTrue(report.contains("не разгружается"))
+
+        val moving = facts(relayQueueOwn = 1000, relayQueueOwnLimit = 1000, relayQueueOwnDrained = 7)
+        val live = DiagnosticsReport.render(moving, emptyList(), emptyList())
+        assertTrue(live.contains("снято по подтверждению=7"))
+        assertFalse(live.contains("не разгружается"))
+    }
+
+    @Test fun theQueueDrainFieldIsParsedOnlyFromTheCoresOwnSummary() {
+        assertEquals(5L, com.vladimir.messenger.data.diagnostics.relayQueueOwnDrained(
+            listOf("Relay-очередь: своих=1000 сигналов=37 чужих=3497 снято-по-ACK=5 предел-своих=1000"),
+        ))
+        // Строка без сводки очереди ничего не придумывает.
+        assertNull(com.vladimir.messenger.data.diagnostics.relayQueueOwnDrained(
+            listOf("MQTT: delivery ACK received for [id]"),
+        ))
     }
 
     @Test fun pushSectionSaysSoWhenItWasNotCollected() {

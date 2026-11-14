@@ -16,6 +16,17 @@ internal class PushTargets(
     private val page: (after: String?, limit: Int) -> PushRegistrationStore.RecoveryPage,
     private val find: (String) -> PushRegistrationStore.RouteResult,
     private val maxPages: Int = DEFAULT_PAGES,
+    /**
+     * Live pins, used only to *seed* a first registration.
+     *
+     * The index cannot bootstrap itself: it holds only routes the server already
+     * confirmed, so a fresh install enumerates nothing and therefore registers
+     * nobody - a closed loop that no amount of retrying opens. A pinned peer is
+     * the independent source that breaks it, and it is still just a candidate:
+     * the runner re-resolves the pair from the same pin before signing, so a pin
+     * that disappeared in between yields `NotReady`, not a registration.
+     */
+    private val seededPeers: suspend () -> Pair<Outcome, List<Peer>>? = { null },
     private val recordFailure: () -> Unit = {},
 ) {
     enum class Outcome {
@@ -27,6 +38,27 @@ internal class PushTargets(
 
     class Peer(val localId: String, val peerId: String, val generation: Long) {
         override fun toString(): String = "PushTarget(redacted)"
+    }
+
+    /**
+     * Every peer worth a registration attempt: what the index already knows,
+     * plus pinned peers that have no route yet. The second half is the only way
+     * a first route can ever exist.
+     */
+    suspend fun candidates(): Pair<Outcome, List<Peer>> {
+        val (outcome, indexed) = enumerate()
+        if (outcome != Outcome.COMPLETED) return outcome to emptyList()
+        val seeds = try {
+            seededPeers()
+        } catch (_: Exception) {
+            // A broken pin store is not "no pins": do not act on a partial set.
+            diag()
+            return Outcome.RETRY to emptyList()
+        } ?: return outcome to indexed
+        val (seedOutcome, pinned) = seeds
+        if (seedOutcome != Outcome.COMPLETED) return Outcome.RETRY to emptyList()
+        val known = indexed.map { it.peerId }.toHashSet()
+        return Outcome.COMPLETED to (indexed + pinned.filter { it.peerId !in known })
     }
 
     fun enumerate(): Pair<Outcome, List<Peer>> {
@@ -94,6 +126,9 @@ internal class PushTargets(
             java.util.logging.Logger.getLogger("PushTargets").warning("Enumeration diagnostics unavailable")
         }
     }
+
+    /** One pinned peer with no indexed route yet: a seed, never authority. */
+    internal fun seed(peerId: String, localId: String): Peer = Peer(localId, peerId, 0L)
 
     companion object {
         /** Must match the journal's own page size limit. */

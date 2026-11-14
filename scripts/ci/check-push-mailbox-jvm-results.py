@@ -241,6 +241,7 @@ EXPECTED = {
         "aProviderGapAndAStartupResumeAreReportedWithoutInventingSuccess",
     },
     PREFIX + "PushTargetsTest": {
+        "aFreshInstallIsSeededFromPinsOrItWouldNeverRegisterAnyone",
         "everyPageIsEnumeratedAndDuplicatesCollapse",
         "anUnreadableIndexIsNeverAnEmptyList",
         "aVanishedRouteIsSkippedButAnUnreadableOneRetriesTheEnumeration",

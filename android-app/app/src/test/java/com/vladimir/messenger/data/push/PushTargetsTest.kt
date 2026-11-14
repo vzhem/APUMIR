@@ -2,6 +2,7 @@ package com.vladimir.messenger.data.push
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import kotlinx.coroutines.runBlocking
 import org.junit.Test
 
 class PushTargetsTest {
@@ -56,6 +57,36 @@ class PushTargetsTest {
         val (state, peers) = unreadable.enumerate()
         assertEquals(PushTargets.Outcome.RETRY, state)
         assertTrue(peers.isEmpty())
+    }
+
+    @Test fun aFreshInstallIsSeededFromPinsOrItWouldNeverRegisterAnyone() = runBlocking {
+        // The index cannot bootstrap itself: it holds only confirmed routes, and
+        // confirming needs a registration. Without seeds a new install would sit
+        // at zero routes forever, which is exactly what the phone report showed.
+        val empty = PushTargets(
+            page = { _, _ -> PushRegistrationStore.RecoveryPage.Ready(emptyList(), null) },
+            find = { PushRegistrationStore.RouteResult.Missing },
+            seededPeers = { PushTargets.Outcome.COMPLETED to listOf(PushTargets.seed(peer(9), local())) },
+        )
+        val (state, peers) = empty.candidates()
+        assertEquals(PushTargets.Outcome.COMPLETED, state)
+        assertEquals(listOf(peer(9)), peers.map { it.peerId })
+
+        // A peer the index already knows is not registered twice.
+        val known = PushTargets(
+            page = { _, _ -> PushRegistrationStore.RecoveryPage.Ready(listOf(route(1)), null) },
+            find = { PushRegistrationStore.RouteResult.Found(local(), peer(9), 1) },
+            seededPeers = { PushTargets.Outcome.COMPLETED to listOf(PushTargets.seed(peer(9), local())) },
+        )
+        assertEquals(listOf(peer(9)), known.candidates().second.map { it.peerId })
+
+        // An unreadable pin store is not "no pins": act on nothing.
+        val brokenPins = PushTargets(
+            page = { _, _ -> PushRegistrationStore.RecoveryPage.Ready(emptyList(), null) },
+            find = { PushRegistrationStore.RouteResult.Missing },
+            seededPeers = { PushTargets.Outcome.RETRY to emptyList() },
+        )
+        assertEquals(PushTargets.Outcome.RETRY, brokenPins.candidates().first)
     }
 
     @Test fun thePageBudgetIsABoundAndNotAFinishedList() {

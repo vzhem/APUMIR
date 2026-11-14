@@ -375,6 +375,7 @@ object TransferDiagnostics {
                 relayQueueOwnLimit = logcat.queueOwnLimit,
                 relayQueueOwnOldestSecs = logcat.queueOwnOldestSecs,
                 relayQueueOwnEvictions = logcat.queueOwnEvictions,
+                relayQueueOwnDrained = logcat.queueOwnDrained,
                 relayQueueOwnEvictionsAreCumulative = logcat.queueOwnEvictionsAreCumulative,
                 stunFailedCycles = logcat.stunFailedCycles,
                 stunSuccessfulBindings = logcat.stunSuccessfulBindings,
@@ -402,7 +403,7 @@ object TransferDiagnostics {
             CrashTrace.report(context.applicationContext)
         snapshotOf(facts.copy(relayStorage = storage, runtimeHealth = health,
             operationalHealth = OperationalDiagnostics.tracker.snapshot(), operationalDetails = details,
-            push = facts.push),
+            push = facts.push ?: pushSnapshot),
             journalSnapshot.first, logcat.lines, createdAtMs)
     }
 
@@ -463,7 +464,8 @@ object TransferDiagnostics {
         val pushSnapshot: PushSnapshot? = runCatching {
             val gate = com.vladimir.messenger.data.push.PushServiceLocator.enabled(context)
             val receive = com.vladimir.messenger.data.push.PushServiceLocator.receiving(context)
-            com.vladimir.messenger.data.push.PushDiagnostics.snapshot(context, gate, receive)
+            val endpoint = com.vladimir.messenger.data.push.PushServiceLocator.endpoint(context) != null
+            com.vladimir.messenger.data.push.PushDiagnostics.snapshot(context, gate, receive, endpoint)
         }.getOrNull()
         return DiagnosticsFacts(
             createdAtMs = createdAtMs,
@@ -584,6 +586,8 @@ object TransferDiagnostics {
         val queueOwnOldestSecs: Long?,
         val queueOwnEvictions: Long,
         val queueOwnEvictionsAreCumulative: Boolean,
+        /** «снято-по-ACK» из той же сводки: очередь не просто стоит. */
+        val queueOwnDrained: Long?,
         val stunFailedCycles: Long,
         val stunSuccessfulBindings: Long,
         val stunLastAttemptFailed: Boolean?,
@@ -614,6 +618,7 @@ object TransferDiagnostics {
                 queueOwnOldestSecs = null,
                 queueOwnEvictions = 0L,
                 queueOwnEvictionsAreCumulative = false,
+                queueOwnDrained = null,
                 stunFailedCycles = 0L,
                 stunSuccessfulBindings = 0L,
                 stunLastAttemptFailed = null,
@@ -837,6 +842,7 @@ object TransferDiagnostics {
             queueOwnLimit = queueStat(all, "предел-своих="),
             queueOwnOldestSecs = queueStat(all, "старейшее-своё="),
             queueOwnEvictions = evictionScan.count,
+            queueOwnDrained = relayQueueOwnDrained(all),
             queueOwnEvictionsAreCumulative = evictionScan.cumulative,
             stunFailedCycles = all.count { it.contains(STUN_ALL_SERVERS_FAILED) }.toLong(),
             stunSuccessfulBindings = all.count(::isStunSuccess).toLong(),
