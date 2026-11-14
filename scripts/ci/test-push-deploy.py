@@ -189,6 +189,66 @@ class DeploymentTests(unittest.TestCase):
                                                "private_key": "not a key"}))
         self.assertEqual("fcm_identity_invalid", raised.exception.code)
 
+    def test_a_refusal_is_reported_as_one_fixed_code_never_wrangler_text(self):
+        # Wrangler prints request ids, account names and token prefixes on
+        # failure, so only a recognised phrase may leave the process, as a code.
+        cases = [
+            ("Error: Couldn't find a Durable Object namespace named PUSH_SHARDS", "worker_namespace_missing"),
+            ("Authentication error [code: 10000]", "credentials_refused"),
+            ("A request to the Cloudflare API (/accounts/abc/workers/scripts/apu-push) failed", "api_refused"),
+        ]
+        for text, expected in cases:
+            self.assertEqual(expected, deploy.diagnosis(text), text)
+        self.assertIsNone(deploy.diagnosis("some unrecognised text"))
+        self.assertIsNone(deploy.diagnosis(None))
+
+    def test_a_failure_says_which_step_it_was_without_quoting_anything(self):
+        for marker, expected_step, expected_code in (
+                ("deploy", 1, "upload"), ("secret", 2, "secret")):
+            fake = FakeWrangler(fail_on=marker)
+            code, text, _ = self.run_deploy(fake=fake)
+            self.assertEqual(1, code)
+            self.assertIn("failed at step " + str(expected_step) + " of 6", text)
+        # A failure on the last deploy (the one that turns the switches on) is
+        # reported as step 6, not as step 1.
+        calls = []
+
+        def run(args, env, stdin_text=None):
+            calls.append(" ".join(args))
+            return (1 if len(calls) == 6 else 0), ""
+
+        out = io.StringIO()
+        saved_run, saved_health = deploy.run_wrangler, deploy.health
+        deploy.run_wrangler, deploy.health = run, lambda: (200, {"ok": True})
+        try:
+            with contextlib.redirect_stdout(out):
+                code = deploy.main(runtime())
+        finally:
+            deploy.run_wrangler, deploy.health = saved_run, saved_health
+        self.assertEqual(1, code)
+        self.assertIn("failed at step 6 of 6", out.getvalue())
+
+    def test_wrangler_text_never_reaches_the_output_even_when_it_fails(self):
+        noisy = "Authentication error [code: 10000] token=cf-abcdef123456 account=0123456789abcdef0123456789abcdef"
+
+        def failing_run(args, env, stdin_text=None):
+            return 1, noisy
+
+        out = io.StringIO()
+        saved_run, saved_health = deploy.run_wrangler, deploy.health
+        deploy.run_wrangler = failing_run
+        try:
+            with contextlib.redirect_stdout(out):
+                code = deploy.main(runtime())
+        finally:
+            deploy.run_wrangler, deploy.health = saved_run, saved_health
+        text = out.getvalue()
+        self.assertEqual(1, code)
+        self.assertNotIn("cf-abcdef123456", text)
+        self.assertNotIn("0123456789abcdef0123456789abcdef", text)
+        self.assertNotIn("Authentication error", text)
+        self.assertIn("credentials_refused", text)
+
     def test_no_output_contains_a_token_key_or_account(self):
         code, text, _ = self.run_deploy()
         self.assertEqual(0, code, text)

@@ -55,8 +55,13 @@ SECRET_NAMES = ("FCM_PROJECT_ID", "FCM_CLIENT_EMAIL", "FCM_PRIVATE_KEY", "PUSH_R
 class DeployError(Exception):
     """Fixed code only; never provider text, tokens or account identifiers."""
 
-    def __init__(self, code):
+    def __init__(self, code, detail=None, stage=None):
         self.code = code
+        # A second fixed code from DIAGNOSTICS, or None. Never free text.
+        self.detail = detail
+        # 1-based index of the Wrangler call that failed, so a run says where it
+        # stopped without quoting anything Wrangler printed.
+        self.stage = stage
         super().__init__(code)
 
 
@@ -106,7 +111,41 @@ def run_wrangler(args, env, stdin_text=None):
         )
     except (OSError, subprocess.SubprocessError):
         raise DeployError("wrangler") from None
-    return completed.returncode, completed.stdout or ""
+    return completed.returncode, (completed.stdout or "") + (completed.stderr or "")
+
+
+# Wrangler and Cloudflare echo request identifiers, account names, routes and
+# token prefixes on failure, so its output never goes to the log as-is. These are
+# the phrases that name the reason; everything around them is dropped.
+DIAGNOSTICS = (
+    ("Couldn't find a Durable Object namespace", "worker_namespace_missing"),
+    # Credential and transport failures are listed before the generic API phrase,
+    # because Cloudflare's own wording for them also contains "A request to the
+    # Cloudflare API" and the first match is the one that is reported.
+    ("Authentication error", "credentials_refused"),
+    ("Invalid API Token", "credentials_refused"),
+    ("Unauthorized", "credentials_refused"),
+    ("10000", "credentials_refused"),
+    ("fetch failed", "network"),
+    ("ECONNRESET", "network"),
+    ("ETIMEDOUT", "network"),
+    ("getaddrinfo", "network"),
+    ("You need to register a workers.dev subdomain", "subdomain_missing"),
+    ("Cannot create a new class", "migration_refused"),
+    ("cannot be migrated", "migration_refused"),
+    ("Exceeded the limit", "quota"),
+    ("A request to the Cloudflare API", "api_refused"),
+)
+
+
+def diagnosis(text):
+    """Map Wrangler's own failure wording to one fixed code, or None."""
+    if not isinstance(text, str):
+        return None
+    for phrase, code in DIAGNOSTICS:
+        if phrase in text:
+            return code
+    return None
 
 
 def upload_secrets(env, fcm, rate_key):
@@ -118,7 +157,7 @@ def upload_secrets(env, fcm, rate_key):
         "PUSH_RATE_KEY": rate_key,
     }
     for name in SECRET_NAMES:
-        code, _ = run_wrangler(
+        code, output = run_wrangler(
             # --name is explicit: a command must never depend on which directory
             # (or which config default) it happens to run from.
             ["secret", "put", name, "--name", WORKER_NAME,
@@ -126,20 +165,23 @@ def upload_secrets(env, fcm, rate_key):
             env, stdin_text=values[name] + "\n",
         )
         if code != 0:
-            raise DeployError("secret")
+            raise DeployError("secret", diagnosis(output), stage=SECRET_NAMES.index(name) + 2)
     return True
 
 
 def deploy(env, enabled):
     """One deploy; the two switches are plain-text bindings, not secrets."""
     value = "true" if enabled else "false"
-    code, _ = run_wrangler([
+    code, output = run_wrangler([
         "deploy", "--config", str(CONFIG.relative_to(PROJECT)),
         "--var", "PUSH_ENABLED:" + value, "--var", "MAILBOX_ENABLED:" + value,
         "--name", WORKER_NAME,
     ], env)
     if code != 0:
-        raise DeployError("upload")
+        # Stage 1 is the switched-off deploy, stages 2..5 are the secrets, and
+        # stage 6 is the deploy that turns everything on.
+        raise DeployError("upload", diagnosis(output),
+                          stage=6 if enabled else 1)
     return True
 
 
@@ -183,6 +225,13 @@ MESSAGES = {
     "rate_key": "APU_PUSH_RATE_KEY is present but has the wrong format (32-128 hex characters).",
     "wrangler_missing": "Wrangler is not installed; run npm ci in tools/worker/push first.",
     "wrangler": "Wrangler could not be started.",
+    "worker_namespace_missing": "The Worker tried to reach its storage class before that class existed; the storage binding is missing from the deployed version.",
+    "credentials_refused": "Cloudflare refused the deployment token: it cannot write Workers in this account.",
+    "api_refused": "Cloudflare refused the request; the deploy token may lack the Workers edit permission.",
+    "subdomain_missing": "The account has no workers.dev subdomain, so the reviewed host cannot resolve.",
+    "migration_refused": "Cloudflare refused the storage migration; the class already exists in another form.",
+    "quota": "A Cloudflare account limit was reached.",
+    "network": "The runner could not reach the Cloudflare API; nothing was changed.",
     "secret": "A Worker secret was refused. The service exists with both switches off; inspect before retrying.",
     "upload": "Wrangler refused the deploy. The service may still be on its previous version.",
     "health": "The deployed service did not answer a health request.",
@@ -212,7 +261,16 @@ def main(values, environ=None):
         }
         # The Worker must exist before a secret can be attached to it, and it
         # must exist in the off position before it holds any credential.
-        deploy(env, enabled=False)
+        try:
+            deploy(env, enabled=False)
+        except DeployError as error:
+            # A first deploy onto an existing Worker can legitimately conflict
+            # with what is already there. Say so with an annotation instead of
+            # leaving only a bare "exit code 1".
+            print("::warning title=Push deployment::The first, switched-off deploy was refused"
+                  + ((" [" + error.detail + "] " + MESSAGES.get(error.detail, "")) if error.detail else "")
+                  + " (failed at step 1 of 6) Nothing was uploaded and no secret was attached.")
+            raise
         print("Created or refreshed " + WORKER_NAME + " with both switches off.")
         upload_secrets(env, fcm, key)
         print("Uploaded " + str(len(SECRET_NAMES)) + " encrypted secrets; values were not printed.")
@@ -232,7 +290,12 @@ def main(values, environ=None):
         print("This is not delivery: no device registered and no provider message was sent.")
         return 0
     except DeployError as error:
-        print("::error title=Push deployment::" + MESSAGES.get(error.code, MESSAGES["wrangler"]))
+        message = MESSAGES.get(error.code, MESSAGES["wrangler"])
+        if error.detail:
+            message += " [" + error.detail + "] " + MESSAGES.get(error.detail, "")
+        if error.stage:
+            message += " (failed at step " + str(error.stage) + " of 6)"
+        print("::error title=Push deployment::" + message.rstrip())
         return 1
     except preflight.PreflightError as error:
         print("::error title=Push deployment::" + preflight.MESSAGES.get(error.code, preflight.MESSAGES["unavailable"]))
