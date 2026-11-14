@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Exercise the working push deployment offline, with a fabricated provider.
 
-No network, no Cloudflare, no Google. The fake records every call so the tests
-can assert what would have been sent, and the assertions never require a real
-credential. The point is the safety shape: one Worker name, one upload, no
-retry, no delete, and nothing secret in any output.
+No network, no Cloudflare, no Google, no Wrangler process. The fake records each
+command so the tests can assert what would have been sent, and no assertion
+requires a real credential. The point is the safety shape: secrets before the
+switch, one deploy of one name, no retry, no delete, nothing secret in output.
 """
 import contextlib
 import importlib.util
@@ -28,28 +28,22 @@ FCM_JSON = json.dumps({
 })
 
 
-class FakeProvider:
-    def __init__(self, settings_status=404, upload_status=200, deployments_status=200,
-                 existing_bindings=None):
-        self.calls = []
-        self.settings_status = settings_status
-        self.existing_bindings = existing_bindings or []
-        self.upload_status = upload_status
-        self.deployments_status = deployments_status
-        self.uploaded = None
+class FakeWrangler:
+    """Stands in for subprocess.run; records argv, env and stdin."""
 
-    def __call__(self, host, path, token, method="GET", body=None, maximum=None):
-        self.calls.append((host, path, method))
-        if path.endswith("/settings"):
-            if self.settings_status == 200:
-                return 200, {"result": {"bindings": self.existing_bindings}}
-            return self.settings_status, None
-        if method == "PUT":
-            self.uploaded = body
-            return self.upload_status, {"success": True}
-        if path.endswith("/deployments"):
-            return self.deployments_status, {"success": True, "result": {"deployments": []}}
-        raise AssertionError("unexpected path " + path)
+    def __init__(self, fail_on=None):
+        self.calls = []
+        self.fail_on = fail_on
+
+    def __call__(self, argv, cwd=None, env=None, input=None, capture_output=None,
+                 text=None, timeout=None, check=None):
+        self.calls.append({"argv": list(argv), "env": dict(env or {}), "stdin": input})
+
+        class Completed:
+            returncode = 1 if self.fail_on and self.fail_on in " ".join(argv) else 0
+            stdout = "Total Upload: 48 KiB"
+            stderr = ""
+        return Completed()
 
 
 def runtime(extra=None):
@@ -60,76 +54,106 @@ def runtime(extra=None):
         "APU_PUSH_CLOUDFLARE_ACCOUNT_ID": ACCOUNT,
         "APU_PUSH_CLOUDFLARE_DEPLOY_TOKEN": TOKEN,
         "APU_PUSH_FCM_SERVICE_ACCOUNT": FCM_JSON,
-        "APU_PUSH_RATE_KEY": RATE_KEY,
     }
     values.update(extra or {})
     return values
 
 
+def patch(name, value):
+    original = getattr(deploy, name)
+    setattr(deploy, name, value)
+    return original
+
+
 class DeploymentTests(unittest.TestCase):
-    def test_one_upload_to_the_reviewed_name_with_both_switches_on(self):
-        fake = FakeProvider()
-        self.assertTrue(deploy.deploy(ACCOUNT, TOKEN, deploy.service_account(FCM_JSON), RATE_KEY, request=fake))
-        # Exactly one write, and it addressed the single reviewed Worker.
-        writes = [call for call in fake.calls if call[2] != "GET"]
-        self.assertEqual(1, len(writes))
-        self.assertEqual("api.cloudflare.com", writes[0][0])
-        self.assertTrue(writes[0][1].endswith("/workers/scripts/apu-push"))
-        payload = fake.uploaded
-        self.assertEqual("worker.mjs", payload["main_module"])
-        names = {binding["name"]: binding for binding in payload["bindings"]}
-        self.assertEqual("true", names["PUSH_ENABLED"]["text"])
-        self.assertEqual("true", names["MAILBOX_ENABLED"]["text"])
-        self.assertEqual("durable_object_namespace", names["PUSH_SHARDS"]["type"])
-        self.assertEqual("PushShard", names["PUSH_SHARDS"]["class_name"])
-        # Every module is uploaded as text, never as a path or an exec'd file.
-        uploaded_modules = {module["name"] for module in payload["modules"]}
-        self.assertEqual(set(deploy.MODULES), uploaded_modules)
-        self.assertTrue(all(isinstance(module["content"], str) for module in payload["modules"]))
+    def run_deploy(self, values=None, fake=None, health_result=(200, {"ok": True})):
+        fake = fake or FakeWrangler()
 
-    def test_credentials_are_secret_bindings_and_never_plain_text(self):
-        fake = FakeProvider()
-        deploy.deploy(ACCOUNT, TOKEN, deploy.service_account(FCM_JSON), RATE_KEY, request=fake)
-        bindings = {binding["name"]: binding for binding in fake.uploaded["bindings"]}
-        self.assertEqual("secret_text", bindings["FCM_PRIVATE_KEY"]["type"])
-        self.assertEqual("secret_text", bindings["FCM_CLIENT_EMAIL"]["type"])
-        self.assertEqual("secret_text", bindings["PUSH_RATE_KEY"]["type"])
-        # The project id is not a credential and is useful in readbacks.
-        self.assertEqual("plain_text", bindings["FCM_PROJECT_ID"]["type"])
+        def fake_run(args, env, stdin_text=None):
+            # Same contract as the real helper: record, then honour the failure.
+            fake.calls.append({"argv": list(args), "env": dict(env), "stdin": stdin_text})
+            failed = fake.fail_on and fake.fail_on in " ".join(args)
+            return (1 if failed else 0), ""
 
-    def test_the_migration_is_sent_once_and_not_replayed(self):
-        fresh = FakeProvider(settings_status=404)
-        deploy.deploy(ACCOUNT, TOKEN, deploy.service_account(FCM_JSON), RATE_KEY, request=fresh)
-        self.assertEqual({"new_sqlite_classes": ["PushShard"]}, fresh.uploaded["migrations"])
-        # A Worker that already owns the shard class must not replay the
-        # migration: Cloudflare rejects it for an existing class.
-        existing = FakeProvider(settings_status=200, existing_bindings=[
-            {"name": "PUSH_ENABLED"}, {"name": "PUSH_SHARDS", "class_name": "PushShard"},
-        ])
-        deploy.deploy(ACCOUNT, TOKEN, deploy.service_account(FCM_JSON), RATE_KEY, request=existing)
-        self.assertNotIn("migrations", existing.uploaded)
-        self.assertEqual(1, len([c for c in existing.calls if c[2] == "PUT"]))
-        # A Worker that exists without the shard binding is the upgrade case and
-        # does get the migration.
-        upgrade = FakeProvider(settings_status=200, existing_bindings=[{"name": "PUSH_ENABLED"}])
-        deploy.deploy(ACCOUNT, TOKEN, deploy.service_account(FCM_JSON), RATE_KEY, request=upgrade)
-        self.assertEqual({"new_sqlite_classes": ["PushShard"]}, upgrade.uploaded["migrations"])
+        out = io.StringIO()
+        saved_run, saved_health = deploy.run_wrangler, deploy.health
+        deploy.run_wrangler, deploy.health = fake_run, lambda: health_result
+        try:
+            with contextlib.redirect_stdout(out):
+                code = deploy.main(values or runtime())
+        finally:
+            deploy.run_wrangler, deploy.health = saved_run, saved_health
+        return code, out.getvalue(), fake
 
-    def test_a_refused_upload_stops_without_retry_or_delete(self):
-        fake = FakeProvider(upload_status=400)
-        with self.assertRaises(deploy.DeployError) as raised:
-            deploy.deploy(ACCOUNT, TOKEN, deploy.service_account(FCM_JSON), RATE_KEY, request=fake)
-        self.assertEqual("upload", raised.exception.code)
-        methods = [call[2] for call in fake.calls]
-        self.assertEqual(["GET", "PUT"], methods)
-        self.assertNotIn("DELETE", methods)
-        self.assertEqual(1, methods.count("PUT"))
+    def test_secrets_are_uploaded_before_a_single_deploy(self):
+        code, text, fake = self.run_deploy()
+        self.assertEqual(0, code, text)
+        argv = [" ".join(call["argv"]) for call in fake.calls]
+        self.assertEqual(4, len(argv), argv)
+        self.assertEqual(
+            ["secret put FCM_CLIENT_EMAIL", "secret put FCM_PRIVATE_KEY", "secret put PUSH_RATE_KEY"],
+            [item.split(" --config")[0] for item in argv[:3]],
+        )
+        self.assertTrue(argv[3].startswith("deploy"), argv[3])
+        self.assertIn("--var PUSH_ENABLED:true", argv[3])
+        self.assertIn("--var MAILBOX_ENABLED:true", argv[3])
+        self.assertIn("--name apu-push", argv[3])
 
-    def test_an_unconfirmed_deployment_is_an_error_not_success(self):
-        fake = FakeProvider(deployments_status=404)
-        with self.assertRaises(deploy.DeployError) as raised:
-            deploy.deploy(ACCOUNT, TOKEN, deploy.service_account(FCM_JSON), RATE_KEY, request=fake)
-        self.assertEqual("deployment", raised.exception.code)
+    def test_secret_values_travel_on_stdin_and_never_as_arguments(self):
+        _, _, fake = self.run_deploy(values=runtime({"APU_PUSH_RATE_KEY": RATE_KEY}))
+        puts = [call for call in fake.calls if call["argv"][0] == "secret"]
+        self.assertEqual(3, len(puts))
+        # A value in argv would be visible in process listings and logs.
+        for call in puts:
+            self.assertNotIn("BEGIN PRIVATE KEY", " ".join(call["argv"]))
+            self.assertNotIn(RATE_KEY, " ".join(call["argv"]))
+            self.assertTrue(call["stdin"])
+        self.assertEqual(RATE_KEY + "\n", puts[2]["stdin"])
+
+    def test_the_child_process_gets_only_the_three_variables_it_needs(self):
+        _, _, fake = self.run_deploy()
+        env = fake.calls[0]["env"]
+        self.assertEqual(ACCOUNT, env["CLOUDFLARE_ACCOUNT_ID"])
+        self.assertEqual(TOKEN, env["CLOUDFLARE_API_TOKEN"])
+        # The service-account JSON must not be inherited by Wrangler.
+        self.assertNotIn("APU_PUSH_FCM_SERVICE_ACCOUNT", env)
+        self.assertNotIn("BEGIN PRIVATE KEY", json.dumps(env))
+
+    def test_a_refused_secret_or_upload_stops_without_retry_or_delete(self):
+        for marker, expected in (("secret", "secret"), ("deploy", "upload")):
+            fake = FakeWrangler(fail_on=marker)
+            code, text, _ = self.run_deploy(fake=fake)
+            self.assertEqual(1, code, text)
+            self.assertIn("::error", text)
+            joined = [" ".join(call["argv"]) for call in fake.calls]
+            self.assertNotIn("delete", " ".join(joined))
+            # Failures are not retried: the run stops at the failing command.
+            self.assertLessEqual(len(joined), 4 if marker == "deploy" else 3)
+
+    def test_a_service_that_does_not_confirm_health_is_a_failure(self):
+        code, text, _ = self.run_deploy(health_result=(503, {"ok": False}))
+        self.assertEqual(1, code, text)
+        self.assertIn("HEALTH=UNEXPECTED", text)
+        # Not a delivery claim even on success.
+        code, text, _ = self.run_deploy()
+        self.assertIn("not delivery", text.lower())
+
+    def test_a_missing_rate_key_is_generated_once_and_never_printed(self):
+        code, text, fake = self.run_deploy()
+        self.assertEqual(0, code, text)
+        uploaded = [call for call in fake.calls if call["argv"][:2] == ["secret", "put"]][2]["stdin"]
+        self.assertRegex(uploaded.strip(), r"^[0-9a-f]{64}$")
+        self.assertNotIn(uploaded.strip(), text)
+        self.assertIn("Generated a random PUSH_RATE_KEY", text)
+
+    def test_a_malformed_stored_rate_key_fails_before_any_call(self):
+        fake = FakeWrangler()
+        code, text, _ = self.run_deploy(values=runtime({"APU_PUSH_RATE_KEY": "nope"}), fake=fake)
+        self.assertEqual(1, code, text)
+        self.assertEqual([], fake.calls)
+        code, text, _ = self.run_deploy(values=runtime({"APU_PUSH_RATE_KEY": "c" * 32}), fake=FakeWrangler())
+        self.assertEqual(0, code, text)
+        self.assertNotIn("Generated a random PUSH_RATE_KEY", text)
 
     def test_malformed_inputs_fail_before_any_request(self):
         for raw in ("", "{}", "[]", json.dumps({"project_id": "x"})):
@@ -139,37 +163,34 @@ class DeploymentTests(unittest.TestCase):
             deploy.service_account(json.dumps({"project_id": "apu-test-project", "client_email": "x",
                                                "private_key": "not a key"}))
         self.assertEqual("fcm_identity_invalid", raised.exception.code)
-        with self.assertRaises(deploy.DeployError) as raised:
-            deploy.script_payload(deploy.service_account(FCM_JSON), "short", deploy.modules_payload())
-        self.assertEqual("rate_key", raised.exception.code)
 
     def test_no_output_contains_a_token_key_or_account(self):
-        fake = FakeProvider()
-        secret_service = deploy.service_account(FCM_JSON)
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            original_health, original_deploy = deploy.health, deploy.deploy
-            deploy.health = lambda: (200, {"ok": True})
-            deploy.deploy = lambda account, token, fcm, rate_key: True
-            try:
-                code = deploy.main(runtime())
-            finally:
-                deploy.health, deploy.deploy = original_health, original_deploy
-        text = out.getvalue()
+        code, text, _ = self.run_deploy()
         self.assertEqual(0, code, text)
-        for secret in (TOKEN, RATE_KEY, ACCOUNT, secret_service["key"], "BEGIN PRIVATE KEY"):
+        for secret in (TOKEN, RATE_KEY, ACCOUNT, "BEGIN PRIVATE KEY", "MIIBOgIBAAJBAK"):
             self.assertNotIn(secret, text)
-        self.assertIn("HEALTH=OK", text)
 
-    def test_the_reviewed_host_matches_the_android_allowlist(self):
+    def test_the_reviewed_host_matches_every_place_that_names_it(self):
         config = (HERE.parents[1] / "android-app/app/src/main/java/com/vladimir/messenger/data/push/PushRuntimeConfig.kt")\
             .read_text(encoding="utf-8")
         self.assertIn('PRODUCTION_HOST: String = "' + deploy.REVIEWED_HOST + '"', config)
+        toml = (deploy.CONFIG).read_text(encoding="utf-8")
+        # Only the assignment matters; the comment above it names the relay on
+        # purpose, to say what this Worker must never be.
+        # Everything before the first table header is the Worker identity.
+        header = toml.split(chr(10) + "[", 1)[0]
+        top_level = [line.strip() for line in header.splitlines() if line.strip().startswith("name = ")]
+        self.assertEqual(['name = "' + deploy.WORKER_NAME + '"'], top_level)
+        self.assertNotIn("p2p-relay", top_level)
+        self.assertIn('class_name = "PushShard"', toml)
 
     def test_an_unrelated_branch_cannot_deploy(self):
-        values = runtime({"GITHUB_REF": "refs/heads/main"})
-        with self.assertRaises(deploy.preflight.PreflightError):
-            deploy.preflight.deployment_target(values)
+        spec = importlib.util.spec_from_file_location(
+            "push_preflight", HERE / "push-infra-preflight.py")
+        preflight = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(preflight)
+        with self.assertRaises(preflight.PreflightError):
+            preflight.deployment_target(runtime({"GITHUB_REF": "refs/heads/main"}))
 
 
 if __name__ == "__main__":

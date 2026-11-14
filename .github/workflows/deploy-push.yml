@@ -81,7 +81,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/ci/push-infra-preflight.py --check-protection
-      - name: Upload the service, its storage and its credentials
+      - name: Install the pinned Wrangler the deploy script drives
+        run: npm ci --prefix tools/worker/push --no-audit --no-fund
+      - name: Upload secrets and one version with both switches on
         env:
           GITHUB_ACTIONS: 'true'
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -91,19 +93,3 @@ jobs:
           APU_PUSH_FCM_SERVICE_ACCOUNT: ${{ secrets.APU_PUSH_FCM_SERVICE_ACCOUNT }}
           APU_PUSH_RATE_KEY: ${{ secrets.APU_PUSH_RATE_KEY }}
         run: python3 scripts/ci/push-deploy.py
-      - name: Ask the deployed service to describe itself
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json, sys, urllib.request
-          host = "apu-push.apuchat.workers.dev"
-          try:
-              with urllib.request.urlopen("https://" + host + "/health", timeout=30) as response:
-                  body = json.loads(response.read(4096).decode("utf-8"))
-                  print("HEALTH=OK" if response.status == 200 and body.get("ok") is True
-                        else "HEALTH=UNEXPECTED status=%d" % response.status)
-          except urllib.error.HTTPError as error:
-              print("HEALTH=UNEXPECTED status=%d" % error.code)
-          except Exception:
-              print("HEALTH=UNREACHABLE")
-          PY
