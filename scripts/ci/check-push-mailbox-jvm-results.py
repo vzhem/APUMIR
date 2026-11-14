@@ -200,9 +200,10 @@ EXPECTED = {
         "callbackFailureAndCancellationDoNotLeakOrTurnIntoSuccess",
     },
     PREFIX + "PushSignalPolicyTest": {
-        "onlyTheExactV1DataOnlyShapeMayAskForAMailboxCheck",
+        "onlyTheExactV1RouteSignalMayAskForAMailboxCheck",
         "providerRenderedNotificationIsRejectedEvenWithValidData",
         "unknownVersionIsIgnoredButExtraOrMissingFieldsAreRejected",
+        "aSignalWithoutAUsableRouteIsRejectedAndNeverTriggersAScan",
         "signalCarriesNoMessageTextSenderChatOrUnreadCount",
         "aProviderGapOnlyRequiresAFullCheck",
     },

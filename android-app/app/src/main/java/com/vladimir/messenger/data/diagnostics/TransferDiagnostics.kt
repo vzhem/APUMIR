@@ -401,7 +401,8 @@ object TransferDiagnostics {
             com.vladimir.messenger.data.schedule.ScheduledSendStore.cancelDiagnostics() +
             CrashTrace.report(context.applicationContext)
         snapshotOf(facts.copy(relayStorage = storage, runtimeHealth = health,
-            operationalHealth = OperationalDiagnostics.tracker.snapshot(), operationalDetails = details),
+            operationalHealth = OperationalDiagnostics.tracker.snapshot(), operationalDetails = details,
+            push = facts.push),
             journalSnapshot.first, logcat.lines, createdAtMs)
     }
 
@@ -457,6 +458,13 @@ object TransferDiagnostics {
         // Полное имя java.lang.Runtime: иначе песочница, где нет JDK, видит
         // «Runtime» как имя без объявления (ложное срабатывание проверки).
         val runtime = java.lang.Runtime.getRuntime()
+        // Состояние push читается без побочных эффектов: гейт и приём — из
+        // сборки и настроек SDK, остальное — счётчики, уже записанные runtime.
+        val pushSnapshot = runCatching {
+            val gate = com.vladimir.messenger.data.push.PushServiceLocator.enabled(context)
+            val receive = com.vladimir.messenger.data.push.PushServiceLocator.receiving(context)
+            com.vladimir.messenger.data.push.PushDiagnostics.snapshot(context, gate, receive)
+        }.getOrNull()
         return DiagnosticsFacts(
             createdAtMs = createdAtMs,
             sessionStartedAtMs = sessionStartedAtMs,

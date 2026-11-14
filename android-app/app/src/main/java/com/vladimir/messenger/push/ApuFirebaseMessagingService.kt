@@ -4,6 +4,7 @@ import android.util.Log
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.vladimir.messenger.data.push.PushServiceLocator
+import com.vladimir.messenger.data.push.PushSignalPolicy
 import com.vladimir.messenger.data.push.PushSignalSink
 import com.vladimir.messenger.worker.PushTokenWorker
 import com.vladimir.messenger.worker.RelayWakeWorker
@@ -54,6 +55,9 @@ class ApuFirebaseMessagingService : FirebaseMessagingService() {
         // The token itself is deliberately NOT passed to WorkManager input data
         // or logged; the worker asks the SDK again and compares fingerprints.
         PushTokenWorker.enqueue(applicationContext)
+        // A token that arrives proves the SDK is configured, not that this
+        // process will accept a message; both are needed for one signal.
+        scope.launch { PushServiceLocator.preparingReceive(applicationContext) }
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
@@ -65,6 +69,12 @@ class ApuFirebaseMessagingService : FirebaseMessagingService() {
         val data = message.data
         scope.launch {
             try {
+                // Reception must be confirmed before a callback is trusted to be
+                // the only one: an install that never enabled auto-init receives
+                // nothing at all, so a missing setting is a defect, not quiet.
+                if (!PushServiceLocator.preparingReceive(context)) {
+                    Log.w(TAG, "signal arrives without confirmed reception")
+                }
                 // The sink accepts only the exact data-only `{v:"1"}` shape and
                 // writes one durable generic marker; it never reads a message,
                 // shows a notification or acknowledges anything.
@@ -72,14 +82,27 @@ class ApuFirebaseMessagingService : FirebaseMessagingService() {
                 // separately; a payload that carried one is not data-only, so it
                 // is reported as such rather than assumed absent.
                 val notificationBlock = message.notification != null
-                when (PushSignalSink.of(PushServiceLocator.shared(context).dispatcher)
-                        .onMessage(data.ifEmpty { null }, hasNotificationBlock = notificationBlock)) {
+                val sink = PushSignalSink.of(PushServiceLocator.shared(context).dispatcher)
+                val result = if (PushSignalPolicy.route(data) != null) {
+                    // The service names the route it woke, so the intake can
+                    // check the local index instead of asking for a full scan.
+                    // A route hit stays a hint: the worker re-derives it.
+                    sink.onRoutedSignal(data, hasNotificationBlock = notificationBlock)
+                } else {
+                    sink.onMessage(data.ifEmpty { null }, hasNotificationBlock = notificationBlock)
+                }
+                com.vladimir.messenger.data.push.PushDiagnostics.noteSignal(
+                    accepted = result == PushSignalSink.Result.QUEUED ||
+                        result == PushSignalSink.Result.QUEUED_WITHOUT_SCHEDULER,
+                )
+                when (result) {
                     PushSignalSink.Result.QUEUED_WITHOUT_SCHEDULER,
                     PushSignalSink.Result.UNAVAILABLE -> Log.w(TAG, "signal stored but not scheduled")
                     PushSignalSink.Result.IGNORED, PushSignalSink.Result.QUEUED -> Unit
                 }
             } catch (_: Exception) {
                 // Never log the payload, the route or exception text.
+                com.vladimir.messenger.data.push.PushDiagnostics.noteError("signal handling")
                 Log.w(TAG, "signal handling failed")
             }
             // Independent of the mailbox pass: the message this wake is about
@@ -97,6 +120,7 @@ class ApuFirebaseMessagingService : FirebaseMessagingService() {
     override fun onDeletedMessages() {
         val context = applicationContext
         if (!PushServiceLocator.enabled(context)) return
+        com.vladimir.messenger.data.push.PushDiagnostics.noteSignal(accepted = true)
         val sink = PushSignalSink.of(PushServiceLocator.shared(context).dispatcher)
         scope.launch {
             try {

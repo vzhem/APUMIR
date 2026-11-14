@@ -37,7 +37,25 @@ class PushTokenWorker(
         if (!PushServiceLocator.enabled(app)) return@withContext Result.success()
         val registrar = PushServiceLocator.registrar(app) ?: return@withContext Result.success()
         try {
-            when (registrar.run()) {
+            val outcome = registrar.run()
+            com.vladimir.messenger.data.push.PushDiagnostics.noteRegistration(
+                when (outcome) {
+                    PushTokenRegistrar.Outcome.Disabled ->
+                        com.vladimir.messenger.data.push.PushDiagnostics.Phase.DISABLED
+                    PushTokenRegistrar.Outcome.NotConfigured ->
+                        com.vladimir.messenger.data.push.PushDiagnostics.Phase.NOT_CONFIGURED
+                    PushTokenRegistrar.Outcome.NoPlayServices ->
+                        com.vladimir.messenger.data.push.PushDiagnostics.Phase.NO_PLAY_SERVICES
+                    PushTokenRegistrar.Outcome.Registered,
+                    PushTokenRegistrar.Outcome.AlreadyCurrent ->
+                        com.vladimir.messenger.data.push.PushDiagnostics.Phase.REGISTERED
+                    PushTokenRegistrar.Outcome.Partial ->
+                        com.vladimir.messenger.data.push.PushDiagnostics.Phase.PARTIAL
+                    PushTokenRegistrar.Outcome.Failed ->
+                        com.vladimir.messenger.data.push.PushDiagnostics.Phase.FAILED
+                },
+            )
+            when (outcome) {
                 PushTokenRegistrar.Outcome.Disabled,
                 PushTokenRegistrar.Outcome.NotConfigured,
                 PushTokenRegistrar.Outcome.NoPlayServices -> Result.success()
@@ -54,6 +72,7 @@ class PushTokenWorker(
             }
         } catch (error: Exception) {
             if (error is kotlinx.coroutines.CancellationException) throw error
+            com.vladimir.messenger.data.push.PushDiagnostics.noteError("token registration")
             Log.w(TAG, "token registration failed")
             Result.retry()
         }

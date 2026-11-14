@@ -93,6 +93,9 @@ internal class PushEndpoint private constructor(private val authority: String) {
         return URI("https://$authority$path").toURL()
     }
 
+    /** Host only, for the unauthenticated health probe; never a full URL. */
+    internal fun host(): String = authority
+
     override fun toString(): String = "PushEndpoint(redacted)"
 
     companion object {

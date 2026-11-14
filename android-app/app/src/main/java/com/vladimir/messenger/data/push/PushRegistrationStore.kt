@@ -133,6 +133,27 @@ internal class PushRegistrationStore(
      * or current trust; bind the result to the live profile/pin and re-derive
      * the route before scheduling work or displaying any notification.
      */
+    /**
+     * Number of routes currently in the index, for diagnostics only.
+     *
+     * A count, never a route and never a participant id: the report must show
+     * whether this device is addressable at all without exposing who with. Zero
+     * is the interesting value - it means a wake cannot reach this device
+     * whatever the provider does.
+     */
+    fun indexedRoutes(): Int? = synchronized(LOCK) {
+        try {
+            val db = db()
+            db.rawQuery("SELECT count(*) FROM registrations", null).use { cursor ->
+                if (!cursor.moveToFirst()) null else cursor.getInt(0)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun findRoute(route: String): RouteResult = synchronized(LOCK) {
         if (!ROUTE.matches(route)) return@synchronized RouteResult.Unavailable
         try {

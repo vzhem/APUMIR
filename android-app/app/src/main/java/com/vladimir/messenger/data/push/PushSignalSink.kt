@@ -13,7 +13,13 @@ package com.vladimir.messenger.data.push
  * the encrypted registration index; the worker re-derives each route from the
  * live pin, identity and secret before reading anything.
  *
- * Production wiring is [of]; the two callbacks are seams so this mapping can be
+ * A signal that names a route takes the routed branch: the intake checks the
+ * local index and queues that route, which is the only shape the Worker sends.
+ * A signal without a usable route keeps the older, more conservative behaviour
+ * (a generic bounded recovery marker), so nothing regresses if the service
+ * shape changes again.
+ *
+ * Production wiring is [of]; the callbacks are seams so this mapping can be
  * tested without WorkManager or journals.
  *
  * A rejection or an unsupported version writes nothing at all. [Result]
@@ -24,6 +30,8 @@ internal class PushSignalSink(
     private val onRecovery: (Long) -> PushWakeIntake.Result,
     private val onResume: (Long) -> PushWakeIntake.Result,
     private val nowMs: () -> Long = System::currentTimeMillis,
+    /** Routed intake; defaults to the conservative marker for older callers. */
+    private val onRoute: (String, Long) -> PushWakeIntake.Result = { _, now -> onRecovery(now) },
 ) {
     enum class Result { IGNORED, QUEUED, QUEUED_WITHOUT_SCHEDULER, UNAVAILABLE }
 
@@ -45,6 +53,25 @@ internal class PushSignalSink(
     /** Retry a scheduler registration that failed after a process restart. */
     fun resume(): Result = map(onResume(nowMs()))
 
+    /**
+     * A validated `{v:"1", route}` signal. The route is used only as a lookup
+     * key: a hit queues that route, a miss is dropped, an unreadable index falls
+     * back to the generic marker. It is never treated as an identifier of a
+     * person, a chat or a message.
+     */
+    fun onRoutedSignal(data: Map<String, String>, hasNotificationBlock: Boolean): Result {
+        val now = nowMs()
+        return when (PushSignalPolicy.inspect(data, hasNotificationBlock)) {
+            PushSignalPolicy.Decision.LookInMailbox -> {
+                val route = PushSignalPolicy.route(data)
+                if (route == null) map(onRecovery(now)) else map(onRoute(route, now))
+            }
+            PushSignalPolicy.Decision.CheckMailboxAfterGap -> deleted(now)
+            PushSignalPolicy.Decision.Ignore,
+            PushSignalPolicy.Decision.Reject -> Result.IGNORED
+        }
+    }
+
     private fun deleted(now: Long): Result = map(onRecovery(now))
 
     companion object {
@@ -52,6 +79,8 @@ internal class PushSignalSink(
         fun of(dispatcher: PushWakeDispatcher): PushSignalSink = PushSignalSink(
             onRecovery = { now -> dispatcher.onDeletedMessages(now) },
             onResume = { now -> dispatcher.resume(now) },
+            nowMs = System::currentTimeMillis,
+            onRoute = { route, now -> dispatcher.onData(mapOf("v" to "1", "route" to route), now) },
         )
     }
 

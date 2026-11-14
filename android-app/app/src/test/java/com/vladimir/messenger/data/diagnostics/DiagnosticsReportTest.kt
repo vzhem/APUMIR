@@ -800,7 +800,7 @@ class DiagnosticsReportTest {
         )
 
         listOf(
-            "apu-diag/5",
+            "apu-diag/6",
             "[сводка]",
             "[окружение]",
             "[сеть]",

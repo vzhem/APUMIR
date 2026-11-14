@@ -95,7 +95,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
 
     def test_report_keeps_the_privacy_promise(self):
         report = source(DIAG / "DiagnosticsReport.kt")
-        self.assertIn('const val SCHEMA = "apu-diag/5"', report)
+        self.assertIn('const val SCHEMA = "apu-diag/6"', report)
         for part in (
             "Приватность", "текст переписки", "имена файлов", "ключи", "contact ID", "UUID сообщений",
         ):
@@ -113,9 +113,10 @@ class DiagnosticsContractsTest(unittest.TestCase):
 
     def test_report_has_every_section_the_owner_reads(self):
         report = (source(DIAG / "DiagnosticsReport.kt") + source(DIAG / "UpdateDiagnosticsReport.kt")
-                  + source(DIAG / "CoreDiagnosticStage.kt"))
+                  + source(DIAG / "CoreDiagnosticStage.kt") + source(DIAG / "PushDiagnosticsReport.kt"))
         for section in (
             "[сводка]",
+            "[push]",
             "[окружение]",
             "[сеть]",
             "[обновления]",
@@ -141,7 +142,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
         core = (ROOT / "rust-core/src/engine/core.rs").read_text()
         assistance = (ROOT / "rust-core/src/network/peer_assistance.rs").read_text()
         race = (ROOT / "rust-core/src/network/helper_delivery.rs").read_text()
-        self.assertIn('const val SCHEMA = "apu-diag/5"', report)
+        self.assertIn('const val SCHEMA = "apu-diag/6"', report)
         self.assertIn("HelperRouteDiagnosticsParser.parse(all)", collector)
         self.assertIn('"ONLINE_HELPER"', collector)
         for marker in (

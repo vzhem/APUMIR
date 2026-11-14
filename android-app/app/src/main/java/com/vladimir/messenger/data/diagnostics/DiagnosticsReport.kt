@@ -217,6 +217,7 @@ data class DiagnosticsFacts(
     val runtimeHealth: RuntimeHealthSnapshot = RuntimeHealthSnapshot(),
     val operationalHealth: OperationalSnapshot = OperationalSnapshot(),
     val operationalDetails: String = "",
+    val push: com.vladimir.messenger.data.push.PushDiagnostics.Snapshot? = null,
     val networkValidated: Boolean? = null,
     val networkCaptivePortal: Boolean? = null,
     val privateDnsActive: Boolean? = null,
@@ -662,7 +663,7 @@ object DiagnosticsPrivacy {
 /** Сборка текста отчёта и строк сводки. Ничего не читает сама — только форматирует. */
 object DiagnosticsReport {
     /** Версия формата отчёта: по ней видно, что файл разобран теми же правилами. */
-    const val SCHEMA = "apu-diag/5"
+    const val SCHEMA = "apu-diag/6"
 
     private const val MAX_JOURNAL_LINES = 240
 
@@ -695,6 +696,7 @@ object DiagnosticsReport {
         appendMqtt(facts)
         appendHelperRoutes(facts)
         appendMessages(facts)
+        PushDiagnosticsReport.appendPush(this, facts)
         append(facts.operationalHealth.render())
         append(facts.operationalDetails)
         appendLine()
@@ -1387,9 +1389,7 @@ object DiagnosticsReport {
         }
     }
 
-    // ------------------------------------------------------------------
-    // Служебное форматирование
-    // ------------------------------------------------------------------
+    // Служебное форматирование.
     private fun marker(level: DiagnosticsLevel): String = when (level) {
         DiagnosticsLevel.OK -> "✔"
         DiagnosticsLevel.INFO -> "•"
@@ -1429,7 +1429,6 @@ object DiagnosticsReport {
         }
     }
 
-    /** «8.4 МиБ», «512 КиБ», «1.20 ГиБ», «0 Б». */
     fun formatBytes(bytes: Long): String {
         val safe = bytes.coerceAtLeast(0L)
         return when {

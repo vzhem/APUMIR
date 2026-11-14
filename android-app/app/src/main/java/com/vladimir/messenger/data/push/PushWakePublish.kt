@@ -46,6 +46,22 @@ internal object PushWakePublish {
         if (peerId.isBlank()) return Outcome.Skipped
         val app = context.applicationContext
         if (!PushServiceLocator.enabled(app)) return Outcome.Skipped
+        PushDiagnostics.install(app)
+        val outcome = attempt(app, peerId)
+        PushDiagnostics.noteWake(
+            when (outcome) {
+                Outcome.Accepted -> PushDiagnostics.Wake.ACCEPTED
+                Outcome.WithinBudget -> PushDiagnostics.Wake.WITHIN_BUDGET
+                Outcome.NotRegistered -> PushDiagnostics.Wake.NOT_REGISTERED
+                Outcome.Unavailable -> PushDiagnostics.Wake.UNAVAILABLE
+                Outcome.Skipped -> PushDiagnostics.Wake.SKIPPED
+            },
+        )
+        return outcome
+    }
+
+    /** The bounded attempt itself; [wake] only measures and records it. */
+    private suspend fun attempt(app: android.content.Context, peerId: String): Outcome {
         return try {
             val endpoint = PushServiceLocator.endpoint(app) ?: return Outcome.Skipped
             val shared = PushServiceLocator.shared(app)

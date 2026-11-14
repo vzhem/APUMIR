@@ -19,9 +19,10 @@ import com.vladimir.messenger.BuildConfig
  * data or a stack trace never reaches a log.
  *
  * The SDK is never started unless a caller has already passed
- * [PushRuntimeConfig.gateOpen]; with the gate closed (every shipped build) this
- * object is not used at all and the app remains a build with
- * `firebase_messaging_auto_init_enabled=false`.
+ * [PushRuntimeConfig.gateOpen]; with the gate closed this object is not used at
+ * all and the app remains a build with
+ * `firebase_messaging_auto_init_enabled=false`. With the gate open [enableReceiving]
+ * is the single call that lets a provider message reach the process at all.
  */
 internal object PushFirebaseSignals {
     sealed interface Outcome {
@@ -78,6 +79,51 @@ internal object PushFirebaseSignals {
             Log.w(TAG, "token request failed")
             Outcome.Failed
         }
+    }
+
+    /**
+     * Turns message *reception* on for this process.
+     *
+     * The manifest keeps `firebase_messaging_auto_init_enabled=false`, so no
+     * build creates a token or accepts a provider message until this call runs.
+     * That invariant is what kept every shipped build inert. It also meant a
+     * build with the gate open could request a token and send wakes but never
+     * receive a signal: Google only delivers to an installation that has
+     * registered a messaging receiver, which is exactly what auto-init does.
+     *
+     * Called only after [enabled] has returned true, so a closed gate keeps the
+     * app's Firebase state byte-for-byte identical to the previous release.
+     * Returns true only when the SDK confirmed reception is on; a false value is
+     * reported to diagnostics and retried on the next start, never assumed.
+     */
+    suspend fun enableReceiving(context: Context): Boolean {
+        val app = context.applicationContext
+        return try {
+            if (!enabled(app)) return false
+            if (GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(app) !=
+                ConnectionResult.SUCCESS
+            ) {
+                return false
+            }
+            if (FirebaseApp.getApps(app).none { it.name == FirebaseApp.DEFAULT_APP_NAME }) {
+                return false
+            }
+            val messaging = FirebaseMessaging.getInstance()
+            if (!messaging.isAutoInitEnabled) messaging.setAutoInitEnabled(true)
+            messaging.isAutoInitEnabled
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            Log.w(TAG, "reception enable failed")
+            false
+        }
+    }
+
+    /** Local fact only: reception is on, so a provider message can arrive. */
+    fun receivingEnabled(): Boolean = try {
+        FirebaseMessaging.getInstance().isAutoInitEnabled
+    } catch (_: Exception) {
+        false
     }
 
     /** Ask the SDK to rotate/drop the registration; no mailbox call is made here. */

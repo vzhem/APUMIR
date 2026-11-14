@@ -109,6 +109,24 @@ internal class FcmTokenJournal(
         }
     }
 
+    /**
+     * Read-only fact: a token fingerprint is on record.
+     *
+     * Used by diagnostics only. It says nothing about whether the token is still
+     * valid at Google, whether any route is registered, or whether a signal can
+     * be delivered - a stored token is exactly the state a build with reception
+     * turned off also has.
+     */
+    fun present(): Boolean = synchronized(LOCK) {
+        try {
+            readFingerprint(db()) != null
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun close() = synchronized(LOCK) { helper?.close(); helper = null }
 
     private fun readFingerprint(db: SQLiteDatabase): String? =

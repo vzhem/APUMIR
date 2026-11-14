@@ -47,6 +47,10 @@ internal object PushServiceLocator {
     }
 
     private val LOCK = Any()
+
+    /** Process-lifetime scope for one-shot startup wiring; nothing is retried here. */
+    private val startupScope =
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
     private var sharedInstance: Shared? = null
     private var receiverInstance: PushMailboxReceiver? = null
     private var fullScanInstance: PushFullScan? = null
@@ -74,6 +78,67 @@ internal object PushServiceLocator {
     fun enabled(context: Context): Boolean = PushFirebaseSignals.enabled(context)
 
     fun endpoint(context: Context): PushEndpoint? = PushFirebaseSignals.endpoint(context)
+
+    /**
+     * Gate check for the receive path, plus the one action that makes reception
+     * possible at all.
+     *
+     * The manifest keeps Firebase Messaging auto-init off, so an installation
+     * that never calls this is invisible to the provider and every inbound
+     * callback is dead code - a state that produced a build which could register
+     * a route and send wakes but never hear an answer. Only a build whose gate is
+     * already open reaches [PushFirebaseSignals.enableReceiving], so a closed
+     * build still never touches Google.
+     *
+     * Safe to call on every start and from every callback: the SDK call is
+     * idempotent and the result is a local fact, not a delivery claim.
+     */
+    suspend fun preparingReceive(context: Context): Boolean {
+        if (!enabled(context)) return false
+        PushDiagnostics.install(context)
+        val on = PushFirebaseSignals.enableReceiving(context)
+        PushDiagnostics.noteReception(on)
+        return on
+    }
+
+    /** Reception state without side effects, for the diagnostics section. */
+    fun receiving(context: Context): Boolean = enabled(context) && PushFirebaseSignals.receivingEnabled()
+
+    /**
+     * One unauthenticated GET of the service's public health route.
+     *
+     * Deliberately outside [PushHttpClient]: no credential, no body, no route and
+     * no token go over the wire, so this can never be mistaken for a wake. Its
+     * only purpose is to separate "the phone cannot reach Cloudflare" from "the
+     * phone reaches the service and still receives nothing", which is the
+     * difference between a network fault and a delivery fault on the phone.
+     */
+    private fun healthReachable(endpoint: PushEndpoint): Boolean = try {
+        val url = java.net.URI("https://${endpoint.host()}/health").toURL()
+        val connection = (url.openConnection() as java.net.HttpURLConnection).apply {
+            connectTimeout = 5_000
+            readTimeout = 5_000
+            requestMethod = "GET"
+            // The service answers only a normal client user-agent; a default
+            // Java one is refused, which would look like an outage.
+            setRequestProperty("user-agent", "apu-android-diagnostics/1")
+            instanceFollowRedirects = false
+        }
+        try {
+            connection.responseCode == 200
+        } finally {
+            connection.disconnect()
+        }
+    } catch (_: Exception) {
+        false
+    }
+
+    /**
+     * The already-built runtime, or null. Diagnostics must never *construct* the
+     * push runtime just to read a counter: building it opens journals and a
+     * crypto object, and a report may be taken in a build where push is off.
+     */
+    fun sharedOrNull(context: Context): Shared? = synchronized(LOCK) { sharedInstance }
 
     fun shared(context: Context): Shared = synchronized(LOCK) {
         val app = context.applicationContext
@@ -344,6 +409,31 @@ internal object PushServiceLocator {
         val app = context.applicationContext
         if (!enabled(app)) return
         try {
+            // Reception first: a token without a receiver is a route that can
+            // never be reached. Not awaited here - startup must not block on
+            // Google - and the result is only a local fact for diagnostics.
+            PushDiagnostics.install(app)
+            startupScope.launch {
+                try {
+                    val on = preparingReceive(app)
+                    PushDiagnostics.noteReception(on)
+                    // One explicit token request per process start. Auto-init is
+                    // off in the manifest, so without this a fresh install has no
+                    // token, no route and nothing for the service to address -
+                    // the test report showed exactly that silence.
+                    if (on) {
+                        com.vladimir.messenger.worker.PushTokenWorker.enqueue(app)
+                        // Local-only reachability probe: the endpoint is a fixed
+                        // build fact and /health needs no credential. A failed
+                        // probe is evidence about the network, never about push.
+                        endpoint(app)?.let { approved ->
+                            PushDiagnostics.noteEndpoint(healthReachable(approved))
+                        }
+                    }
+                } catch (_: Exception) {
+                    diag("Push receive enable failed")
+                }
+            }
             com.vladimir.messenger.worker.PushWakeRecoveryWorker.install(app)
             com.vladimir.messenger.worker.PushTokenWorker.enqueue(app)
             // A signal may have arrived while the process was dead: the durable
