@@ -21,11 +21,12 @@ spec.loader.exec_module(deploy)
 ACCOUNT = "a" * 32
 TOKEN = "cf-token-value-for-tests-only"
 RATE_KEY = "b" * 64
-FCM_JSON = json.dumps({
+SERVICE_ACCOUNT = {
     "project_id": "apu-test-project",
     "client_email": "sender@apu-test-project.iam.gserviceaccount.com",
     "private_key": "-----BEGIN PRIVATE KEY-----\nMIIBOgIBAAJBAK\n-----END PRIVATE KEY-----\n",
-})
+}
+FCM_JSON = json.dumps(SERVICE_ACCOUNT)
 
 
 class FakeWrangler:
@@ -89,26 +90,37 @@ class DeploymentTests(unittest.TestCase):
         code, text, fake = self.run_deploy()
         self.assertEqual(0, code, text)
         argv = [" ".join(call["argv"]) for call in fake.calls]
-        self.assertEqual(4, len(argv), argv)
+        self.assertEqual(5, len(argv), argv)
         self.assertEqual(
-            ["secret put FCM_CLIENT_EMAIL", "secret put FCM_PRIVATE_KEY", "secret put PUSH_RATE_KEY"],
-            [item.split(" --config")[0] for item in argv[:3]],
+            ["secret put FCM_PROJECT_ID", "secret put FCM_CLIENT_EMAIL",
+             "secret put FCM_PRIVATE_KEY", "secret put PUSH_RATE_KEY"],
+            [item.split(" --name")[0] for item in argv[:4]],
         )
-        self.assertTrue(argv[3].startswith("deploy"), argv[3])
-        self.assertIn("--var PUSH_ENABLED:true", argv[3])
-        self.assertIn("--var MAILBOX_ENABLED:true", argv[3])
-        self.assertIn("--name apu-push", argv[3])
+        self.assertTrue(argv[4].startswith("deploy"), argv[4])
+        self.assertIn("--var PUSH_ENABLED:true", argv[4])
+        self.assertIn("--var MAILBOX_ENABLED:true", argv[4])
+        self.assertIn("--name apu-push", argv[4])
+
+    def test_the_project_id_is_uploaded_or_the_service_stays_disabled(self):
+        # fcmConfigured() needs FCM_PROJECT_ID; without it the service deploys
+        # with both switches on and still refuses every wake. The value must come
+        # from the service account, not from a second copy in repository config.
+        _, _, fake = self.run_deploy()
+        puts = {call["argv"][2]: call for call in fake.calls if call["argv"][0] == "secret"}
+        self.assertIn("FCM_PROJECT_ID", puts)
+        self.assertEqual(SERVICE_ACCOUNT["project_id"] + chr(10), puts["FCM_PROJECT_ID"]["stdin"])
 
     def test_secret_values_travel_on_stdin_and_never_as_arguments(self):
         _, _, fake = self.run_deploy(values=runtime({"APU_PUSH_RATE_KEY": RATE_KEY}))
         puts = [call for call in fake.calls if call["argv"][0] == "secret"]
-        self.assertEqual(3, len(puts))
+        self.assertEqual(len(deploy.SECRET_NAMES), len(puts))
         # A value in argv would be visible in process listings and logs.
         for call in puts:
             self.assertNotIn("BEGIN PRIVATE KEY", " ".join(call["argv"]))
             self.assertNotIn(RATE_KEY, " ".join(call["argv"]))
             self.assertTrue(call["stdin"])
-        self.assertEqual(RATE_KEY + "\n", puts[2]["stdin"])
+        by_name = {call["argv"][2]: call for call in puts}
+        self.assertEqual(RATE_KEY + chr(10), by_name["PUSH_RATE_KEY"]["stdin"])
 
     def test_the_child_process_gets_only_the_three_variables_it_needs(self):
         _, _, fake = self.run_deploy()
@@ -128,7 +140,7 @@ class DeploymentTests(unittest.TestCase):
             joined = [" ".join(call["argv"]) for call in fake.calls]
             self.assertNotIn("delete", " ".join(joined))
             # Failures are not retried: the run stops at the failing command.
-            self.assertLessEqual(len(joined), 4 if marker == "deploy" else 3)
+            self.assertLessEqual(len(joined), 5 if marker == "deploy" else 4)
 
     def test_a_service_that_does_not_confirm_health_is_a_failure(self):
         code, text, _ = self.run_deploy(health_result=(503, {"ok": False}))
@@ -141,8 +153,11 @@ class DeploymentTests(unittest.TestCase):
     def test_a_missing_rate_key_is_generated_once_and_never_printed(self):
         code, text, fake = self.run_deploy()
         self.assertEqual(0, code, text)
-        uploaded = [call for call in fake.calls if call["argv"][:2] == ["secret", "put"]][2]["stdin"]
+        puts = {call["argv"][2]: call for call in fake.calls if call["argv"][:2] == ["secret", "put"]}
+        uploaded = puts["PUSH_RATE_KEY"]["stdin"]
         self.assertRegex(uploaded.strip(), r"^[0-9a-f]{64}$")
+        # One key for the deployment, not a new one per secret.
+        self.assertEqual(uploaded, puts["PUSH_RATE_KEY"]["stdin"])
         self.assertNotIn(uploaded.strip(), text)
         self.assertIn("Generated a random PUSH_RATE_KEY", text)
 

@@ -14,7 +14,8 @@ explicit and reviewable.
 
 Order matters and is deliberate:
   1. secrets are uploaded first, so the version that turns the switches on can
-     never start without the credentials it needs;
+     never start without the credentials it needs (project id included - the
+     service reports itself disabled without it);
   2. one deploy of `wrangler.push.toml` with both switches overridden to "true";
   3. one public health request, which is the only honest signal available here.
 
@@ -36,7 +37,10 @@ CONFIG = PROJECT / "wrangler.push.toml"
 WRANGLER = PROJECT / "node_modules" / ".bin" / "wrangler"
 WORKER_NAME = "apu-push"
 REVIEWED_HOST = WORKER_NAME + ".apuchat.workers.dev"
-SECRET_NAMES = ("FCM_CLIENT_EMAIL", "FCM_PRIVATE_KEY", "PUSH_RATE_KEY")
+# fcmConfigured() refuses to call the provider unless all three of these bind,
+# so the project id is not optional: without it the service would be up and
+# silently disabled.
+SECRET_NAMES = ("FCM_PROJECT_ID", "FCM_CLIENT_EMAIL", "FCM_PRIVATE_KEY", "PUSH_RATE_KEY")
 
 
 class DeployError(Exception):
@@ -99,13 +103,17 @@ def run_wrangler(args, env, stdin_text=None):
 def upload_secrets(env, fcm, rate_key):
     """PUT each secret through Wrangler's own secret path, one at a time."""
     values = {
+        "FCM_PROJECT_ID": fcm["project"],
         "FCM_CLIENT_EMAIL": fcm["email"],
         "FCM_PRIVATE_KEY": fcm["key"],
         "PUSH_RATE_KEY": rate_key,
     }
     for name in SECRET_NAMES:
         code, _ = run_wrangler(
-            ["secret", "put", name, "--config", str(CONFIG.relative_to(PROJECT))],
+            # --name is explicit: a command must never depend on which directory
+            # (or which config default) it happens to run from.
+            ["secret", "put", name, "--name", WORKER_NAME,
+             "--config", str(CONFIG.relative_to(PROJECT))],
             env, stdin_text=values[name] + "\n",
         )
         if code != 0:
@@ -193,18 +201,20 @@ def main(values, environ=None):
             "WRANGLER_SEND_METRICS": "false",
         }
         upload_secrets(env, fcm, key)
-        print("Uploaded three encrypted secrets; values were not printed.")
+        print("Uploaded " + str(len(SECRET_NAMES)) + " encrypted secrets; values were not printed.")
         deploy(env)
         print("Deployed " + WORKER_NAME + " with both switches on.")
         if generated:
             print("Generated a random PUSH_RATE_KEY for this deployment (not stored by this program).")
         status, body = health()
-        if status == 200 and isinstance(body, dict) and body.get("ok") is True:
-            print("HEALTH=OK")
-        else:
+        healthy = status == 200 and isinstance(body, dict) and body.get("ok") is True
+        if not healthy:
             print("HEALTH=UNEXPECTED status=" + str(status))
-            print("The service did not confirm it is configured; inspect before enabling clients.")
+            # Both the requested switches and the Worker's own idea of "enabled"
+            # are what /health reports, so a switch is the first thing to check.
+            print("A switch or a credential binding is not in effect; the service reports itself off.")
             return 1
+        print("HEALTH=OK")
         print("This is not delivery: no device registered and no provider message was sent.")
         return 0
     except DeployError as error:
