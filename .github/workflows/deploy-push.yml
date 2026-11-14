@@ -92,4 +92,13 @@ jobs:
           APU_PUSH_CLOUDFLARE_DEPLOY_TOKEN: ${{ secrets.APU_PUSH_CLOUDFLARE_DEPLOY_TOKEN }}
           APU_PUSH_FCM_SERVICE_ACCOUNT: ${{ secrets.APU_PUSH_FCM_SERVICE_ACCOUNT }}
           APU_PUSH_RATE_KEY: ${{ secrets.APU_PUSH_RATE_KEY }}
-        run: python3 scripts/ci/push-deploy.py
+        run: |
+          set -uo pipefail
+          python3 scripts/ci/push-deploy.py
+          status=$?
+          # The step's own annotation, independent of anything Python printed:
+          # the run page keeps it even where the log cannot be downloaded.
+          if [ "$status" -ne 0 ]; then
+            echo "::error title=Push deployment::The client exited with code $status."
+          fi
+          exit "$status"

@@ -10,6 +10,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import unittest
 from pathlib import Path
 
@@ -248,6 +249,58 @@ class DeploymentTests(unittest.TestCase):
         self.assertNotIn("0123456789abcdef0123456789abcdef", text)
         self.assertNotIn("Authentication error", text)
         self.assertIn("credentials_refused", text)
+
+    def test_a_broken_setup_is_reported_not_silent(self):
+        # The first approved run failed with no annotation from this program at
+        # all, so the run page said only "exit code 1". Whatever breaks, the run
+        # must say that it broke and where.
+        broken = [
+            lambda: deploy.service_account("not json"),
+            lambda: deploy.rate_key({"APU_PUSH_RATE_KEY": "no"}),
+        ]
+        for make in broken:
+            with self.assertRaises(deploy.DeployError):
+                make()
+
+        # A failure inside the first step still produces an annotation, and the
+        # message names the step rather than staying silent.
+        def run(args, env, stdin_text=None):
+            raise RuntimeError("simulated bug")
+
+        out = io.StringIO()
+        saved_run, saved_health = deploy.run_wrangler, deploy.health
+        deploy.run_wrangler, deploy.health = run, lambda: (200, {"ok": True})
+        try:
+            with contextlib.redirect_stdout(out):
+                code = deploy.main(runtime())
+        finally:
+            deploy.run_wrangler, deploy.health = saved_run, saved_health
+        self.assertEqual(1, code)
+        self.assertIn("::error", out.getvalue())
+        self.assertIn("RuntimeError", out.getvalue())
+        # The exception's own text can carry provider bodies, so it stays out.
+        self.assertNotIn("simulated bug", out.getvalue())
+
+    def test_progress_reaches_the_run_summary(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            path = folder + "/summary.md"
+            saved = os.environ.get("GITHUB_STEP_SUMMARY")
+            os.environ["GITHUB_STEP_SUMMARY"] = path
+            try:
+                code, text, _ = self.run_deploy()
+            finally:
+                if saved is None:
+                    os.environ.pop("GITHUB_STEP_SUMMARY", None)
+                else:
+                    os.environ["GITHUB_STEP_SUMMARY"] = saved
+            self.assertEqual(0, code, text)
+            summary = open(path, encoding="utf-8").read()
+        # Every step is named, so a run that stops halfway still shows where.
+        for expected in ("started", "Step 1 of 6", "Steps 2-5 of 6", "Step 6 of 6"):
+            self.assertIn(expected, summary)
+        self.assertNotIn(RATE_KEY, summary)
+        self.assertNotIn(TOKEN, summary)
 
     def test_no_output_contains_a_token_key_or_account(self):
         code, text, _ = self.run_deploy()

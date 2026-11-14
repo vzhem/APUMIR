@@ -52,6 +52,23 @@ REVIEWED_HOST = WORKER_NAME + ".apuchat.workers.dev"
 SECRET_NAMES = ("FCM_PROJECT_ID", "FCM_CLIENT_EMAIL", "FCM_PRIVATE_KEY", "PUSH_RATE_KEY")
 
 
+def trace(line):
+    """Append one fixed line to the run summary, if the runner asked for one.
+
+    The summary is rendered on the run page, so it is the one channel that shows
+    progress even when the job log cannot be retrieved. Only fixed text is
+    written; no value, path or provider wording ever passes through here.
+    """
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as summary:
+            summary.write("- " + line + chr(10))
+    except OSError:
+        pass
+
+
 class DeployError(Exception):
     """Fixed code only; never provider text, tokens or account identifiers."""
 
@@ -245,6 +262,8 @@ def main(values, environ=None):
         "push_preflight", Path(__file__).with_name("push-infra-preflight.py"))
     preflight = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(preflight)
+    trace("Deployment client started.")
+    print("Starting the deployment client.")
     try:
         account, token = preflight.deployment_target(values)
         fcm = service_account(values.get("APU_PUSH_FCM_SERVICE_ACCOUNT", ""))
@@ -261,20 +280,27 @@ def main(values, environ=None):
         }
         # The Worker must exist before a secret can be attached to it, and it
         # must exist in the off position before it holds any credential.
+        trace("Step 1 of 6: deploying with both switches off.")
         try:
             deploy(env, enabled=False)
         except DeployError as error:
             # A first deploy onto an existing Worker can legitimately conflict
             # with what is already there. Say so with an annotation instead of
             # leaving only a bare "exit code 1".
+            trace("Step 1 of 6 was refused.")
             print("::warning title=Push deployment::The first, switched-off deploy was refused"
                   + ((" [" + error.detail + "] " + MESSAGES.get(error.detail, "")) if error.detail else "")
                   + " (failed at step 1 of 6) Nothing was uploaded and no secret was attached.")
             raise
         print("Created or refreshed " + WORKER_NAME + " with both switches off.")
+        trace("Step 1 of 6 succeeded.")
+        trace("Steps 2-5 of 6: uploading four encrypted secrets.")
         upload_secrets(env, fcm, key)
+        trace("Steps 2-5 of 6 succeeded.")
         print("Uploaded " + str(len(SECRET_NAMES)) + " encrypted secrets; values were not printed.")
+        trace("Step 6 of 6: deploying with both switches on.")
         deploy(env, enabled=True)
+        trace("Step 6 of 6 succeeded.")
         print("Deployed " + WORKER_NAME + " with both switches on.")
         if generated:
             print("Generated a random PUSH_RATE_KEY for this deployment (not stored by this program).")
@@ -296,15 +322,30 @@ def main(values, environ=None):
         if error.stage:
             message += " (failed at step " + str(error.stage) + " of 6)"
         print("::error title=Push deployment::" + message.rstrip())
+        trace("Failed: " + error.code + ((" / " + error.detail) if error.detail else "")
+              + ((" at step " + str(error.stage)) if error.stage else ""))
         return 1
     except preflight.PreflightError as error:
         print("::error title=Push deployment::" + preflight.MESSAGES.get(error.code, preflight.MESSAGES["unavailable"]))
+        trace("Failed before any upload: " + str(error.code))
         return 1
-    except Exception:
+    except Exception as error:
         # Never print exception text: it can contain secrets and provider bodies.
-        print("::error title=Push deployment::" + MESSAGES["wrangler"])
+        # The class name is safe, and it is the difference between "Wrangler said
+        # no" and "this program has a bug".
+        print("::error title=Push deployment::" + MESSAGES["wrangler"] + " (" + type(error).__name__ + ")")
+        trace("Failed unexpectedly: " + type(error).__name__)
         return 1
 
 
 if __name__ == "__main__":
-    sys.exit(main(dict(os.environ)))
+    # Anything that escapes main() must still be reported: a bare non-zero exit
+    # leaves the run page with "exit code 1" and no reason at all.
+    try:
+        status = main(dict(os.environ))
+    except BaseException as error:  # noqa: BLE001 - the point is not to escape
+        print("::error title=Push deployment::The deployment client stopped unexpectedly ("
+              + type(error).__name__ + ").")
+        trace("Stopped unexpectedly: " + type(error).__name__)
+        status = 1
+    sys.exit(status)
