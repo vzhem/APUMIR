@@ -127,10 +127,10 @@ internal class PushTargets(
         }
     }
 
-    /** One pinned peer with no indexed route yet: a seed, never authority. */
-    internal fun seed(peerId: String, localId: String): Peer = Peer(localId, peerId, 0L)
-
     companion object {
+        /** One pinned peer with no indexed route yet: a seed, never authority. */
+        internal fun seed(peerId: String, localId: String): Peer = Peer(localId, peerId, 0L)
+
         /** Must match the journal's own page size limit. */
         internal const val PAGE_SIZE = 16
         internal const val DEFAULT_PAGES = 8

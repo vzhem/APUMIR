@@ -403,9 +403,20 @@ object TransferDiagnostics {
             CrashTrace.report(context.applicationContext)
         snapshotOf(facts.copy(relayStorage = storage, runtimeHealth = health,
             operationalHealth = OperationalDiagnostics.tracker.snapshot(), operationalDetails = details,
-            push = facts.push ?: pushSnapshot),
+            push = facts.push ?: pushSnapshot(context.applicationContext)),
             journalSnapshot.first, logcat.lines, createdAtMs)
     }
+
+    /**
+     * Read-only push state. Never constructs the push runtime, so a report taken
+     * in a build with the gate closed costs nothing and cannot create journals.
+     */
+    private fun pushSnapshot(context: Context): PushSnapshot? = runCatching {
+        val gate = com.vladimir.messenger.data.push.PushServiceLocator.enabled(context)
+        val receive = com.vladimir.messenger.data.push.PushServiceLocator.receiving(context)
+        val endpoint = com.vladimir.messenger.data.push.PushServiceLocator.endpoint(context) != null
+        com.vladimir.messenger.data.push.PushDiagnostics.snapshot(context, gate, receive, endpoint)
+    }.getOrNull()
 
     private fun snapshotOf(
         facts: DiagnosticsFacts,
@@ -461,12 +472,7 @@ object TransferDiagnostics {
         val runtime = java.lang.Runtime.getRuntime()
         // Состояние push читается без побочных эффектов: гейт и приём — из
         // сборки и настроек SDK, остальное — счётчики, уже записанные runtime.
-        val pushSnapshot: PushSnapshot? = runCatching {
-            val gate = com.vladimir.messenger.data.push.PushServiceLocator.enabled(context)
-            val receive = com.vladimir.messenger.data.push.PushServiceLocator.receiving(context)
-            val endpoint = com.vladimir.messenger.data.push.PushServiceLocator.endpoint(context) != null
-            com.vladimir.messenger.data.push.PushDiagnostics.snapshot(context, gate, receive, endpoint)
-        }.getOrNull()
+        val pushSnapshot: PushSnapshot? = pushSnapshot(context)
         return DiagnosticsFacts(
             createdAtMs = createdAtMs,
             sessionStartedAtMs = sessionStartedAtMs,
