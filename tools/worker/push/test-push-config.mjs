@@ -60,3 +60,61 @@ test("the same config keeps serving disabled health and refusing traffic in work
     await mf.dispose();
   }
 });
+
+test("a rejected request never arms an alarm", async () => {
+  // The alarm used to be installed before the rate verdict, so a flood of
+  // requests the shard refused still made it wake up later. Rejections must be
+  // inert: only accepted traffic may schedule work. The test-only subclass both
+  // serves the shard routes and exposes the persisted alarm.
+  const { routeFor, shardFor } = await import("./protocol.mjs");
+  const mf = new Miniflare({
+    modules: true,
+    scriptPath: new URL("fixture-wake-queue.mjs", here).pathname,
+    compatibilityDate: "2025-07-18",
+    durableObjects: { PUSH_SHARDS: { className: "TestPushShard", useSQLite: true } },
+    bindings: {
+      FCM_PROJECT_ID: "test-apu-project",
+      FCM_CLIENT_EMAIL: "test-service@test-apu-project.invalid",
+      FCM_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----",
+      PUSH_RATE_KEY: "ab".repeat(32),
+      PUSH_ENABLED: "true",
+    },
+  });
+  try {
+    const namespace = await mf.getDurableObjectNamespace("PUSH_SHARDS");
+    const owner = "11".repeat(32);
+    const capability = "22".repeat(32);
+    const stub = namespace.get(namespace.idFromName("apu-push-shard-v1:" + (await shardFor(owner))));
+    const post = (path, body, rateId) => stub.fetch("https://push-internal.invalid" + path, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-apu-rate-id": rateId },
+      body: JSON.stringify(body),
+    });
+    const observe = async () => {
+      const response = await stub.fetch("https://push-internal.invalid/test/pending", { method: "POST" });
+      assert.equal(response.status, 200);
+      return response.json();
+    };
+    // Exhaust one address's hourly budget for this shard (240/hour).
+    const flood = "33".repeat(32);
+    let last;
+    for (let i = 0; i < 241; i++) last = await post("/v1/wake", { owner, capability }, flood);
+    assert.equal(last.status, 429);
+    // The accepted requests above legitimately armed the alarm; clear it so the
+    // next observation can only be caused by the rejected request itself.
+    await stub.fetch("https://push-internal.invalid/test/clear-alarm", { method: "POST" });
+    assert.equal((await observe()).alarm, null);
+    assert.equal((await post("/v1/wake", { owner, capability }, flood)).status, 429);
+    const rejected = await observe();
+    // A refused wake must not become pending work, and must not arm the shard.
+    assert.equal(rejected.count, 0);
+    assert.equal(rejected.alarm, null);
+    // Control: the same body from a fresh address is accepted and does arm it.
+    const accepted = await post("/v1/wake", { owner, capability }, "44".repeat(32));
+    assert.ok([202, 404].includes(accepted.status), "accepted or explicitly unavailable");
+    const after = await observe();
+    assert.notEqual(after.alarm, null);
+  } finally {
+    await mf.dispose();
+  }
+});

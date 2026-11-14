@@ -204,8 +204,11 @@ export class PushShard {
       return this.consume("global", 1200, 60_000, now) &&
         this.consume("ip:" + rateId, 240, 60 * 60_000, now);
     });
-    await this.ensureAlarm();
+    // Only accepted traffic may schedule work. A rejected request is exactly what
+    // an abusive client produces, and it must not be able to make the shard wake
+    // up later: the alarm is installed after the verdict, before any effect.
     if (!allowed) return json({ error: "rate limited" }, 429);
+    await this.ensureAlarm();
     const route = await routeFor(body.owner, body.capability);
     if (path === "/v1/registration") return this.register(body, route);
     if (path === "/v1/wake") return this.wake(body.owner, route, now);

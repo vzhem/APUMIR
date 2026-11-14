@@ -10,6 +10,13 @@ export class TestPushShard extends PushShard {
       const row = this.rows("SELECT count(*) AS count, MAX(generation) AS generation FROM pending_wakes")[0];
       return Response.json({ count: Number(row.count), generation: row.generation, alarm: await this.state.storage.getAlarm() });
     }
+    if (path === "/test/clear-alarm") {
+      // Lets a test isolate one request: whatever armed the alarm earlier is
+      // removed, so the next observation is caused only by the request after it.
+      const had = await this.state.storage.getAlarm();
+      await this.state.storage.deleteAlarm();
+      return Response.json({ had });
+    }
     if (path === "/test/prepare-restart") {
       this.state.storage.transactionSync(() => {
         this.sql.exec("UPDATE pending_wakes SET next_at = ?, lease_until = 0", Date.now() - 1);
