@@ -13,11 +13,20 @@ configuration file and perform the upload. Everything before and after it stays
 explicit and reviewable.
 
 Order matters and is deliberate:
-  1. secrets are uploaded first, so the version that turns the switches on can
-     never start without the credentials it needs (project id included - the
-     service reports itself disabled without it);
-  2. one deploy of `wrangler.push.toml` with both switches overridden to "true";
-  3. one public health request, which is the only honest signal available here.
+  1. a first deploy of `wrangler.push.toml` with both switches left at "false".
+     `wrangler secret put` addresses an existing Worker, so the Worker has to
+     exist before any secret can be attached. Starting from a switched-off
+     version also means the account never holds a version that is on but is
+     missing a credential;
+  2. the secrets, so the version that turns the switches on can never start
+     without them (project id included - the service reports itself disabled
+     without it);
+  3. a second deploy with both switches overridden to "true";
+  4. one public health request, which is the only honest signal available here.
+
+Both deploys are the same source and the same storage; only the two plain-text
+bindings differ, and the Worker itself reports "off" until every credential is
+present.
 
 No retries, no deletes, no other Worker names, no secret values printed.
 """
@@ -121,11 +130,12 @@ def upload_secrets(env, fcm, rate_key):
     return True
 
 
-def deploy(env):
-    """One deploy with both switches on; the plain-text ones are not secrets."""
+def deploy(env, enabled):
+    """One deploy; the two switches are plain-text bindings, not secrets."""
+    value = "true" if enabled else "false"
     code, _ = run_wrangler([
         "deploy", "--config", str(CONFIG.relative_to(PROJECT)),
-        "--var", "PUSH_ENABLED:true", "--var", "MAILBOX_ENABLED:true",
+        "--var", "PUSH_ENABLED:" + value, "--var", "MAILBOX_ENABLED:" + value,
         "--name", WORKER_NAME,
     ], env)
     if code != 0:
@@ -173,7 +183,7 @@ MESSAGES = {
     "rate_key": "APU_PUSH_RATE_KEY is present but has the wrong format (32-128 hex characters).",
     "wrangler_missing": "Wrangler is not installed; run npm ci in tools/worker/push first.",
     "wrangler": "Wrangler could not be started.",
-    "secret": "A Worker secret was refused. The service may be partially configured; inspect before retrying.",
+    "secret": "A Worker secret was refused. The service exists with both switches off; inspect before retrying.",
     "upload": "Wrangler refused the deploy. The service may still be on its previous version.",
     "health": "The deployed service did not answer a health request.",
 }
@@ -200,9 +210,13 @@ def main(values, environ=None):
             "CLOUDFLARE_API_TOKEN": token,
             "WRANGLER_SEND_METRICS": "false",
         }
+        # The Worker must exist before a secret can be attached to it, and it
+        # must exist in the off position before it holds any credential.
+        deploy(env, enabled=False)
+        print("Created or refreshed " + WORKER_NAME + " with both switches off.")
         upload_secrets(env, fcm, key)
         print("Uploaded " + str(len(SECRET_NAMES)) + " encrypted secrets; values were not printed.")
-        deploy(env)
+        deploy(env, enabled=True)
         print("Deployed " + WORKER_NAME + " with both switches on.")
         if generated:
             print("Generated a random PUSH_RATE_KEY for this deployment (not stored by this program).")

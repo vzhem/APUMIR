@@ -86,20 +86,28 @@ class DeploymentTests(unittest.TestCase):
             deploy.run_wrangler, deploy.health = saved_run, saved_health
         return code, out.getvalue(), fake
 
-    def test_secrets_are_uploaded_before_a_single_deploy(self):
+    def test_the_service_never_exists_on_without_its_credentials(self):
+        # Reasons, in order: `secret put` needs an existing Worker; a version that
+        # is on but missing a credential would be a lie the account then holds;
+        # and the last deploy is the only one that turns the switches on.
         code, text, fake = self.run_deploy()
         self.assertEqual(0, code, text)
         argv = [" ".join(call["argv"]) for call in fake.calls]
-        self.assertEqual(5, len(argv), argv)
+        self.assertEqual(6, len(argv), argv)
+        self.assertTrue(argv[0].startswith("deploy"), argv[0])
+        self.assertIn("--var PUSH_ENABLED:false", argv[0])
+        self.assertIn("--var MAILBOX_ENABLED:false", argv[0])
         self.assertEqual(
             ["secret put FCM_PROJECT_ID", "secret put FCM_CLIENT_EMAIL",
              "secret put FCM_PRIVATE_KEY", "secret put PUSH_RATE_KEY"],
-            [item.split(" --name")[0] for item in argv[:4]],
+            [item.split(" --name")[0] for item in argv[1:5]],
         )
-        self.assertTrue(argv[4].startswith("deploy"), argv[4])
-        self.assertIn("--var PUSH_ENABLED:true", argv[4])
-        self.assertIn("--var MAILBOX_ENABLED:true", argv[4])
-        self.assertIn("--name apu-push", argv[4])
+        self.assertTrue(argv[5].startswith("deploy"), argv[5])
+        self.assertIn("--var PUSH_ENABLED:true", argv[5])
+        self.assertIn("--var MAILBOX_ENABLED:true", argv[5])
+        self.assertIn("--name apu-push", argv[5])
+        # Nothing before the last step claims to be enabled.
+        self.assertEqual(1, sum("PUSH_ENABLED:true" in item for item in argv))
 
     def test_the_project_id_is_uploaded_or_the_service_stays_disabled(self):
         # fcmConfigured() needs FCM_PROJECT_ID; without it the service deploys
@@ -122,7 +130,7 @@ class DeploymentTests(unittest.TestCase):
         by_name = {call["argv"][2]: call for call in puts}
         self.assertEqual(RATE_KEY + chr(10), by_name["PUSH_RATE_KEY"]["stdin"])
 
-    def test_the_child_process_gets_only_the_three_variables_it_needs(self):
+    def test_the_child_process_gets_no_service_account_and_no_token_file(self):
         _, _, fake = self.run_deploy()
         env = fake.calls[0]["env"]
         self.assertEqual(ACCOUNT, env["CLOUDFLARE_ACCOUNT_ID"])
@@ -140,7 +148,9 @@ class DeploymentTests(unittest.TestCase):
             joined = [" ".join(call["argv"]) for call in fake.calls]
             self.assertNotIn("delete", " ".join(joined))
             # Failures are not retried: the run stops at the failing command.
-            self.assertLessEqual(len(joined), 5 if marker == "deploy" else 4)
+            # A refused secret stops the run: the switched-off deploy happened,
+            # nothing after it did.
+            self.assertLessEqual(len(joined), 2 if marker == "secret" else 6)
 
     def test_a_service_that_does_not_confirm_health_is_a_failure(self):
         code, text, _ = self.run_deploy(health_result=(503, {"ok": False}))

@@ -831,8 +831,10 @@ APK), а не среда выполнения Worker. Нужен Cloudflare Work
   `v1`, `workers_dev = true`. Флаги в файле по-прежнему `"false"`: развернуть
   скелет и включить доставку — два разных решения.
 - `scripts/ci/push-deploy.py` — деплой через закреплённый Wrangler, а не через
-  ручные вызовы API: три `wrangler secret put` (значение подаётся на stdin и
-  никогда не попадает в argv), затем один `wrangler deploy` по
+  ручные вызовы API: сначала `wrangler deploy` с выключенными флагами (Worker
+  должен существовать, а версия «включено без креды» не должна появляться на
+  аккаунте), затем четыре `wrangler secret put` (значение подаётся на stdin и
+  никогда не попадает в argv), затем второй `wrangler deploy` по
   `wrangler.push.toml` с `--var PUSH_ENABLED:true --var MAILBOX_ENABLED:true` и
   утверждённым именем Worker. Так Durable Object namespace, миграция и
   secret-bindings проходят ровно тем путём, который проверен на аккаунте

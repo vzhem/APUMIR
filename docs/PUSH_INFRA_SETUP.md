@@ -605,13 +605,18 @@ Cloudflare. Создана только первая storage-free версия �
 Как проходит деплой (`scripts/ci/push-deploy.py`):
 
 1. `npm ci --prefix tools/worker/push` — закреплённый Wrangler;
-2. четыре `wrangler secret put` — `FCM_PROJECT_ID`, `FCM_CLIENT_EMAIL`,
+2. первый `wrangler deploy` по `wrangler.push.toml` с флагами **выключенными**
+   (`--var PUSH_ENABLED:false --var MAILBOX_ENABLED:false`). Порядок именно
+   такой, потому что `wrangler secret put` адресует уже существующий Worker, а
+   версия «включено, но без креды» не должна появляться на аккаунте даже на
+   минуту;
+3. четыре `wrangler secret put` — `FCM_PROJECT_ID`, `FCM_CLIENT_EMAIL`,
    `FCM_PRIVATE_KEY`, `PUSH_RATE_KEY`; значения подаются на stdin и в argv не
    попадают. Project ID берётся из того же JSON сервисного аккаунта, потому что
    без него Worker считает себя выключенным;
-3. один `wrangler deploy` по `wrangler.push.toml` с `--var PUSH_ENABLED:true
-   --var MAILBOX_ENABLED:true` и явным `--name apu-push`;
-4. один публичный `GET /health` → `HEALTH=OK` или `HEALTH=UNEXPECTED`.
+4. второй `wrangler deploy` с `--var PUSH_ENABLED:true --var MAILBOX_ENABLED:true`
+   и явным `--name apu-push`;
+5. один публичный `GET /health` → `HEALTH=OK` или `HEALTH=UNEXPECTED`.
    Оба флага и все креды проверяются самим Worker'ом, поэтому `503` означает
    «что-то из перечисленного не подхватилось», а не сетевую ошибку.
 
