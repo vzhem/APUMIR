@@ -119,7 +119,7 @@ class PushRuntimeCoordinatorTest {
         val fake = Fake()
         assertEquals(
             PushRuntimeCoordinator.SignalOutcome.CheckRequested,
-            fake.coordinator.onSignal(mapOf("v" to "1"), false, 99),
+            fake.coordinator.onSignal(mapOf("v" to "1", "route" to "ab".repeat(32)), false, 99),
         )
         assertEquals(listOf(99L), fake.checks)
         assertEquals(
@@ -128,9 +128,22 @@ class PushRuntimeCoordinatorTest {
         )
         assertEquals(
             PushRuntimeCoordinator.SignalOutcome.Rejected,
-            fake.coordinator.onSignal(mapOf("v" to "1"), hasNotificationBlock = true, nowMs = 101),
+            fake.coordinator.onSignal(
+                mapOf("v" to "1", "route" to "ab".repeat(32)),
+                hasNotificationBlock = true,
+                nowMs = 101,
+            ),
         )
-        assertEquals(PushRuntimeCoordinator.SignalOutcome.Ignored, fake.coordinator.onSignal(mapOf("v" to "2"), false, 102))
+        // No route: the deployed service always names one, so this is not our
+        // signal and must not cost a bounded scan.
+        assertEquals(
+            PushRuntimeCoordinator.SignalOutcome.Rejected,
+            fake.coordinator.onSignal(mapOf("v" to "1"), false, 102),
+        )
+        assertEquals(
+            PushRuntimeCoordinator.SignalOutcome.Ignored,
+            fake.coordinator.onSignal(mapOf("v" to "2", "route" to "ab".repeat(32)), false, 103),
+        )
         assertEquals(listOf(99L), fake.checks)
     }
 

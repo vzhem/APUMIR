@@ -236,6 +236,7 @@ EXPECTED = {
     },
     PREFIX + "PushSignalSinkTest": {
         "onlyTheExactDataOnlySignalWritesAGenericMarker",
+        "aRoutedSignalQueuesThatRouteInsteadOfAFullScan",
         "notificationBlocksAndUnknownVersionsWriteNothing",
         "aProviderGapAndAStartupResumeAreReportedWithoutInventingSuccess",
     },

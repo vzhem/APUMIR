@@ -5,7 +5,7 @@ import org.junit.Test
 
 class PushSignalInboxTest {
     private val now = 1_800_000_000_000L
-    private val signal = mapOf("v" to "1")
+    private val signal = mapOf("v" to "1", "route" to "ab".repeat(32))
 
     @Test fun aValidSignalOnlyWritesAGenericRecoveryMarker() {
         val inbox = FakeInbox()
@@ -28,8 +28,8 @@ class PushSignalInboxTest {
         val signalInbox = PushSignalInbox(inbox::enqueueRecovery, nowMs = { now })
         assertEquals(PushSignalInbox.Result.Rejected, signalInbox.onSignal(null, false))
         assertEquals(PushSignalInbox.Result.Rejected, signalInbox.onSignal(signal, hasNotificationBlock = true))
-        assertEquals(PushSignalInbox.Result.Rejected, signalInbox.onSignal(mapOf("v" to "2"), false))
-        assertEquals(PushSignalInbox.Result.Rejected, signalInbox.onSignal(mapOf("v" to "1", "text" to "hi"), false))
+        assertEquals(PushSignalInbox.Result.Rejected, signalInbox.onSignal(mapOf("v" to "2", "route" to "ab".repeat(32)), false))
+        assertEquals(PushSignalInbox.Result.Rejected, signalInbox.onSignal(mapOf("v" to "1", "route" to "ab".repeat(32), "text" to "hi"), false))
         assertEquals(0, inbox.recoveries)
         assertEquals(0, inbox.calls)
     }
