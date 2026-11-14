@@ -262,6 +262,15 @@ class ChatRepository @Inject constructor(
 
             Log.i(TAG, "sendMessage direct=$sentDirectly messageId=$messageId recipient=$actualRecipientId")
 
+            // Personal chat, ordinary attempt did not get through: ask the push
+            // service to wake that phone, so it comes back on its own and looks
+            // for what arrived. Only 1:1 - groups, channels and other sections
+            // keep their current behaviour until waking is proven on real phones.
+            // Fire-and-forget: it cannot change the result above or the status.
+            if (!sentDirectly && actualRecipientId.isNotBlank()) {
+                wakeCorrespondentIfUnreachable(context, actualRecipientId, sentDirectly)
+            }
+
             // р242: отметка для диагностики - когда последний раз отправляли.
             com.vladimir.messenger.data.mirror.MirrorHub.noteOutgoing()
             if (sentDirectly) {

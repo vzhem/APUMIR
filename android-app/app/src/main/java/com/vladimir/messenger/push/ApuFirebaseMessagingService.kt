@@ -6,6 +6,7 @@ import com.google.firebase.messaging.RemoteMessage
 import com.vladimir.messenger.data.push.PushServiceLocator
 import com.vladimir.messenger.data.push.PushSignalSink
 import com.vladimir.messenger.worker.PushTokenWorker
+import com.vladimir.messenger.worker.RelayWakeWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -28,6 +29,14 @@ import kotlinx.coroutines.launch
  *    signals while the device was unreachable;
  *  - `onNewToken` -> a durable token journal write and one WorkManager task that
  *    performs the signed registration.
+ *
+ * What a valid callback also does: brings the ordinary transport back for a
+ * bounded window, so the app can actually fetch what was sent while it was
+ * asleep. A wake that only reads the ciphertext mailbox would wake the phone and
+ * still leave the message unreceived, because personal text travels through the
+ * normal Rust transport, not through the mailbox. The window is the existing
+ * bounded [RelayWakeWorker] pass - it never starts a foreground service, never
+ * sends anything, and yields to a lifecycle start.
  *
  * With PUSH disabled (every shipped build: no verified client configuration, no
  * test-build flag, no approved host) every callback returns immediately, before
@@ -72,6 +81,15 @@ class ApuFirebaseMessagingService : FirebaseMessagingService() {
             } catch (_: Exception) {
                 // Never log the payload, the route or exception text.
                 Log.w(TAG, "signal handling failed")
+            }
+            // Independent of the mailbox pass: the message this wake is about
+            // travels through the ordinary transport, so the transport has to be
+            // up for anything to arrive. Best effort, bounded, never a promise of
+            // delivery.
+            try {
+                RelayWakeWorker.enqueueOnce(context)
+            } catch (_: Exception) {
+                Log.w(TAG, "bounded relay wake not scheduled")
             }
         }
     }
