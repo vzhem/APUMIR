@@ -217,7 +217,7 @@ data class DiagnosticsFacts(
     val runtimeHealth: RuntimeHealthSnapshot = RuntimeHealthSnapshot(),
     val operationalHealth: OperationalSnapshot = OperationalSnapshot(),
     val operationalDetails: String = "",
-    val push: com.vladimir.messenger.data.push.PushDiagnostics.Snapshot? = null,
+    val push: PushSnapshot? = null,
     val networkValidated: Boolean? = null,
     val networkCaptivePortal: Boolean? = null,
     val privateDnsActive: Boolean? = null,

@@ -460,7 +460,7 @@ object TransferDiagnostics {
         val runtime = java.lang.Runtime.getRuntime()
         // Состояние push читается без побочных эффектов: гейт и приём — из
         // сборки и настроек SDK, остальное — счётчики, уже записанные runtime.
-        val pushSnapshot = runCatching {
+        val pushSnapshot: PushSnapshot? = runCatching {
             val gate = com.vladimir.messenger.data.push.PushServiceLocator.enabled(context)
             val receive = com.vladimir.messenger.data.push.PushServiceLocator.receiving(context)
             com.vladimir.messenger.data.push.PushDiagnostics.snapshot(context, gate, receive)

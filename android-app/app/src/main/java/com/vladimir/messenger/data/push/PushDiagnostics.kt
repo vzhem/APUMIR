@@ -2,6 +2,9 @@ package com.vladimir.messenger.data.push
 
 import android.content.Context
 import android.util.Log
+import com.vladimir.messenger.data.diagnostics.PushPhase
+import com.vladimir.messenger.data.diagnostics.PushSnapshot
+import com.vladimir.messenger.data.diagnostics.PushWakeOutcome
 
 /**
  * The smallest possible record of what the push path did, so a report from a
@@ -22,41 +25,14 @@ import android.util.Log
  * Every write is best effort. Diagnostics must never be the reason delivery
  * fails, so a broken preferences file degrades to "no counters" and nothing else.
  */
-internal object PushDiagnostics {
+object PushDiagnostics {
 
     private const val FILE = "apu_push_diag_v1"
     private const val TAG = "PushDiagnostics"
 
-    /** Coarse phase of the registration, as one of these names. */
-    enum class Phase { UNKNOWN, DISABLED, NOT_CONFIGURED, NO_PLAY_SERVICES, REGISTERED, PARTIAL, FAILED }
-
-    /** Coarse outcome of the last wake attempt we made. */
-    enum class Wake { NONE, ACCEPTED, WITHIN_BUDGET, NOT_REGISTERED, UNAVAILABLE, SKIPPED }
-
-    /** Immutable view for the report. Contains no secret and no identifier. */
-    class Snapshot(
-        val gateOpen: Boolean,
-        val receiveEnabled: Boolean,
-        val tokenRecorded: Boolean,
-        val registeredRoutes: Int?,
-        val phase: Phase,
-        val lastRegisterAtMs: Long,
-        val signalsReceived: Long,
-        val signalsRejected: Long,
-        val lastSignalAtMs: Long,
-        val wakeAttempts: Long,
-        val lastWake: Wake,
-        val lastWakeAtMs: Long,
-        val inboxPending: String,
-        val endpointReachable: Boolean?,
-        val lastError: String,
-    ) {
-        override fun toString(): String = "PushDiagnosticsSnapshot(redacted)"
-    }
-
     fun noteReception(enabled: Boolean) = write(if (enabled) "receive=1" else "receive=0")
 
-    fun noteRegistration(phase: Phase) = write(
+    fun noteRegistration(phase: PushPhase) = write(
         "phase=${phase.name}",
         "lastRegisterAt=${System.currentTimeMillis()}",
     )
@@ -66,7 +42,7 @@ internal object PushDiagnostics {
         "lastSignalAt=${System.currentTimeMillis()}",
     )
 
-    fun noteWake(wake: Wake) = write(
+    fun noteWake(wake: PushWakeOutcome) = write(
         "wakeAttempts=+1",
         "lastWake=${wake.name}",
         "lastWakeAt=${System.currentTimeMillis()}",
@@ -84,7 +60,7 @@ internal object PushDiagnostics {
      * Read the stored record plus the facts that can be read live. Never throws:
      * a report built while the push files are unreadable must still render.
      */
-    fun snapshot(context: Context, gateOpen: Boolean, receiveEnabled: Boolean): Snapshot {
+    fun snapshot(context: Context, gateOpen: Boolean, receiveEnabled: Boolean): PushSnapshot {
         val app = context.applicationContext
         val stored = try {
             app.getSharedPreferences(FILE, Context.MODE_PRIVATE).all
@@ -95,18 +71,19 @@ internal object PushDiagnostics {
         }
         fun text(key: String): String? = stored[key] as? String
         fun number(key: String): Long = (stored[key] as? Long) ?: 0L
-        return Snapshot(
+        return PushSnapshot(
             gateOpen = gateOpen,
             receiveEnabled = receiveEnabled,
             tokenRecorded = tokenPresent(app),
             registeredRoutes = routeCount(app),
-            phase = runCatching { Phase.valueOf(text("phase") ?: "UNKNOWN") }.getOrDefault(Phase.UNKNOWN),
+            phase = runCatching { PushPhase.valueOf(text("phase") ?: "UNKNOWN") }.getOrDefault(PushPhase.UNKNOWN),
             lastRegisterAtMs = number("lastRegisterAt"),
             signalsReceived = number("signals"),
             signalsRejected = number("signalsRejected"),
             lastSignalAtMs = number("lastSignalAt"),
             wakeAttempts = number("wakeAttempts"),
-            lastWake = runCatching { Wake.valueOf(text("lastWake") ?: "NONE") }.getOrDefault(Wake.NONE),
+            lastWake = runCatching { PushWakeOutcome.valueOf(text("lastWake") ?: "NONE") }
+                .getOrDefault(PushWakeOutcome.NONE),
             lastWakeAtMs = number("lastWakeAt"),
             inboxPending = text("inbox") ?: "?",
             endpointReachable = when (text("endpoint")) {

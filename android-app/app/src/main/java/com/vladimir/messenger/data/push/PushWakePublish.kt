@@ -1,6 +1,7 @@
 package com.vladimir.messenger.data.push
 
 import android.content.Context
+import com.vladimir.messenger.data.diagnostics.PushWakeOutcome
 import java.util.concurrent.CancellationException
 import java.util.logging.Logger
 
@@ -50,11 +51,11 @@ internal object PushWakePublish {
         val outcome = attempt(app, peerId)
         PushDiagnostics.noteWake(
             when (outcome) {
-                Outcome.Accepted -> PushDiagnostics.Wake.ACCEPTED
-                Outcome.WithinBudget -> PushDiagnostics.Wake.WITHIN_BUDGET
-                Outcome.NotRegistered -> PushDiagnostics.Wake.NOT_REGISTERED
-                Outcome.Unavailable -> PushDiagnostics.Wake.UNAVAILABLE
-                Outcome.Skipped -> PushDiagnostics.Wake.SKIPPED
+                Outcome.Accepted -> PushWakeOutcome.ACCEPTED
+                Outcome.WithinBudget -> PushWakeOutcome.WITHIN_BUDGET
+                Outcome.NotRegistered -> PushWakeOutcome.NOT_REGISTERED
+                Outcome.Unavailable -> PushWakeOutcome.UNAVAILABLE
+                Outcome.Skipped -> PushWakeOutcome.SKIPPED
             },
         )
         return outcome

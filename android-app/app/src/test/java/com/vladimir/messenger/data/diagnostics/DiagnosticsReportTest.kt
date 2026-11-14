@@ -1254,18 +1254,18 @@ class DiagnosticsReportTest {
     @Test fun pushSectionAnswersWhereTheWakeStopped() {
         // Раздел существует ровно потому, что отчёт v11.74.512 не сказал о push
         // ни слова: провал приёма выглядел как «тихое приложение».
-        val snapshot = com.vladimir.messenger.data.push.PushDiagnostics.Snapshot(
+        val snapshot = PushSnapshot(
             gateOpen = true,
             receiveEnabled = false,
             tokenRecorded = true,
             registeredRoutes = 0,
-            phase = com.vladimir.messenger.data.push.PushDiagnostics.Phase.FAILED,
+            phase = PushPhase.FAILED,
             lastRegisterAtMs = 1_700_000_000_000L,
             signalsReceived = 0,
             signalsRejected = 2,
             lastSignalAtMs = 0L,
             wakeAttempts = 1,
-            lastWake = com.vladimir.messenger.data.push.PushDiagnostics.Wake.NOT_REGISTERED,
+            lastWake = PushWakeOutcome.NOT_REGISTERED,
             lastWakeAtMs = 1_700_000_000_000L,
             inboxPending = "0",
             endpointReachable = true,

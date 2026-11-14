@@ -41,18 +41,18 @@ class PushTokenWorker(
             com.vladimir.messenger.data.push.PushDiagnostics.noteRegistration(
                 when (outcome) {
                     PushTokenRegistrar.Outcome.Disabled ->
-                        com.vladimir.messenger.data.push.PushDiagnostics.Phase.DISABLED
+                        com.vladimir.messenger.data.diagnostics.PushPhase.DISABLED
                     PushTokenRegistrar.Outcome.NotConfigured ->
-                        com.vladimir.messenger.data.push.PushDiagnostics.Phase.NOT_CONFIGURED
+                        com.vladimir.messenger.data.diagnostics.PushPhase.NOT_CONFIGURED
                     PushTokenRegistrar.Outcome.NoPlayServices ->
-                        com.vladimir.messenger.data.push.PushDiagnostics.Phase.NO_PLAY_SERVICES
+                        com.vladimir.messenger.data.diagnostics.PushPhase.NO_PLAY_SERVICES
                     PushTokenRegistrar.Outcome.Registered,
                     PushTokenRegistrar.Outcome.AlreadyCurrent ->
-                        com.vladimir.messenger.data.push.PushDiagnostics.Phase.REGISTERED
+                        com.vladimir.messenger.data.diagnostics.PushPhase.REGISTERED
                     PushTokenRegistrar.Outcome.Partial ->
-                        com.vladimir.messenger.data.push.PushDiagnostics.Phase.PARTIAL
+                        com.vladimir.messenger.data.diagnostics.PushPhase.PARTIAL
                     PushTokenRegistrar.Outcome.Failed ->
-                        com.vladimir.messenger.data.push.PushDiagnostics.Phase.FAILED
+                        com.vladimir.messenger.data.diagnostics.PushPhase.FAILED
                 },
             )
             when (outcome) {

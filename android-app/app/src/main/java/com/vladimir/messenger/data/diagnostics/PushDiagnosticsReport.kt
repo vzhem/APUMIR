@@ -16,6 +16,40 @@ package com.vladimir.messenger.data.diagnostics
  * `DiagnosticsReport.kt`, и раздел проверяется до выпуска, а не на телефоне.
  */
 /**
+ * Грубая фаза регистрации в push-службе: только эти значения, без адресов и кодов.
+ */
+enum class PushPhase { UNKNOWN, DISABLED, NOT_CONFIGURED, NO_PLAY_SERVICES, REGISTERED, PARTIAL, FAILED }
+
+/** Итог последней попытки разбудить собеседника. */
+enum class PushWakeOutcome { NONE, ACCEPTED, WITHIN_BUDGET, NOT_REGISTERED, UNAVAILABLE, SKIPPED }
+
+/**
+ * Снимок состояния push для отчёта. Чистый JVM-тип: ни Android, ни Firebase, ни
+ * секретов. Значения собирает `PushDiagnostics` (Android), печатает [appendPush].
+ */
+data class PushSnapshot(
+    val gateOpen: Boolean,
+    /** Принимает ли сборка входящие сигналы вообще. */
+    val receiveEnabled: Boolean,
+    /** Записан ли отпечаток токена (сам токен сюда не попадает). */
+    val tokenRecorded: Boolean,
+    /** Сколько маршрутов в индексе; null — индекс не читается. */
+    val registeredRoutes: Int?,
+    val phase: PushPhase,
+    val lastRegisterAtMs: Long,
+    val signalsReceived: Long,
+    val signalsRejected: Long,
+    val lastSignalAtMs: Long,
+    val wakeAttempts: Long,
+    val lastWake: PushWakeOutcome,
+    val lastWakeAtMs: Long,
+    val inboxPending: String,
+    /** null — проверка доступности службы не проводилась. */
+    val endpointReachable: Boolean?,
+    val lastError: String,
+)
+
+/**
  * `DiagnosticsFacts.push`: единственный раздел, где видно, дошёл ли сигнал.
  *
  * `0 сигналов` при открытом гейте и `off` приёме — это и есть диагноз.
