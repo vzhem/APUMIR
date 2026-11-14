@@ -129,6 +129,22 @@ jobs:
           python3 scripts/ci/check-topic-read-contract.py
           python3 scripts/ci/check-invite-text.py
 
+      # A release built from an explicit tag carries the push test gate. The
+      # gate is what makes a shipped build ask Firebase for a token and register
+      # a mailbox route at all; without it the app is the same as v11.74.510 and
+      # there is nothing to test on a phone. Only a tag gets this, and the release
+      # notes say plainly that this build talks to the push service.
+      - name: Enable the remote-push test gate for a tagged build
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          echo "ORG_GRADLE_PROJECT_apuPushTested=true" >> "$GITHUB_ENV"
+          echo "ORG_GRADLE_PROJECT_apuPushEndpoint=https://apu-push.apuchat.workers.dev" >> "$GITHUB_ENV"
+          echo "### Remote push in this build" >> "$GITHUB_STEP_SUMMARY"
+          echo "- APU_PUSH_TESTED: true" >> "$GITHUB_STEP_SUMMARY"
+          echo "- endpoint: https://apu-push.apuchat.workers.dev" >> "$GITHUB_STEP_SUMMARY"
+          echo "- This is a test build: the service is enabled, but no device has been verified yet." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
