@@ -37,10 +37,32 @@ class PushRuntimeConfigTest {
         assertTrue(PushRuntimeConfig.gateOpen(firebaseConfigured = true, testedBuild = true))
     }
 
-    @Test fun shippedDefaultsHaveNoApprovedEndpoint() {
-        // The default arguments of the real object must not approve anything:
-        // a released build cannot reach a production Worker by accident.
-        assertNull(PushRuntimeConfig.endpoint(firebaseConfigured = true, testedBuild = true))
+    @Test fun theReviewedHostIsTheOnlyDefaultAndStillNeedsBothBuildFacts() {
+        // The default endpoint is the one reviewed host, but it is reached only
+        // when both build facts are true: a Firebase-configured released build
+        // and a build without the client configuration still get nothing.
+        val endpoint = PushRuntimeConfig.endpoint(firebaseConfigured = true, testedBuild = true)
+        assertEquals("apu-push.apuchat.workers.dev", PushRuntimeConfig.PRODUCTION_HOST)
+        assertEquals(
+            "https://" + PushRuntimeConfig.PRODUCTION_HOST + "/v1/registration",
+            endpoint?.url("/v1/registration")?.toString(),
+        )
+        assertNull(PushRuntimeConfig.endpoint(firebaseConfigured = false, testedBuild = true))
+        assertNull(PushRuntimeConfig.endpoint(firebaseConfigured = true, testedBuild = false))
         assertNull(PushRuntimeConfig.endpoint(firebaseConfigured = false, testedBuild = false))
+    }
+
+    @Test fun anApprovedHostCannotBeChosenByAnythingButTheReviewedConstant() {
+        // A build property may point at the approved host; it can never widen the
+        // allowlist, so an unreviewed service never receives a capability.
+        val reviewed = PushRuntimeConfig.PRODUCTION_HOST
+        assertEquals(
+            "https://$reviewed/v1/wake",
+            PushRuntimeConfig.endpoint(true, true, setOf(reviewed), "https://$reviewed")?.url("/v1/wake")?.toString(),
+        )
+        assertNull(PushRuntimeConfig.endpoint(true, true, setOf(reviewed), "https://apu-push-evil.workers.dev"))
+        assertNull(PushRuntimeConfig.endpoint(true, true, setOf(reviewed), "https://p2p-relay.apuchat.workers.dev"))
+        // The relay that already carries MQTT is deliberately not this service.
+        assertFalse(reviewed.contains("p2p-relay"))
     }
 }

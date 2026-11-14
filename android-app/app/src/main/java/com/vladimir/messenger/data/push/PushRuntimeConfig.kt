@@ -1,9 +1,9 @@
 package com.vladimir.messenger.data.push
 
 /**
- * Reviewed, immutable endpoint and feature-gate description for a future
- * remote-push runtime. Nothing here performs I/O, reads Firebase or schedules
- * work; it only decides whether the *offline* pieces may be used at all.
+ * Reviewed, immutable endpoint and feature-gate description for the remote-push
+ * runtime. Nothing here performs I/O, reads Firebase or schedules work; it only
+ * decides whether the *offline* pieces may be used at all.
  *
  * Deliberately, [PushRuntimeConfig.enabled] can never be turned on by a value
  * that arrives at runtime (an FCM payload, a peer packet, a deep link or a
@@ -12,16 +12,19 @@ package com.vladimir.messenger.data.push
  *  - a build property that must be set explicitly for a testing build, and
  *  - inclusion of a verified Firebase client configuration.
  *
- * Even when both are true, the runtime still requires a registered device, an
- * authenticated mailbox item and a completed end-to-end test on two physical
+ * The endpoint is a third, independent build-time fact: it must be one of the
+ * hosts in [APPROVED_HOSTS], which is a reviewed constant in this file. A build
+ * property can only *select* among approved hosts; it can never introduce one.
+ *
+ * Even when all three are true, the runtime still requires a registered device,
+ * an authenticated mailbox item and a completed end-to-end check on two physical
  * phones before push may be announced. A false gate is not a delivery failure;
  * it is the intended state of every released build today.
  */
 internal object PushRuntimeConfig {
     /**
-     * Endpoint selection. There is no approved production host: the isolated
-     * Worker exists only as a disabled prototype. When the gate is off this is
-     * null, so no transport can be constructed by accident.
+     * Endpoint selection. The host must be in [approvedHosts]; anything else is
+     * null, so a transport cannot be constructed against an unreviewed service.
      */
     fun endpoint(
         firebaseConfigured: Boolean,
@@ -42,9 +45,19 @@ internal object PushRuntimeConfig {
     fun gateOpen(firebaseConfigured: Boolean, testedBuild: Boolean): Boolean =
         firebaseConfigured && testedBuild
 
-    /** No host is approved until one is reviewed; keep the list empty. */
-    private val APPROVED_HOSTS: Set<String> = emptySet()
+    /**
+     * The one reviewed push service host.
+     *
+     * It is the dedicated, storage-backed Worker for this feature — deliberately
+     * not the MQTT relay (`p2p-relay`) and not the disabled prototype Worker.
+     * Changing this string is a reviewed change: it decides where a device will
+     * send a capability and where it will look for its own ciphertext.
+     */
+    const val PRODUCTION_HOST: String = "apu-push.apuchat.workers.dev"
 
-    /** No endpoint is approved until one is reviewed; keep it null. */
-    private val APPROVED_URL: String? = null
+    /** Reviewed hosts. A build property may select among these, never add one. */
+    private val APPROVED_HOSTS: Set<String> = setOf(PRODUCTION_HOST)
+
+    /** Default endpoint used when a build does not name an approved one. */
+    private val APPROVED_URL: String = "https://" + PRODUCTION_HOST
 }

@@ -1,0 +1,39 @@
+# Dedicated push service: the Worker the Android client actually talks to.
+#
+# This is NOT the MQTT relay (`p2p-relay`) and NOT the storage-free prototype in
+# `wrangler.toml`. Deploying this file is what makes the reviewed host
+# `apu-push.apuchat.workers.dev` exist with:
+#   - a Durable Object namespace for per-receiver shards (registrations, pending
+#     wakes, ciphertext mailbox), and
+#   - the FCM provider credentials, which live in secrets and are never here.
+#
+# Both switches stay "false" in this file on purpose: deploying the skeleton and
+# enabling delivery for users are two separate decisions. Turning them on is a
+# deploy-time variable change plus a real test on two phones.
+#
+# Required secrets (set with `wrangler secret put`, never committed):
+#   FCM_PROJECT_ID, FCM_CLIENT_EMAIL, FCM_PRIVATE_KEY, PUSH_RATE_KEY
+name = "apu-push"
+main = "worker.mjs"
+compatibility_date = "2025-07-18"
+
+# The Android client addresses `<name>.<account-subdomain>.workers.dev`, so the
+# workers.dev route must stay on for the reviewed host to resolve.
+workers_dev = true
+
+[vars]
+PUSH_ENABLED = "false"
+MAILBOX_ENABLED = "false"
+
+[observability]
+enabled = true
+
+[[durable_objects.bindings]]
+name = "PUSH_SHARDS"
+class_name = "PushShard"
+
+# One migration creates the SQLite-backed class. Adding it together with the
+# binding is what the prototype deliberately avoided; here it is the point.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PushShard"]

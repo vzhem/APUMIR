@@ -211,7 +211,8 @@ EXPECTED = {
         "aReleasedBuildStaysClosedEvenWithFirebaseConfigured",
         "anApprovedHostIsStillRequired",
         "anUnreviewedHostOrAnHttpUrlIsRejected",
-        "shippedDefaultsHaveNoApprovedEndpoint",
+        "theReviewedHostIsTheOnlyDefaultAndStillNeedsBothBuildFacts",
+        "anApprovedHostCannotBeChosenByAnythingButTheReviewedConstant",
     },
     PREFIX + "PushRuntimeCoordinatorTest": {
         "closedGateStoresNothingAndSchedulesNothing",
