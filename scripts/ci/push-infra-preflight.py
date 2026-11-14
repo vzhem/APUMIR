@@ -208,12 +208,27 @@ def check_environment(token, request=request_json):
     if reviewer["reviewer"].get("id") != OWNER_ID:
         raise PreflightError("environment")
     status, body = request("api.github.com", prefix + "/deployment-branch-policies?per_page=100", token)
-    if status != 200 or not isinstance(body, dict) or body.get("total_count") != 1:
+    if status != 200 or not isinstance(body, dict):
         raise PreflightError("environment")
     policies = body.get("branch_policies")
-    if not isinstance(policies, list) or len(policies) != 1 or not isinstance(policies[0], dict):
+    if not isinstance(policies, list) or body.get("total_count") != len(policies):
         raise PreflightError("environment")
-    if policies[0].get("name") not in BRANCHES or policies[0].get("type") != "branch":
+    # The environment accumulates one rule per branch that a deployment may start
+    # from. Requiring exactly one made this check fail the moment a second rule
+    # was added, which is a legitimate protection change, not a missing one. What
+    # must hold is that every rule is a branch rule inside the reviewed set, and
+    # that an unknown rule can never widen the environment.
+    names = set()
+    for policy in policies:
+        if not isinstance(policy, dict) or policy.get("type") != "branch":
+            raise PreflightError("environment")
+        name = policy.get("name")
+        if not isinstance(name, str) or name not in BRANCHES:
+            raise PreflightError("environment")
+        names.add(name)
+    # A duplicate rule protects nothing extra and is not something GitHub creates
+    # on its own, so it stays a reason to stop.
+    if not names or len(names) != len(policies):
         raise PreflightError("environment")
 
 

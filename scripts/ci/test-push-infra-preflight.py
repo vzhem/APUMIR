@@ -245,6 +245,22 @@ class EnvironmentTests(unittest.TestCase):
                 self.run_guard(test_environment(), policies)
             self.assertEqual(error.exception.code, "environment")
 
+    def test_one_rule_per_reviewed_branch_is_the_normal_state(self):
+        # The environment gains one rule per branch allowed to start a deployment,
+        # so two rules for the two branches of this line of work must pass, and
+        # the current branch must be one of them.
+        policies = {"total_count": 2, "branch_policies": [
+            {"name": preflight.BRANCHES[0], "type": "branch"},
+            {"name": preflight.BRANCHES[1], "type": "branch"},
+        ]}
+        self.run_guard(test_environment(), policies)
+        # An extra rule for any other branch widens the environment: fail closed.
+        widened = {"total_count": 3, "branch_policies": policies["branch_policies"] +
+                   [{"name": "some-other-branch", "type": "branch"}]}
+        with self.assertRaises(preflight.PreflightError) as error:
+            self.run_guard(test_environment(), widened)
+        self.assertEqual(error.exception.code, "environment")
+
     def test_api_errors_fail_closed(self):
         for first, second in ((404, 200), (403, 200), (200, 404), (200, 500)):
             with self.subTest(first=first, second=second), self.assertRaises(preflight.PreflightError):
