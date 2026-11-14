@@ -583,34 +583,51 @@ Cloudflare. Создана только первая storage-free версия �
 
 ## 5. Развёртывание рабочего сервиса (2026-11-14)
 
-Подготовлено отдельно от создания выключенного прототипа и **не запускалось**.
+Подготовлено и проверено офлайн. **Развёртывание ещё не запускалось.**
 
-Что нужно от владельца, по порядку:
+Состояние окружения `apu-push-staging` (сверено по API и по скриншоту владельца):
 
-1. **Разрешить текущую ветку в окружении.** Сейчас deployment branch policy
-   окружения `apu-push-staging` разрешает только `arena/1266946d-apumir`
-   (проверено API). Добавьте правило **Branch** `arena/2d5de8a6-apumir` в
-   Settings → Environments → apu-push-staging → Deployment branches and tags.
-   Интерфейс агента это изменить не может (HTTP 403), поэтому без этого шага
-   review-джоб не запустится.
-2. **Добавить секрет `APU_PUSH_RATE_KEY`** в то же окружение: случайная строка
-   из 32–128 шестнадцатеричных символов. Она нужна Worker'у, чтобы считать
-   HMAC идентичности источника; значение в чат не присылать.
-3. Убедиться, что в окружении есть `APU_PUSH_CLOUDFLARE_ACCOUNT_ID`,
-   `APU_PUSH_CLOUDFLARE_DEPLOY_TOKEN` (Workers Scripts → Edit, один аккаунт) и
-   `APU_PUSH_FCM_SERVICE_ACCOUNT` (JSON сервисного аккаунта).
+- deployment branch policy разрешает обе ветки линии работ
+  (`arena/1266946d-apumir` и `arena/2d5de8a6-apumir`), review владельца включён,
+  admin-bypass выключен;
+- есть `APU_PUSH_CLOUDFLARE_ACCOUNT_ID`, `APU_PUSH_CLOUDFLARE_DEPLOY_TOKEN`,
+  `APU_PUSH_CLOUDFLARE_TOKEN`, `APU_PUSH_FCM_SERVICE_ACCOUNT`,
+  `APU_PUSH_REFERENCE_ANDROID_CONFIG`;
+- `APU_PUSH_RATE_KEY` пока нет — и это не блокирует запуск: скрипт сгенерирует
+  один случайный ключ на деплой и не напечатает его. Ключ нужен только для HMAC
+  идентичности источника, его не держит ни один клиент; стабильность между
+  передеплоями — единственная причина завести секрет:
+  Settings → Environments → `apu-push-staging` → Add secret →
+  `APU_PUSH_RATE_KEY` = 64 hex-символа
+  (`python3 -c "import secrets;print(secrets.token_hex(32))"`). Значение в чат не
+  присылать.
 
-Дальше — отдельное решение о развёртывании:
+Как проходит деплой (`scripts/ci/push-deploy.py`):
 
-- запуск `deploy-push.yml` через `workflow_dispatch` на ветке
-  `arena/2d5de8a6-apumir` (или коммит с маркером `[deploy-push]`);
-- GitHub останавливает job на review — одобряет владелец, увидев точный SHA;
-- job загружает версию с включёнными флагами и печатает `HEALTH=…`.
+1. `npm ci --prefix tools/worker/push` — закреплённый Wrangler;
+2. четыре `wrangler secret put` — `FCM_PROJECT_ID`, `FCM_CLIENT_EMAIL`,
+   `FCM_PRIVATE_KEY`, `PUSH_RATE_KEY`; значения подаются на stdin и в argv не
+   попадают. Project ID берётся из того же JSON сервисного аккаунта, потому что
+   без него Worker считает себя выключенным;
+3. один `wrangler deploy` по `wrangler.push.toml` с `--var PUSH_ENABLED:true
+   --var MAILBOX_ENABLED:true` и явным `--name apu-push`;
+4. один публичный `GET /health` → `HEALTH=OK` или `HEALTH=UNEXPECTED`.
+   Оба флага и все креды проверяются самим Worker'ом, поэтому `503` означает
+   «что-то из перечисленного не подхватилось», а не сетевую ошибку.
 
-Откат: повторный запуск того же workflow с выключенными флагами
-(`wrangler secret`/переменные) или предыдущая версия в дашборде Cloudflare.
-Скрипт ничего не удаляет сам, поэтому неудачный прогон разбирается вручную.
+Запуск — отдельное решение владельца на конкретном SHA:
 
-Чего этот раздел не обещает: что Google примет креды, что телефон получит
-wake, что сообщение дойдёт. `HEALTH=OK` — это ответ самого Worker'а о своей
-конфигурации, не проверка FCM и не доставка.
+- `gh workflow run deploy-push.yml --ref arena/2d5de8a6-apumir` (или коммит с
+  маркером `[deploy-push]`);
+- GitHub останавливает job на review — одобряется точный SHA, который показан в
+  запуске.
+
+Откат: повторный `wrangler deploy` с `--var PUSH_ENABLED:false` (или
+`MAILBOX_ENABLED:false`), либо предыдущая версия в дашборде Cloudflare. Скрипт
+ничего не удаляет и не повторяет, поэтому неудачный прогон разбирается вручную;
+при отказе на секрете сервис может остаться частично настроенным — это написано
+и в сообщении об ошибке.
+
+Чего этот раздел не обещает: что Google примет креды, что телефон получит wake,
+что сообщение дойдёт. `HEALTH=OK` — ответ самого Worker'а о своей конфигурации,
+не проверка FCM и не доставка.
