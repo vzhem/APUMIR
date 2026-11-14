@@ -49,7 +49,7 @@ internal class PushEpochDelivery(
      * binding. Only the sender direction can produce an offer, and only a live
      * registration with an accepted epoch can be offered at all.
      */
-    fun offer(
+    suspend fun offer(
         state: PushRegistrationState.State,
         peerId: String,
         localBinding: ByteArray,
@@ -58,7 +58,7 @@ internal class PushEpochDelivery(
     ): Outcome = send(state, peerId, localBinding, pinnedPeer, localSecret)
 
     /** Sends the revocation of an epoch the peer must stop using. */
-    fun revoke(
+    suspend fun revoke(
         state: PushRegistrationState.State,
         peerId: String,
         localBinding: ByteArray,
@@ -71,7 +71,7 @@ internal class PushEpochDelivery(
         return send(state, peerId, localBinding, pinnedPeer, localSecret)
     }
 
-    private fun send(
+    private suspend fun send(
         state: PushRegistrationState.State,
         peerId: String,
         localBinding: ByteArray,
@@ -98,7 +98,7 @@ internal class PushEpochDelivery(
             ) return Outcome.NotReady
 
             val now = nowMs()
-            val expiresAt = now + ttl
+            val expiresAt = now + ttlMs
             if (!PushMailboxProtocol.validTimestamp(now)) return Outcome.NotReady
             val epoch = PushEpochProtocol.State.from(packet)
             val draft = PushMailboxOutbox.Draft(
