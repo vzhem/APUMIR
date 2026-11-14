@@ -52,7 +52,7 @@ enum class DiagnosticsLineTone {
 // Заголовки разделов перечислены явно: под этот шаблон не попадут ни метки
 // приватности вида [contact], ни скрытые тела сообщений.
 private val toneSectionRegex = Regex(
-    "^\\[(?:сводка|окружение|сеть|обновления|ядро|mqtt|помощники|сообщения|передачи|сессия|журнал|лог процесса)\\]",
+    "^\\[(?:сводка|окружение|сеть|обновления|ядро|mqtt|помощники|сообщения|push|передачи|сессия|журнал|лог процесса)\\]",
 )
 private val toneBadSummaryRegex = Regex("^✖")
 private val toneWarnSummaryRegex = Regex("^!")
@@ -696,7 +696,8 @@ object DiagnosticsReport {
         appendMqtt(facts)
         appendHelperRoutes(facts)
         appendMessages(facts)
-        PushDiagnosticsReport.appendPush(this, facts)
+        // Раздел [push] живёт в PushDiagnosticsReport.kt (потолок god-файла).
+        appendPush(facts)
         append(facts.operationalHealth.render())
         append(facts.operationalDetails)
         appendLine()

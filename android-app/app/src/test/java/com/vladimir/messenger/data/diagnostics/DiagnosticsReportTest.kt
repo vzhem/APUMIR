@@ -1251,6 +1251,51 @@ class DiagnosticsReportTest {
         }
     }
 
+    @Test fun pushSectionAnswersWhereTheWakeStopped() {
+        // Раздел существует ровно потому, что отчёт v11.74.512 не сказал о push
+        // ни слова: провал приёма выглядел как «тихое приложение».
+        val snapshot = com.vladimir.messenger.data.push.PushDiagnostics.Snapshot(
+            gateOpen = true,
+            receiveEnabled = false,
+            tokenRecorded = true,
+            registeredRoutes = 0,
+            phase = com.vladimir.messenger.data.push.PushDiagnostics.Phase.FAILED,
+            lastRegisterAtMs = 1_700_000_000_000L,
+            signalsReceived = 0,
+            signalsRejected = 2,
+            lastSignalAtMs = 0L,
+            wakeAttempts = 1,
+            lastWake = com.vladimir.messenger.data.push.PushDiagnostics.Wake.NOT_REGISTERED,
+            lastWakeAtMs = 1_700_000_000_000L,
+            inboxPending = "0",
+            endpointReachable = true,
+            lastError = "token registration",
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        for (line in listOf(
+            "[push]",
+            "гейт=открыт",
+            "приём=off",
+            "токен=записан",
+            "маршрутов=0",
+            "фаза=failed",
+            "сигналов=0 · отклонено=2",
+            "сигнал_назад=не было",
+            "последнее=not_registered",
+            "служба=доступна",
+        )) {
+            assertTrue("нет строки: $line", report.contains(line))
+        }
+        // Значение токена и маршрут в раздел не попадают — только «записан»/«нет».
+        assertFalse(report.contains("маршрут="))
+    }
+
+    @Test fun pushSectionSaysSoWhenItWasNotCollected() {
+        val report = DiagnosticsReport.render(facts(), emptyList(), emptyList())
+        assertTrue(report.contains("[push]"))
+        assertTrue(report.contains("нет данных"))
+    }
+
     @Test fun operationalMetricsAndSafeKeyReasonsReachReport() {
         val state = OperationalSnapshot(counters = mapOf(OperationalCounter.STORY_PACKET_DEFERRED to 3L))
         val report = DiagnosticsReport.render(facts().copy(operationalHealth = state,
