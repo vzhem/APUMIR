@@ -87,7 +87,10 @@ class PushIngressContracts(unittest.TestCase):
     def test_pin_learning_is_preserved_for_ordinary_opened_messages(self):
         helper = HELPER.read_text(encoding="utf-8")
         self.assertIn("router.rememberOpenedMessageBinding(senderId, wire)", helper)
-        self.assertIn("TransferDiagnostics.notePeerKeyChanged()", helper)
+        # A changed binding is counted, and the counter names the path it was
+        # caught on: the opened-message path, not the HELLO handshake.
+        self.assertIn("TransferDiagnostics.notePeerKeyChanged(", helper)
+        self.assertIn("TransferDiagnostics.KeyChangedPath.OPENED", helper)
         self.assertEqual(self.source.count("rememberOpenedMessageBinding(fileTransferRouter,"), 2)
 
 
