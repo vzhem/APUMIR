@@ -3892,7 +3892,7 @@ impl P2PCore {
                                                             // «своя переписка идёт первой»).
                                                             if !is_own_origin {
                                                                 if let Some(custody) = relay_custody {
-                                                                    match custody.store.remove_encrypted(msg_id) {
+                                                                    match custody.store.remove_encrypted(&msg_id) {
                                                                         Ok(true) => tracing::info!(
                                                                             "MESH relay: released the durable copy of {} the RAM queue refused",
                                                                             msg_id
