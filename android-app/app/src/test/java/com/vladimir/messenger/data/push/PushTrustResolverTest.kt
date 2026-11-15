@@ -82,6 +82,20 @@ class PushTrustResolverTest {
         assertNull(resolver(state = revoking).resolveForRegistration(peerId))
     }
 
+    @Test fun aFirstRegistrationNeedsNoRecordYet() = runBlocking {
+        // Замкнутый круг из отчёта 518: запись заводит только register через
+        // journal.ensure, а ensure звался ПОСЛЕ resolveForRegistration. Пока
+        // отсутствие записи давало null, первая регистрация была невозможна,
+        // и «маршрутов=0» не двигался ни одним повтором.
+        assertNotNull(resolver(state = null).resolveForRegistration(peerId))
+        // Приём такой записи не принимает: маршрута ещё не существует.
+        assertNull(resolver(state = null).resolve(peerId))
+        // И Pass с отсутствующей записью ничего не выдумывает: эпохи нет.
+        resolver(state = null).resolveForRegistration(peerId)!!.use {
+            assertNull(it.registration)
+        }
+    }
+
     @Test fun anUnreadableJournalIsNotAnEmptyJournal() = runBlocking {
         val unavailable = PushTrustResolver(
             localNodeId = { nodeId },

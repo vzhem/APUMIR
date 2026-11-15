@@ -251,6 +251,7 @@ EXPECTED = {
         "aLivePairYieldsAPassBoundToTheCurrentValues",
         "missingValuesAreNeverTurnedIntoTrust",
         "aReceivingPassRequiresAServerConfirmedRegistration",
+        "aFirstRegistrationNeedsNoRecordYet",
         "anUnreadableJournalIsNotAnEmptyJournal",
         "aPassNeverInventsMaterialFromAFailingOrMalformedDerivation",
         "aSnapshotIsTheSameLiveReadsWithoutDerivation",

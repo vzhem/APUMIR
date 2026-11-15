@@ -126,10 +126,27 @@ internal class PushTrustResolver(
             val participants = PushRegistrationStore.Participants(nodeId, peerId, local, pin)
             val read = registration(participants)
             // "No record" is distinct from "the journal is unreadable", but
-            // neither may be turned into trust or into silence.
-            val state = (read as? PushRegistrationStore.Result.Ready)?.state ?: return null
-            val usable = state.phase == PushRegistrationState.Phase.ACTIVE && state.epochHex.isNotEmpty() &&
-                (!requireRegistered || state.registeredAtMs > 0)
+            // neither may be turned into trust or into silence. Trust here is
+            // the pin, the local binding and the exchange secret; the record
+            // only carries the epoch.
+            val state = (read as? PushRegistrationStore.Result.Ready)?.state
+            // Приём требует записи, которую сервер уже подтвердил: без неё
+            // маршрута не существует. (Ре)регистрация — нет, и именно поэтому
+            // первая регистрация вообще возможна. Запись для свежей пары
+            // заводит `PushRegistrationRunner.register` через `journal.ensure`,
+            // а эпоху читает ОБРАТНО из журнала. Раньше отсутствие записи давало
+            // null и здесь, поэтому `ensure` был недостижим: он звался только
+            // после успешного resolveForRegistration, а успех требовал уже
+            // готовой записи. Замкнутый круг, который не открывалось ни одним
+            // повтором. В отчёте с телефона на 518 он виден как
+            // «маршрутов=0» и «фаза=failed» при живом пине и доступной службе.
+            val usable = when {
+                requireRegistered ->
+                    state != null && state.phase == PushRegistrationState.Phase.ACTIVE &&
+                        state.epochHex.isNotEmpty() && state.registeredAtMs > 0
+                state == null -> true
+                else -> state.phase == PushRegistrationState.Phase.ACTIVE && state.epochHex.isNotEmpty()
+            }
             if (!usable) return null
             Pass(nodeId, peerId, local, secret, pin, state, crypto).also { keep = true }
         } catch (cancelled: CancellationException) {
