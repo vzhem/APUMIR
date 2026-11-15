@@ -295,6 +295,47 @@ object TransferDiagnostics {
         }
     }
 
+    /** Почему запрос ранга собеседнику не ушёл. Причина, а не «молча нет». */
+    enum class RankRefusalReason {
+        /** Суточный гейт частоты ещё не отпустил: запрос намеренно не повторялся. */
+        GATE_DAILY,
+        /** Чата с этим собеседником на телефоне нет — отправлять запрос некуда. */
+        NO_CHAT,
+        /** Ядро отказало: письмо не ушло и не легло в офлайн-очередь. */
+        NO_OWN_NODE,
+    }
+
+    /**
+     * Запрос ранга не ушёл. Раньше отказ был молчаливым: значок VIP не
+     * появлялся, и по отчёту нельзя было понять, почему — суточный гейт,
+     * отсутствие чата или отказ ядра (владелец 2026-11-14: «этот телефон у
+     * кого-то не видит VIP-статус»). Причина считается и называется: числа
+     * видны в разделе `[сессия]`, первая и каждая двадцатая — в журнале,
+     * чтобы часто спрашиваемый чат не заливал его строками.
+     */
+    fun noteRankRefusal(reason: RankRefusalReason) {
+        val key = when (reason) {
+            RankRefusalReason.GATE_DAILY -> "rank_refused_gate_daily"
+            RankRefusalReason.NO_CHAT -> "rank_refused_no_chat"
+            RankRefusalReason.NO_OWN_NODE -> "rank_refused_no_own_node"
+        }
+        val total = bump(key)
+        if (total == 1L || total % 20L == 0L) {
+            append(
+                DiagnosticsLevel.WARN,
+                "rank",
+                when (reason) {
+                    RankRefusalReason.GATE_DAILY ->
+                        "ранг собеседника не запрошен: ещё не прошёл суточный интервал между запросами"
+                    RankRefusalReason.NO_CHAT ->
+                        "ранг собеседника не запрошен: чата с ним на этом телефоне нет"
+                    RankRefusalReason.NO_OWN_NODE ->
+                        "ранг собеседника не запрошен: ядро отказало, в офлайн-очередь письмо не легло"
+                } + " (попыток с начала сессии: $total)",
+            )
+        }
+    }
+
     /** Сколько расхождений поймано на каждой дороге; null — таких не было. */
     @Volatile
     var helloKeyMismatch: Long? = null

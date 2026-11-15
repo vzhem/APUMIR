@@ -136,9 +136,47 @@ class DiagnosticsContractsTest(unittest.TestCase):
                 self.assertIn(marker, wake)
         self.assertNotIn("startForegroundService", wake, "пробуждение не поднимает службу само")
 
+    def test_every_diagnostics_helper_the_code_calls_actually_exists(self):
+        """Вызов несуществующей функции должен падать здесь, а не на компиляции.
+
+        Ровно эта ошибка сломала 516: `PresenceReportStrings.appendPresenceLine`
+        позвали с лишним аргументом, а `PeerRankBroadcaster` — с несуществующей
+        `noteRankRefusal`, и красным стал каждый прогон тестов, хотя сами тесты
+        были целы. Регулярка учитывает и перенос вызова на следующую строку:
+        `TransferDiagnostics\n    .noteRankRefusal(...)` — именно так он и
+        написан в PeerRankBroadcaster, и именно поэтому прежние проверки его не
+        видели.
+        """
+        diag = DIAG / "TransferDiagnostics.kt"
+        declared = set()
+        for line in source(diag).splitlines():
+            m = re.match(
+                r"\s*(?:@\w+\s+)*(?:(?:internal|private|public|suspend|inline|override|operator|external)\s+)*"
+                r"(?:fun|val|var|const val|object|class|data class|enum class)\s+([A-Za-z_]\w*)",
+                line,
+            )
+            if m:
+                declared.add(m.group(1))
+        self.assertIn("noteRankRefusal", declared)
+        self.assertIn("count", declared)
+        missing = []
+        for path in sorted(MAIN.rglob("*.kt")):
+            if path == diag:
+                continue
+            text = path.read_text(encoding="utf-8")
+            for m in re.finditer(r"TransferDiagnostics(\s*\.\s*[A-Za-z_]\w*)", text):
+                name = re.search(r"\.\s*([A-Za-z_]\w*)$", m.group(1)).group(1)
+                # Имя файла в комментариях и строках — не вызов.
+                if name == "kt":
+                    continue
+                if name not in declared:
+                    missing.append("%s: TransferDiagnostics.%s" % (path.relative_to(ROOT), name))
+        self.assertEqual(missing, [], "calls to helpers TransferDiagnostics does not declare")
+
     def test_report_has_every_section_the_owner_reads(self):
         report = (source(DIAG / "DiagnosticsReport.kt") + source(DIAG / "UpdateDiagnosticsReport.kt")
-                  + source(DIAG / "CoreDiagnosticStage.kt") + source(DIAG / "PushDiagnosticsReport.kt"))
+                  + source(DIAG / "CoreDiagnosticStage.kt") + source(DIAG / "PushDiagnosticsReport.kt")
+                  + source(DIAG / "PresenceReportStrings.kt"))
         for section in (
             "[сводка]",
             "[push]",
@@ -151,12 +189,42 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "[сообщения]",
             "[передачи]",
             "[сессия]",
+            "[присутствие]",
             "[журнал]",
             "[лог процесса]",
         ):
             with self.subTest(section=section):
                 self.assertIn(section, report)
         # Сводка отвечает на вопросы, за которыми открывают «Логи».
+        # Присутствие — часть отчёта: раздел счётчиков наблюдателя живёт в
+        # PresenceReportStrings.kt и строится только из полей, которые ядро
+        # передаёт; пустых значений в нём не появляется.
+        presence = source(DIAG / "PresenceReportStrings.kt")
+        for marker in (
+            "\"[присутствие]\"",
+            "fun appendPresenceLine(facts: DiagnosticsFacts)",
+            "val counterKeys",
+            "PRESENCE_OBSERVED = \"presence_observed\"",
+            "PRESENCE_DISCARDED_STALE = \"presence_discarded_stale\"",
+            "PRESENCE_LOST = \"presence_lost\"",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, presence)
+        # Вызов и объявление сходятся по арности: в 516 сюда передали лишний
+        # второй аргумент (context) и сборка упала на несуществующей перегрузке.
+        core = source(DIAG / "DiagnosticsReport.kt")
+        self.assertIn("fun appendPresenceLine(facts: DiagnosticsFacts): String", presence)
+        self.assertIn("PresenceReportStrings.appendPresenceLine(facts)", core)
+        self.assertNotIn("appendPresenceLine(facts,", core)
+        self.assertNotIn("appendPresenceLine(facts, null", core)
+        # Раздел счётчиков присутствия действительно встроен в отчёт.
+        self.assertIn("appendPresence(facts)", core)
+        # Ни одного поля, которого нет в DiagnosticsFacts: иначе раздел снова
+        # сломает сборку (ровно так она и ломалась в 516).
+        for phantom in ("lastPeerDiscoveredAtMs", "presenceDiscardedCount", "beaconLeftCount"):
+            with self.subTest(phantom=phantom):
+                self.assertNotIn(phantom, presence)
+
         for title in ("Сеть", "Брокер", "Ядро", "Сообщения", "Передачи", "Прямой канал", "Батарея"):
             with self.subTest(title=title):
                 self.assertIn('"%s"' % title, report)

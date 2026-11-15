@@ -5,6 +5,7 @@ The behavioral tests run on the actual Kotlin/Rust implementations. These
 checks catch integration regressions; they do not replace two-phone testing.
 """
 from pathlib import Path
+import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -37,6 +38,41 @@ class PresenceWiring(unittest.TestCase):
         self.assertIn("pub const LIVE_PRESENCE_TTL_MS: i64 = 200_000", rust)
         self.assertIn("const val MAX_CLOCK_SKEW_MS = 60_000L", kotlin)
         self.assertIn("pub const MAX_FUTURE_SKEW_MS: i64 = 60_000", rust)
+
+    def test_every_discard_reason_and_retirement_is_counted_and_reachable(self):
+        """Отказ наблюдателя без причины — это молчаливый сбой.
+
+        Каждая дорожка в `PresenceRecovery` обязана звать счётчик из
+        `PresenceReportStrings`, иначе в отчёте приходит ноль наблюдений и
+        «ошибок 0» на телефоне, который соседей не видит.
+        """
+        kotlin = read(APP, "service/PresenceRecovery.kt")
+        for marker in (
+            "TransferDiagnostics.count(PresenceReportStrings.PRESENCE_DISCARDED_NO_TIMESTAMP)",
+            "TransferDiagnostics.count(PresenceReportStrings.PRESENCE_DISCARDED_STALE)",
+            "TransferDiagnostics.count(PresenceReportStrings.PRESENCE_DISCARDED_CLOCK_SKEW)",
+            "TransferDiagnostics.count(PresenceReportStrings.PRESENCE_DISCARDED_DUPLICATE)",
+            "TransferDiagnostics.count(PresenceReportStrings.PRESENCE_DISCARDED_LIMIT)",
+            "TransferDiagnostics.count(PresenceReportStrings.PRESENCE_OBSERVED)",
+            "TransferDiagnostics.count(PresenceReportStrings.PRESENCE_BECAME_ONLINE)",
+            "TransferDiagnostics.count(PresenceReportStrings.PRESENCE_RETIRED_EXPIRED)",
+            "TransferDiagnostics.count(PresenceReportStrings.PRESENCE_LOST)",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, kotlin)
+        strings = read(APP, "data/diagnostics/PresenceReportStrings.kt")
+        # Счётчики присутствия исключаются из [сессия]: иначе одно число
+        # печатается дважды и выглядит как два разных факта.
+        report = read(APP, "data/diagnostics/DiagnosticsReport.kt")
+        self.assertIn("it.key !in PresenceReportStrings.counterKeys", report)
+        declared = re.findall(r'const val (PRESENCE_[A-Z_]+) = "([a-z_]+)"', strings)
+        listed = strings.split("val counterKeys", 1)[1].split(")", 1)[0]
+        self.assertGreaterEqual(len(declared), 9, "every discard reason needs its own key")
+        for name, key in declared:
+            # counterKeys перечисляет имена констант: забыть одну — значит
+            # печатать одно число дважды в [сессия].
+            with self.subTest(counter=name):
+                self.assertIn(name, listed, "key declared but missing from counterKeys")
 
     def test_gossip_invite_and_old_broker_cache_are_not_online(self):
         core = read(RUST, "engine/core.rs")
