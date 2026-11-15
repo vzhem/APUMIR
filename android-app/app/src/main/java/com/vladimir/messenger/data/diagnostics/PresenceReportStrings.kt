@@ -65,6 +65,18 @@ object PresenceReportStrings {
     /** Явный сигнал «сосед пропал» от ядра. */
     const val PRESENCE_LOST = "presence_lost"
 
+    /**
+     * Наблюдение свежее и прошло все проверки, но контакта для него нет:
+     * ни по отпечатку, ни по id. Такому наблюдению некуда записаться, и
+     * сосед остаётся «не в сети» в базе, хотя ядро его только что видела.
+     *
+     * Владелец 2026-11-15: «все телефоны включены, но показывает, что все
+     * друзья вышли из сети». Это число отличает «наблюдений не приходит»
+     * (ядро молчит) от «приходят, но записывать некуда» (не тот контакт) —
+     * у этих двух диагнозов разное лечение.
+     */
+    const val PRESENCE_UNKNOWN_CONTACT = "presence_unknown_contact"
+
     /** Все ключи раздела: чтобы [сессия] не печатала их сырым видом второй раз. */
     val counterKeys: Set<String> = setOf(
         PRESENCE_OBSERVED,
@@ -76,6 +88,7 @@ object PresenceReportStrings {
         PRESENCE_DISCARDED_LIMIT,
         PRESENCE_RETIRED_EXPIRED,
         PRESENCE_LOST,
+        PRESENCE_UNKNOWN_CONTACT,
     )
 
     private fun Map<String, Long>.value(key: String): Long = this[key] ?: 0L

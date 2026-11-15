@@ -136,6 +136,41 @@ class DiagnosticsContractsTest(unittest.TestCase):
                 self.assertIn(marker, wake)
         self.assertNotIn("startForegroundService", wake, "пробуждение не поднимает службу само")
 
+    def test_every_presence_constant_the_code_names_is_declared(self):
+        """Ссылка на необъявленную константу должна падать здесь, а не на компиляции.
+
+        Ровно эта ошибка уже была: `PRESENCE_UNKNOWN_CONTACT` упоминался в
+        `PresenceContactResolver.kt` и в разделе `[присутствие]`, а объявления
+        `const val` не получилось — и `:app:compileReleaseKotlin` упал на двух
+        файлах сразу. Регулярка учитывает и перенос имени на следующую строку:
+        `PresenceReportStrings\n    .PRESENCE_…` — именно так он и написан.
+        """
+        strings = DIAG / "PresenceReportStrings.kt"
+        body = strings.read_text(encoding="utf-8")
+        declared = set()
+        for line in body.splitlines():
+            m = re.match(
+                r"\s*(?:@\w+\s+)*(?:(?:internal|private|public|const)\s+)*"
+                r"(?:val|var|fun)\s+([A-Za-z_]\w*)",
+                line,
+            )
+            if m:
+                declared.add(m.group(1))
+        # Константы presence и общий список ключей обязаны существовать.
+        self.assertIn("PRESENCE_UNKNOWN_CONTACT", declared)
+        self.assertIn("counterKeys", declared)
+        self.assertIn("appendPresenceLine", declared)
+        missing = []
+        for path in sorted(MAIN.rglob("*.kt")):
+            if path == strings:
+                continue
+            text = strip_comments(path.read_text(encoding="utf-8"))
+            for m in re.finditer(r"PresenceReportStrings(?:\s*\.\s*|\.)([A-Z][A-Z0-9_]*)", text):
+                name = m.group(1)
+                if name not in declared:
+                    missing.append("%s: PresenceReportStrings.%s" % (path.relative_to(ROOT), name))
+        self.assertEqual(missing, [], "references to constants PresenceReportStrings does not declare")
+
     def test_a_direct_delivery_ends_the_relay_obligation(self):
         """Доставленное прямо не должно предлагаться соседям «на всякий случай».
 
