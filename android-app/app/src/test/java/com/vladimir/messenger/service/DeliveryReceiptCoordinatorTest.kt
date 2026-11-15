@@ -38,7 +38,7 @@ class DeliveryReceiptCoordinatorTest {
         assertEquals(listOf(true), flags)
         // Обычный кадр без строки по-прежнему молчит: правило ужесточено только
         // для служебных.
-        assertFalse(acknowledgeStoredIncomingText("eph1-abc", "pk_sender", "chat", false, { null }, matched(true), flags::add))
+        assertFalse(acknowledgeStoredIncomingText("eph1-abc", "pk_sender", "chat", false, load = { null }, openedByExpectedSender = matched(true), sendAck = flags::add))
     }
 
     @Test fun onlyATransportIdOfAServicePacketCountsAsAFrameWithoutRow() {
@@ -56,11 +56,11 @@ class DeliveryReceiptCoordinatorTest {
         val flags = mutableListOf<Boolean>()
         var checks = 0
         fun matched(result: Boolean): () -> Boolean = { checks++; result }
-        assertFalse(acknowledgeStoredIncomingText("m1", "pk_sender", "chat", false, { null }, matched(true), flags::add))
-        assertFalse(acknowledgeStoredIncomingText("m1", "pk_sender", "chat", false, { row(sender = "pk_other") }, matched(true), flags::add))
+        assertFalse(acknowledgeStoredIncomingText("m1", "pk_sender", "chat", false, load = { null }, openedByExpectedSender = matched(true), sendAck = flags::add))
+        assertFalse(acknowledgeStoredIncomingText("m1", "pk_sender", "chat", false, load = { row(sender = "pk_other") }, openedByExpectedSender = matched(true), sendAck = flags::add))
         assertEquals(0, checks)
-        assertTrue(acknowledgeStoredIncomingText("m1", "pk_sender", "chat", true, { null }, matched(false), flags::add))
-        assertTrue(acknowledgeStoredIncomingText("m1", "pk_sender", "chat", false, { row() }, matched(true), flags::add))
+        assertTrue(acknowledgeStoredIncomingText("m1", "pk_sender", "chat", true, load = { null }, openedByExpectedSender = matched(false), sendAck = flags::add))
+        assertTrue(acknowledgeStoredIncomingText("m1", "pk_sender", "chat", false, load = { row() }, openedByExpectedSender = matched(true), sendAck = flags::add))
         assertEquals(listOf(false, true), flags)
         assertEquals(2, checks)
     }
