@@ -260,6 +260,7 @@ fn restore_relay_custody(
             let mut queue_full = 0usize;
             let mut own_full = 0usize;
             let mut transient_dropped = 0usize;
+            let mut stale_own_skipped = 0usize;
             for record in outcome.records {
                 // Старые служебные записи, в том числе запечатанные файловые
                 // фрагменты с `frag-` ID и scope `direct`, переживали неделю.
@@ -274,6 +275,24 @@ fn restore_relay_custody(
                         let _ = custody.store.remove_encrypted(&record.msg_id);
                     }
                     transient_dropped += 1;
+                    continue;
+                }
+                // Владелец 2026-11-15: «нужно сделать так чтобы эти очереди не
+                // пладились и не копились». Своя запись, которой на складе
+                // больше суток, в RAM не грузится: её строка в телефоне почти
+                // наверняка уже закрыта, а грузить её значит занимать резерв
+                // переписки записью, которую никто не ждёт, и расшифровывать её
+                // на каждом старте. На диске она остаётся и снимается обычным
+                // абсолютным TTL; если телефон всё ещё хочет её отправить,
+                // досылка заново поставит её в RAM через `enqueue_own`.
+                if !own_origin.is_empty()
+                    && record.origin_sender == own_origin
+                    && !crate::network::relay_queue::own_restore_admitted(
+                        record.created_at_ms,
+                        now_ms,
+                    )
+                {
+                    stale_own_skipped += 1;
                     continue;
                 }
                 // enqueue_first (а не enqueue): под восстановление освобождает
@@ -322,6 +341,16 @@ fn restore_relay_custody(
                 tracing::info!(
                     "MESH durable: убрано {} служебных записей (сигналы/пакеты передачи) — их место не занимает переписку",
                     transient_dropped
+                );
+            }
+            if stale_own_skipped > 0 {
+                // Владелец 2026-11-15: «своё ждёт получателя=1000» при шести
+                // ожидающих в телефоне. Это и были они — записи, чья строка
+                // давно закрыта. Числом в отчёте: сколько резерв переписки не
+                // занял мусором на этом старте.
+                tracing::info!(
+                    "MESH durable: пропущено {} своих записей старше суток — их строки в телефоне закрыты, резерв переписки занят свежим",
+                    stale_own_skipped
                 );
             }
             if recipient_full > 0 || queue_full > 0 || own_full > 0 {
@@ -3834,11 +3863,50 @@ impl P2PCore {
                                                             "MESH relay: {} not stored (duplicate/hop limit)",
                                                             msg_id
                                                         ),
-                                                        Err(e) => tracing::warn!(
-                                                            "MESH relay: failed to store {}: {}",
-                                                            msg_id,
-                                                            e
-                                                        ),
+                                                        Err(e) => {
+                                                            tracing::warn!(
+                                                                "MESH relay: failed to store {}: {}",
+                                                                msg_id,
+                                                                e
+                                                            );
+                                                            // Диск и RAM — одна и та же custody, и
+                                                            // раньше они расходились. Копия для
+                                                            // чужого получателя писалась на диск
+                                                            // ДО решения RAM-очереди, поэтому её
+                                                            // отказ (предел на получателя либо
+                                                            // общий) оставлял запись в складе
+                                                            // навсегда: снять её мог только
+                                                            // абсолютный TTL через неделю. За
+                                                            // неделю такие записи набирались
+                                                            // десятками тысяч — в отчёте с
+                                                            // телефона 17099 записей при 9
+                                                            // получателях, хотя RAM-очередь
+                                                            // держала 3621 и новых копий никто
+                                                            // не ждал. Склад рос без предела,
+                                                            // а каждая запись ещё и расшифровывалась
+                                                            // на старте.
+                                                            // Своё так не чистится: отказ своего
+                                                            // запаса означает «место переписки
+                                                            // занято», и durable-копия остаётся
+                                                            // единственной (владелец 2026-10-07:
+                                                            // «своя переписка идёт первой»).
+                                                            if !is_own_origin {
+                                                                if let Some(custody) = relay_custody {
+                                                                    match custody.store.remove_encrypted(msg_id) {
+                                                                        Ok(true) => tracing::info!(
+                                                                            "MESH relay: released the durable copy of {} the RAM queue refused",
+                                                                            msg_id
+                                                                        ),
+                                                                        Ok(false) => {}
+                                                                        Err(error) => tracing::warn!(
+                                                                            "MESH relay: durable release failed for {}: {}",
+                                                                            msg_id,
+                                                                            error
+                                                                        ),
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
