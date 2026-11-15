@@ -4,6 +4,9 @@ import java.util.UUID
 
 /** Only replaceable control, never chat/ref/rank/delete/scheduled messages. */
 object EphemeralControl {
+    /** Префикс транспортного ID служебного кадра (см. [transportId]). */
+    private const val TRANSPORT_PREFIX = "eph1-"
+
     fun isReplaceable(text: String): Boolean {
         // Periodic game snapshots are disposable; never grow the durable chat backlog.
         if (text.startsWith(com.vladimir.messenger.data.contactreset.ContactResetWire.PREFIX)) return true
@@ -25,5 +28,21 @@ object EphemeralControl {
 
     /** Stable for retry of the same caller ID/recipient; private body is not hashed/exported. */
     fun transportId(id: String, peer: String, text: String): String = if (isReplaceable(text))
-        "eph1-" + UUID.nameUUIDFromBytes(("apu-control:$peer:$id").toByteArray(Charsets.UTF_8)) else id
+        TRANSPORT_PREFIX + UUID.nameUUIDFromBytes(("apu-control:$peer:$id").toByteArray(Charsets.UTF_8)) else id
+
+    /**
+     * Это транспортный ID, выданный [transportId], а не ID сообщения переписки.
+     *
+     * У служебного кадра строки в чате не бывает, поэтому квитанция о его
+     * доставке — единственное доказательство, что он дошёл. Отчёт с телефона на
+     * 517 показал, что без этого признака такая квитанция не снимала удержание
+     * резервной копии: «ACK без локальной строки=1004» при живых
+     * «delivery ACK received for eph1-[id]».
+     *
+     * Обычный ID переписки префикса не носит, а `UUID.fromString` отсекает всё,
+     * что не канонический UUID: совпадение «на всякий случай» невозможно.
+     */
+    fun isTransportId(id: String): Boolean =
+        id.startsWith(TRANSPORT_PREFIX) &&
+            runCatching { UUID.fromString(id.substring(TRANSPORT_PREFIX.length)) }.isSuccess
 }

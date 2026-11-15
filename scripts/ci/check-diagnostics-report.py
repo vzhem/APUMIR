@@ -204,6 +204,45 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertTrue(helper.exists(), "the confirmation call must live beside its reasoning")
         self.assertIn("RustBridge.confirmMessageDelivered(messageId)", helper.read_text(encoding="utf-8"))
 
+    def test_a_service_receipt_releases_the_hold_it_proves(self):
+        """Квитанция служебного кадра обязана снимать удержание резервной копии.
+
+        Владелец 2026-11-15, отчёт с телефона на 517: «ACK без локальной строки
+        =1004» при живых «MQTT: delivery ACK received for eph1-[id]». Причина:
+        снятие удержания звалось только тогда, когда находилась и обновлялась
+        своя строка в базе, а у служебного кадра (`eph1-…`, см.
+        `EphemeralControl.transportId`) строки в переписке не бывает. Доставленный
+        кадр продолжал жить резервной копией и пере-предлагаться соседям и
+        брокеру до истечения срока.
+
+        Признак транспортного ID и снятие удержания по нему закреплены здесь:
+        без них отчёт с телефона снова покажет копящийся резерв «своих».
+        """
+        control = source(MAIN / "data/security/EphemeralControl.kt")
+        self.assertIn("fun isTransportId(id: String): Boolean", control)
+        # Один источник правды для префикса: сборка ID и его распознавание не
+        # имеют права разойтись.
+        self.assertIn('private const val TRANSPORT_PREFIX = "eph1-"', control)
+        self.assertIn("TRANSPORT_PREFIX + UUID.nameUUIDFromBytes(", strip_comments(control))
+        routing = source(MAIN / "service/ScopedDeliveryRouting.kt")
+        body = routing.split("internal suspend fun routeOutgoingDeliveryAck(", 1)[1]
+        self.assertIn(
+            "com.vladimir.messenger.data.security.EphemeralControl.isTransportId(messageId)",
+            body,
+        )
+        # Снятие есть на ОБОИХ путях: у старого MQTT-события отправителя нет
+        # вовсе, а именно им приходит «delivery ACK received for eph1-[id]».
+        legacy = body[body.index("if (senderId == null) {"):body.index("val result = applyPeerScopedDeliveryAck(")]
+        self.assertIn("if (serviceFrame) release(messageId)", legacy)
+        scoped = body[body.index("val result = applyPeerScopedDeliveryAck("):]
+        self.assertIn("} else if (serviceFrame) {", scoped)
+        # И между ветками снятия быть не может: чужой узел, назвавшийся
+        # получателем, не имеет права снять нашу резервную копию до сверки.
+        between = body[body.index("return changed"):body.index("val result = applyPeerScopedDeliveryAck(")]
+        self.assertNotIn("release(", between)
+        # Служебный кадр не становится поводом слать зеркальную пересылку.
+        self.assertIn("if (result != ScopedDeliveryAck.REJECTED)", scoped)
+
     def test_every_diagnostics_helper_the_code_calls_actually_exists(self):
         """Вызов несуществующей функции должен падать здесь, а не на компиляции.
 
@@ -1012,8 +1051,16 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertIn("routeOutgoingDeliveryAck(messageId", service)
         routing = source(MAIN / "service/ScopedDeliveryRouting.kt")
         self.assertIn("applyOutgoingDeliveryAck(messageId", routing)  # legacy MQTT has no sender
-        self.assertLess(routing.index("applyPeerScopedDeliveryAck("), routing.index("release(messageId)"))
-        self.assertLess(routing.index("release(messageId)"), routing.index("forward?.invoke()"))
+        # Старый MQTT-путь: сначала запись, потом снятие (в том числе для
+        # служебного кадра, у которого строки в переписке не бывает).
+        legacy = routing[routing.index("if (senderId == null) {"):routing.index("val result = applyPeerScopedDeliveryAck(")]
+        self.assertLess(legacy.index("applyOutgoingDeliveryAck("), legacy.index("release(messageId)"))
+        # Ветка с заявленным отправителем: сверка строки с получателем идёт
+        # РАНЬШЕ снятия удержания — иначе чужой узел снимал бы нашу резервную
+        # копию, назвавшись получателем.
+        scoped = routing[routing.index("val result = applyPeerScopedDeliveryAck("):]
+        self.assertLess(scoped.index("applyPeerScopedDeliveryAck("), scoped.index("release(messageId)"))
+        self.assertLess(scoped.index("release(messageId)"), scoped.index("forward?.invoke()"))
         self.assertIn("result == ScopedDeliveryAck.UPDATED || result == ScopedDeliveryAck.ALREADY_COMMITTED", routing)
         self.assertIn("if (result != ScopedDeliveryAck.REJECTED)", routing)  # MISSING may exist on the partner
         scoped = source(MAIN / "data/receipt/ScopedDeliveryAck.kt")

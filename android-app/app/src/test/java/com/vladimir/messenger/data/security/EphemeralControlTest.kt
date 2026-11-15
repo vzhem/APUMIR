@@ -14,6 +14,18 @@ class EphemeralControlTest {
             assertNotEquals(id, EphemeralControl.transportId("caller-id", "peer-b", text))
         }
     }
+    @Test fun aMintedTransportIdIsRecognisedAndAPlainMessageIdIsNot() {
+        val text = "APUTYP1|APUGAME1|signed-snapshot"
+        val minted = EphemeralControl.transportId("caller-id", "peer-a", text)
+        assertTrue(EphemeralControl.isTransportId(minted))
+        // Обычная переписка и долгие контроли свой ID не меняют.
+        assertFalse(EphemeralControl.isTransportId("user-id"))
+        // Префикс без канонического UUID — не транспортный ID.
+        assertFalse(EphemeralControl.isTransportId("eph1-"))
+        assertFalse(EphemeralControl.isTransportId("eph1-not-a-uuid"))
+        assertFalse(EphemeralControl.isTransportId("eph1-" + "0".repeat(32)))
+    }
+
     @Test fun userMessagesMediaReferencesAndDurableControlsKeepTheirIds() {
         for (text in listOf("обычное письмо", "APUGIF1|ref|media", "APUSTK1|ref|media", "APUGRP1|delete|message", "APUTYP1|invalid", "APUGRP1|typ|g|t|2", "APUGRP1|hello|binding")) {
             assertFalse(EphemeralControl.isReplaceable(text))
