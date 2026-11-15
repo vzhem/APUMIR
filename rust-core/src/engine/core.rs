@@ -3891,7 +3891,9 @@ impl P2PCore {
                                                             // единственной (владелец 2026-10-07:
                                                             // «своя переписка идёт первой»).
                                                             if !is_own_origin {
-                                                                if let Some(custody) = relay_custody {
+                                                                if let Some(custody) =
+                                                                    relay_custody.as_ref()
+                                                                {
                                                                     match custody.store.remove_encrypted(&msg_id) {
                                                                         Ok(true) => tracing::info!(
                                                                             "MESH relay: released the durable copy of {} the RAM queue refused",
