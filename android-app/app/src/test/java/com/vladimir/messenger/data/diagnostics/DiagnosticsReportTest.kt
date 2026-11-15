@@ -1395,4 +1395,49 @@ class DiagnosticsReportTest {
         assertTrue(report.contains("signing_mode_reason=missing_wrap_key"))
     }
 
+    @Test fun presenceSectionCountsObservationsAndNamesEveryDiscardReason() {
+        val report = DiagnosticsReport.render(
+            facts(
+                liveDirectSwarmPeers = 0,
+                counters = mapOf(
+                    PresenceReportStrings.PRESENCE_OBSERVED to 12L,
+                    PresenceReportStrings.PRESENCE_BECAME_ONLINE to 2L,
+                    PresenceReportStrings.PRESENCE_DISCARDED_STALE to 5L,
+                    PresenceReportStrings.PRESENCE_DISCARDED_CLOCK_SKEW to 1L,
+                    PresenceReportStrings.PRESENCE_RETIRED_EXPIRED to 4L,
+                    PresenceReportStrings.PRESENCE_LOST to 1L,
+                ),
+            ).copy(connectedPeers = 3L),
+            emptyList(),
+            emptyList(),
+        )
+        assertTrue(report.contains("[присутствие]"))
+        assertTrue(report.contains("режим маяка: обычный (известных соседей 3, широкий с 50)"))
+        assertTrue(report.contains("· подтверждённых прямых соседей 0"))
+        assertTrue(report.contains("наблюдений принято: 12 (впервые вышли в сеть: 2)"))
+        assertTrue(
+            report.contains(
+                "отброшено: 6 (без времени 0, устаревших 5, время впереди 1," +
+                    " повторов потерянного 0, предел списка 0)",
+            ),
+        )
+        assertTrue(report.contains("снято: молчанием свыше 200 с — 4, явным «пропал» — 1"))
+        // Счётчики присутствия живут в своём разделе и не печатаются второй
+        // раз сырым видом в [сессия].
+        assertFalse(report.contains("presence_observed="))
+        assertFalse(report.contains("presence_discarded_stale="))
+    }
+
+    @Test fun presenceSectionHidesDirectPeersWhenTheCoreNeverSignedThem() {
+        val report = DiagnosticsReport.render(
+            facts(liveDirectSwarmPeers = null, counters = emptyMap()).copy(connectedPeers = 120L),
+            emptyList(),
+            emptyList(),
+        )
+        assertTrue(report.contains("режим маяка: широкий (известных соседей 120, широкий с 50)"))
+        // Ядро не присылало подписанных соседей — строка молчит, а не выдумывает ноль.
+        assertFalse(report.contains("· подтверждённых прямых соседей"))
+        assertFalse(report.contains("null"))
+    }
+
 }

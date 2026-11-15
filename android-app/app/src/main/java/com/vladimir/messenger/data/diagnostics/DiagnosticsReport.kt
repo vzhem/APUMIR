@@ -1335,14 +1335,14 @@ object DiagnosticsReport {
             Counters.TRANSFER_EXPIRED_ROWS,
             Counters.TRANSFER_EXPIRED_COPIES,
         )
-        c.entries.filter { it.key !in known }.sortedBy { it.key }
+        c.entries.filter { it.key !in known && it.key !in PresenceReportStrings.counterKeys }.sortedBy { it.key }
             .forEach { (key, value) -> appendLine("$key=$value") }
         appendLine()
     }
 
     /** Добавление строки присутствия из PresenceReportStrings.kt */
     private fun StringBuilder.appendPresence(facts: DiagnosticsFacts) {
-        appendLine(com.vladimir.messenger.data.diagnostics.PresenceReportStrings.appendPresenceLine(facts, null))
+        appendLine(PresenceReportStrings.appendPresenceLine(facts))
     }
 
     private fun StringBuilder.appendJournal(

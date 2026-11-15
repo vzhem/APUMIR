@@ -9,6 +9,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import com.vladimir.messenger.data.diagnostics.PresenceReportStrings
+import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 
 /**
  * Serializes the cold-start reset, new observations and expiry. Saved online
@@ -86,20 +88,38 @@ internal class PresenceRecovery(
         mutex.withLock {
             ensureReset()
             val now = nowMs()
-            val eventAt = eventAtMs ?: return@withLock null
-            if (now <= 0L || eventAt <= 0L ||
-                (eventAt > now && eventAt - now > MAX_CLOCK_SKEW_MS) || now - eventAt > TTL_MS
-            ) return@withLock null
+            val eventAt = eventAtMs ?: 0L
+            // Почему наблюдение отброшено — отдельным счётчиком на каждую
+            // причину: «сосед не в сети» из-за устаревшего события и из-за
+            // разбега часов выглядят в базе одинаково, а чинятся по-разному.
+            if (now <= 0L || eventAt <= 0L) {
+                TransferDiagnostics.count(PresenceReportStrings.PRESENCE_DISCARDED_NO_TIMESTAMP)
+                return@withLock null
+            }
+            if (eventAt > now && eventAt - now > MAX_CLOCK_SKEW_MS) {
+                TransferDiagnostics.count(PresenceReportStrings.PRESENCE_DISCARDED_CLOCK_SKEW)
+                return@withLock null
+            }
+            if (now - eventAt > TTL_MS) {
+                TransferDiagnostics.count(PresenceReportStrings.PRESENCE_DISCARDED_STALE)
+                return@withLock null
+            }
             val seenAt = minOf(now, eventAt)
             var peer = peers[peerId]
             // A duplicate retained heartbeat cannot resurrect an explicitly
             // lost peer. A genuinely newer observation may bring it back.
-            if (peer != null && !peer.online && seenAt <= peer.seenAtMs) return@withLock null
+            if (peer != null && !peer.online && seenAt <= peer.seenAtMs) {
+                TransferDiagnostics.count(PresenceReportStrings.PRESENCE_DISCARDED_DUPLICATE)
+                return@withLock null
+            }
             if (peer == null && peers.size >= MAX_TRACKED_PEERS) {
                 // Do not evict a contact whose persisted status would otherwise
                 // remain online forever. Unknown peers can safely be forgotten.
                 val unknown = peers.entries.firstOrNull { it.value.contactId == null }?.key
-                    ?: return@withLock null
+                if (unknown == null) {
+                    TransferDiagnostics.count(PresenceReportStrings.PRESENCE_DISCARDED_LIMIT)
+                    return@withLock null
+                }
                 peers.remove(unknown)
                 notifyOffline(unknown, expired = false)
             }
@@ -123,6 +143,8 @@ internal class PresenceRecovery(
             }
             if (contactId != null && (heavy || becameOnline)) peer.contactDirty = true
             if (contactId != null && becameOnline) peer.chatsDirty = true
+            TransferDiagnostics.count(PresenceReportStrings.PRESENCE_OBSERVED)
+            if (becameOnline) TransferDiagnostics.count(PresenceReportStrings.PRESENCE_BECAME_ONLINE)
             sync(peerId, peer)
             try {
                 onOnline(peerId, peer.seenAtMs)
@@ -135,6 +157,7 @@ internal class PresenceRecovery(
         }
 
     suspend fun lost(peerId: String) = mutex.withLock {
+        TransferDiagnostics.count(PresenceReportStrings.PRESENCE_LOST)
         ensureReset()
         val peer = peers[peerId]
         if (peer == null) {
@@ -151,6 +174,7 @@ internal class PresenceRecovery(
         while (iterator.hasNext()) {
             val (id, peer) = iterator.next()
             if (peer.online && (now < peer.seenAtMs || now - peer.seenAtMs > TTL_MS)) {
+                TransferDiagnostics.count(PresenceReportStrings.PRESENCE_RETIRED_EXPIRED)
                 retire(id, peer, expired = true)
             } else {
                 // Retry partial writes even if there are no more heartbeats.
