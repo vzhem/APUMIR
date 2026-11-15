@@ -51,8 +51,8 @@ internal suspend fun storedIncomingText(
     senderId: String,
     chatId: String,
     inserted: Boolean,
-    load: suspend (String) -> MessageEntity?,
     serviceFrame: Boolean = false,
+    load: suspend (String) -> MessageEntity?,
 ): Boolean {
     if (inserted) return true
     // Служебный кадр, который отправитель сам пометил заменяемым, строки в
@@ -60,6 +60,9 @@ internal suspend fun storedIncomingText(
     // всё равно: без квитанции резервная копия живёт до конца срока хранения
     // и занимает резерв переписки (владелец, 2026-11-15: «ACK без локальной
     // строки=815», склад пересылки 17099 записей при шести телефонах).
+    //
+    // Параметр стоит ПЕРЕД `load` намеренно: `load` у всех вызовов - хвостовая
+    // лямбда, а она занимает последний параметр списка.
     if (serviceFrame) return true
     val row = load(messageId) ?: return false
     return !row.isFromMe && row.senderId == senderId && row.chatId == chatId
@@ -76,12 +79,12 @@ internal suspend fun acknowledgeStoredIncomingText(
     senderId: String,
     chatId: String,
     inserted: Boolean,
+    serviceFrame: Boolean = false,
     load: suspend (String) -> MessageEntity?,
     openedByExpectedSender: () -> Boolean,
     sendAck: (Boolean) -> Unit,
-    serviceFrame: Boolean = false,
 ): Boolean {
-    if (!storedIncomingText(messageId, senderId, chatId, inserted, load, serviceFrame)) return false
+    if (!storedIncomingText(messageId, senderId, chatId, inserted, serviceFrame, load)) return false
     sendAck(openedByExpectedSender())
     return true
 }

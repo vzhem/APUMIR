@@ -31,10 +31,10 @@ class DeliveryReceiptCoordinatorTest {
         fun matched(result: Boolean): () -> Boolean = { result }
         // Пакет истории: строки в переписке не будет никогда, зато без
         // подтверждения его копия жила бы неделю в резерве переписки.
-        assertTrue(storedIncomingText("eph1-abc", "pk_sender", "chat", false, { lookups++; null }, serviceFrame = true))
+        assertTrue(storedIncomingText("eph1-abc", "pk_sender", "chat", false, serviceFrame = true) { lookups++; null })
         assertEquals(0, lookups)
         val flags = mutableListOf<Boolean>()
-        assertTrue(acknowledgeStoredIncomingText("eph1-abc", "pk_sender", "chat", false, { null }, matched(true), flags::add, serviceFrame = true))
+        assertTrue(acknowledgeStoredIncomingText("eph1-abc", "pk_sender", "chat", false, serviceFrame = true, load = { null }, openedByExpectedSender = matched(true), sendAck = flags::add))
         assertEquals(listOf(true), flags)
         // Обычный кадр без строки по-прежнему молчит: правило ужесточено только
         // для служебных.

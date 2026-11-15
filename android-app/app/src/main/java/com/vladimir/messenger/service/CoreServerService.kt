@@ -1275,7 +1275,7 @@ class CoreServerService : Service() {
                                                 timestamp = parsed.timestamp,
                                                 channel = MessageChannel.CF,
                                             )
-                                            acknowledge = storedIncomingText(messageId, senderId, chat.id, saved, appDatabase.messageDao()::getMessageById, serviceFrameWithoutRow(messageId, cfContent.orEmpty()))
+                                            acknowledge = storedIncomingText(messageId = messageId, senderId = senderId, chatId = chat.id, inserted = saved, serviceFrame = serviceFrameWithoutRow(messageId, cfContent.orEmpty()), load = appDatabase.messageDao()::getMessageById)
                                             Log.i(TAG, "CF message handled for chat ${chat.id} msgId=$messageId")
                                             if (chatRepository.isInviteBlocked(senderId, cfContent)) {
                                                 runCatching { sendInviteReject(senderId, cfContent) }
@@ -2765,7 +2765,7 @@ class CoreServerService : Service() {
                     
                     // Отправить ACK отправителю (служебный кадр без строки - тоже).
                     try {
-                        if (acknowledgeStoredIncomingText(messageId, senderId, chat.id, incomingSaved, appDatabase.messageDao()::getMessageById, { sealed && MessageSealer.openedByExpectedSender(rawText, senderId) }, { verified -> RustBridge.sendDeliveryAck(messageId, senderId, roomCommitted = verified) }, serviceFrame = serviceFrameWithoutRow(messageId, text))) { Log.i(TAG, "📤 Delivery ACK queued for msgId=$messageId") } else Log.w(TAG, "Incoming text not stored; ACK withheld for msgId=$messageId")
+                        if (acknowledgeStoredIncomingText(messageId = messageId, senderId = senderId, chatId = chat.id, inserted = incomingSaved, serviceFrame = serviceFrameWithoutRow(messageId, text), load = appDatabase.messageDao()::getMessageById, openedByExpectedSender = { sealed && MessageSealer.openedByExpectedSender(rawText, senderId) }) { verified -> RustBridge.sendDeliveryAck(messageId, senderId, roomCommitted = verified) }) { Log.i(TAG, "📤 Delivery ACK queued for msgId=$messageId") } else Log.w(TAG, "Incoming text not stored; ACK withheld for msgId=$messageId")
                     } catch (e: Exception) {
                         Log.w(TAG, "⚠ ACK send failed: ${e.message}")
                     }
