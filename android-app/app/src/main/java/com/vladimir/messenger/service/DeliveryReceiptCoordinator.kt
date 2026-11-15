@@ -52,8 +52,15 @@ internal suspend fun storedIncomingText(
     chatId: String,
     inserted: Boolean,
     load: suspend (String) -> MessageEntity?,
+    serviceFrame: Boolean = false,
 ): Boolean {
     if (inserted) return true
+    // Служебный кадр, который отправитель сам пометил заменяемым, строки в
+    // переписке не имеет и иметь не будет. Подтверждать его доставку нужно
+    // всё равно: без квитанции резервная копия живёт до конца срока хранения
+    // и занимает резерв переписки (владелец, 2026-11-15: «ACK без локальной
+    // строки=815», склад пересылки 17099 записей при шести телефонах).
+    if (serviceFrame) return true
     val row = load(messageId) ?: return false
     return !row.isFromMe && row.senderId == senderId && row.chatId == chatId
 }
@@ -72,11 +79,33 @@ internal suspend fun acknowledgeStoredIncomingText(
     load: suspend (String) -> MessageEntity?,
     openedByExpectedSender: () -> Boolean,
     sendAck: (Boolean) -> Unit,
+    serviceFrame: Boolean = false,
 ): Boolean {
-    if (!storedIncomingText(messageId, senderId, chatId, inserted, load)) return false
+    if (!storedIncomingText(messageId, senderId, chatId, inserted, load, serviceFrame)) return false
     sendAck(openedByExpectedSender())
     return true
 }
+
+/**
+ * Кадр, который поглощён до записи в переписку и потому не оставляет строки.
+ *
+ * Два условия вместе, а не одно: отметку транспорта (`eph1-…`, см.
+ * [com.vladimir.messenger.data.security.EphemeralControl.transportId]) может
+ * надеть на себя кто угодно, поэтому служебность подтверждается ещё и телом.
+ * Истории и отклики на них (`APUSTORY1:`, `APUSTORY1:FB1|`) сохраняются в
+ * ленту историй и в переписку не идут — [com.vladimir.messenger.util.ChatPreviews.isServicePacket]
+ * их не перечисляет, потому что пакет истории разбирает своя ветка.
+ *
+ * Зачем. Владелец 2026-11-15: «ACK без локальной строки=815». Пока квитанция
+ * требовала строку, служебный кадр не подтверждался никогда, и его копия в
+ * очереди пересылки жила неделю, занимая резерв переписки. Отметка служебности
+ * на отправке (`EphemeralControl`) и подтверждение без строки на приёме —
+ * две половины одного правила.
+ */
+internal fun serviceFrameWithoutRow(messageId: String, text: String): Boolean =
+    com.vladimir.messenger.data.security.EphemeralControl.isTransportId(messageId) &&
+        (com.vladimir.messenger.util.ChatPreviews.isServicePacket(text) ||
+            com.vladimir.messenger.data.story.StoryStore.isStoryPacket(text))
 
 /**
  * Only release native origin custody after Room committed an outgoing ACK.

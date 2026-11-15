@@ -26,6 +26,32 @@ class DeliveryReceiptCoordinatorTest {
         assertFalse(storedIncomingText("m1", "pk_sender", "chat", false) { row(chat = "other") })
     }
 
+    @Test fun aServiceFrameIsAcknowledgedWithoutAChatRow() = runBlocking {
+        var lookups = 0
+        fun matched(result: Boolean): () -> Boolean = { result }
+        // Пакет истории: строки в переписке не будет никогда, зато без
+        // подтверждения его копия жила бы неделю в резерве переписки.
+        assertTrue(storedIncomingText("eph1-abc", "pk_sender", "chat", false, { lookups++; null }, serviceFrame = true))
+        assertEquals(0, lookups)
+        val flags = mutableListOf<Boolean>()
+        assertTrue(acknowledgeStoredIncomingText("eph1-abc", "pk_sender", "chat", false, { null }, matched(true), flags::add, serviceFrame = true))
+        assertEquals(listOf(true), flags)
+        // Обычный кадр без строки по-прежнему молчит: правило ужесточено только
+        // для служебных.
+        assertFalse(acknowledgeStoredIncomingText("eph1-abc", "pk_sender", "chat", false, { null }, matched(true), flags::add))
+    }
+
+    @Test fun onlyATransportIdOfAServicePacketCountsAsAFrameWithoutRow() {
+        val story = "APUSTORY1:{\"id\":\"s1\",\"kind\":\"publish\",\"text\":\"hi\"}"
+        assertTrue(serviceFrameWithoutRow("eph1-00000000-0000-0000-0000-000000000000", story))
+        assertTrue(serviceFrameWithoutRow("eph1-00000000-0000-0000-0000-000000000000", "APUTYP1|1"))
+        // Обычный UUID истории (старый клиент) - как прежде, без подтверждения.
+        assertFalse(serviceFrameWithoutRow("39513698-1234-4abc-8def-000000000000", story))
+        // Отметку транспорта может надеть кто угодно: служебность подтверждает тело.
+        assertFalse(serviceFrameWithoutRow("eph1-00000000-0000-0000-0000-000000000000", "привет, как дела"))
+        assertFalse(serviceFrameWithoutRow("eph1-not-a-uuid", story))
+    }
+
     @Test fun meshReceiptNeedsStoredTextAndOpenedSenderMatchButLegacyAckRemains() = runBlocking {
         val flags = mutableListOf<Boolean>()
         var checks = 0
