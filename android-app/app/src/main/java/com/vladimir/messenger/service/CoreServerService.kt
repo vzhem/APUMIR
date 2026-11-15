@@ -2765,7 +2765,7 @@ class CoreServerService : Service() {
                     
                     // Отправить ACK отправителю (служебный кадр без строки - тоже).
                     try {
-                        if (acknowledgeStoredIncomingText(messageId, senderId, chat.id, incomingSaved, appDatabase.messageDao()::getMessageById, { sealed && MessageSealer.openedByExpectedSender(rawText, senderId) }, serviceFrame = serviceFrameWithoutRow(messageId, text)) { verified -> RustBridge.sendDeliveryAck(messageId, senderId, roomCommitted = verified) }) { Log.i(TAG, "📤 Delivery ACK queued for msgId=$messageId") } else Log.w(TAG, "Incoming text not stored; ACK withheld for msgId=$messageId")
+                        if (acknowledgeStoredIncomingText(messageId, senderId, chat.id, incomingSaved, appDatabase.messageDao()::getMessageById, { sealed && MessageSealer.openedByExpectedSender(rawText, senderId) }, { verified -> RustBridge.sendDeliveryAck(messageId, senderId, roomCommitted = verified) }, serviceFrame = serviceFrameWithoutRow(messageId, text))) { Log.i(TAG, "📤 Delivery ACK queued for msgId=$messageId") } else Log.w(TAG, "Incoming text not stored; ACK withheld for msgId=$messageId")
                     } catch (e: Exception) {
                         Log.w(TAG, "⚠ ACK send failed: ${e.message}")
                     }
