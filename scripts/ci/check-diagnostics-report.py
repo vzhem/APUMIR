@@ -136,6 +136,39 @@ class DiagnosticsContractsTest(unittest.TestCase):
                 self.assertIn(marker, wake)
         self.assertNotIn("startForegroundService", wake, "пробуждение не поднимает службу само")
 
+    def test_a_direct_delivery_ends_the_relay_obligation(self):
+        """Доставленное прямо не должно предлагаться соседям «на всякий случай».
+
+        Владелец 2026-11-15: «если сообщение сразу доходит, оно не должно
+        больше никому слаться для резервных копий — задача выполнена». Оба
+        конца этой цепочки закреплены здесь: ядро снимает удержание в момент
+        успешной прямой отправки, и приложение подтверждает доставку, когда
+        ряд ушёл в SENT.
+        """
+        core = ROOT / "rust-core/src/engine/core.rs"
+        body = core.read_text(encoding="utf-8")
+        start = body.index("let direct_send_ok = {")
+        end = body.index("// M3(d): no direct address", start)
+        success = body[start:end]
+        # Успех прямой отправки завершает обязательство, а не начинает его.
+        self.assertIn("self.release_delivered(&message_id);", success)
+        # Никакого «пользовательский повтор при успешной отправке всё равно
+        # оставляет резерв»: именно так доставленная строка уезжала соседям.
+        # Комментарии снимаем — в них это имя упомянуто как история ошибки.
+        code = strip_comments(success)
+        self.assertNotIn("direct_send_ok && !refresh_retention", code)
+        self.assertNotIn("refresh_retention", code)
+        # Один и тот же выход для прямого успеха и для квитанции приложения:
+        # два разных вызова — это два разных поведения.
+        self.assertIn("pub fn confirm_message_delivered(&self, message_id: &str) -> bool {", body)
+        self.assertIn("self.release_delivered(message_id)", body)
+        self.assertEqual(body.count("fn release_delivered("), 1)
+        chat = (MAIN / "data/repository/ChatRepository.kt").read_text(encoding="utf-8")
+        self.assertIn("confirmDirectDelivery(messageId)", chat)
+        helper = MAIN / "data/repository/DirectDeliveryConfirmation.kt"
+        self.assertTrue(helper.exists(), "the confirmation call must live beside its reasoning")
+        self.assertIn("RustBridge.confirmMessageDelivered(messageId)", helper.read_text(encoding="utf-8"))
+
     def test_every_diagnostics_helper_the_code_calls_actually_exists(self):
         """Вызов несуществующей функции должен падать здесь, а не на компиляции.
 

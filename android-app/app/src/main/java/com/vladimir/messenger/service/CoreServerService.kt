@@ -2785,7 +2785,7 @@ class CoreServerService : Service() {
                 if (!peerId.startsWith("pk_")) return  // Skip mDNS duplicates
                 val peerName = event.displayName?.takeIf { it.isNotBlank() } ?: "Anonymous"
                 try {
-                    val existing = contactRepository.getContactByFingerprint(peerId)
+                    val existing = resolvePresenceContact(contactRepository, peerId)
                     val observation = presence.observe(peerId, existing?.id, event.timestamp) ?: return
                     val lightTouch = observation.lightTouch
                     // Рейтинг отражает исходное время принятого наблюдения, а не время доставки.

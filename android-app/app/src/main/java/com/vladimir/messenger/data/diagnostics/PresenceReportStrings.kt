@@ -110,6 +110,14 @@ object PresenceReportStrings {
             append(", время впереди ${counters.value(PRESENCE_DISCARDED_CLOCK_SKEW)}")
             append(", повторов потерянного ${counters.value(PRESENCE_DISCARDED_DUPLICATE)}")
             append(", предел списка ${counters.value(PRESENCE_DISCARDED_LIMIT)})")
+            val unknown = counters.value(PRESENCE_UNKNOWN_CONTACT)
+            if (unknown > 0L) {
+                // Не ноль: значит часть соседей видна ядром, но не находится
+                // среди контактов — и отметка «в сети» такому не ставится.
+                append("\n  ВНИМАНИЕ: наблюдений без контакта в телефоне — $unknown " +
+                    "(сосед виден ядром, но не совпал ни с одним контактом: " +
+                    "отметка «в сети» такому не ставится)")
+            }
             append("\n  снято: молчанием свыше $PRESENCE_TTL_SECONDS с — ")
             append("${counters.value(PRESENCE_RETIRED_EXPIRED)}")
             append(", явным «пропал» — ${counters.value(PRESENCE_LOST)}")

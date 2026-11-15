@@ -5348,7 +5348,22 @@ impl P2PCore {
             self.send_via_quic(&recipient_id, addr_opt, payload)
         };
 
-        if direct_send_ok && !refresh_retention {
+        // Владелец 2026-11-15: «если я общаюсь в чате на прямую и сообщение
+        // сразу доходит, то оно не должно больше никому слаться для резервных
+        // копий — оно сразу доставилось и задача выполнилась».
+        //
+        // Прямой успех ЗАВЕРШАЕТ обязательство, а не начинает его. Раньше
+        // условие содержало `&& !refresh_retention`, поэтому пользовательский
+        // повтор при УСПЕШНОЙ прямой отправке нарочно оставлял копию в
+        // relay-очереди — и она предлагалась соседям и брокеру каждые
+        // полминуты, хотя получатель уже всё получил. А обычная прямая
+        // отправка не снимала удержание вовсе: сообщение, которое сначала
+        // легло в очередь (прямого пути не было), а потом ушло напрямую при
+        // автоматической досылке, продолжало жить резервной копией. Снятие
+        // звал только `confirm_message_delivered`, а его Android вызывает
+        // исключительно по квитанции доставки — прямой успех до него не доходил.
+        if direct_send_ok {
+            self.release_delivered(&message_id);
             let _ = self
                 .storage
                 .update_message_status(&message_id, MessageStatus::Sent);
@@ -5359,10 +5374,11 @@ impl P2PCore {
             return true;
         }
 
-        // M3(d): no direct address (or a user explicitly requested fresh
-        // retention after a successful direct attempt). Keep the existing N-1-compatible
-        // relay encoding, own the origin copy in RelayQueue first, and only then offer one bounded
-        // command to the persistent MQTT session. This is QUEUED_OFFLINE, never a SENT claim.
+        // M3(d): no direct address. Прямой успех сюда не доходит — он
+        // завершается выше, снимая удержание. Keep the existing N-1-compatible
+        // relay encoding, own the origin copy in RelayQueue first, and only then
+        // offer one bounded command to the persistent MQTT session. This is
+        // QUEUED_OFFLINE, never a SENT claim.
         let prepared = match prepare_offline_relay(
             &message_id,
             &recipient_id,
@@ -5692,15 +5708,24 @@ impl P2PCore {
         self.relay_queue.as_ref().map_or_else(Vec::new, |q| q.own_message_ids())
     }
 
-    /// Android calls this only after its outgoing delivery status is committed.
-    /// Legacy mesh receipts alone never enter this cleanup path.
-    pub fn confirm_message_delivered(&self, message_id: &str) -> bool {
+    /// Снять все резервные обязательства по доставленному сообщению.
+    ///
+    /// Один и тот же выход для двух путей: прямая отправка, которая только
+    /// что подтвердила приём стрима, и квитанция доставки от приложения.
+    /// Раньше их было два разных: прямой успех не снимал ничего, поэтому
+    /// доставленная строка продолжала предлагаться соседям «на всякий случай»
+    /// (владелец 2026-11-15).
+    ///
+    /// Снимается и память, и durable-копия, и предложения держателям K5: без
+    /// последнего «резерв» живёт у соседа до истечения срока, хотя доставка
+    /// закрыта.
+    fn release_delivered(&self, message_id: &str) -> bool {
         let Some(node_id) = self.node_id() else { return false; };
         let removed = super::mesh_cleanup::confirmed_local(
             self.relay_queue.as_deref(), self.relay_custody.as_deref(), &node_id, message_id,
         );
         // K5 holders may have accepted a transport stream without the app
-        // storing it. Drop hints are sent only after the outgoing Room commit.
+        // storing it. Drop hints are sent only after delivery is settled.
         let peers = self.custody_offers.take_offered_peers(message_id);
         self.custody_offers.remove(message_id);
         for peer in &peers {
@@ -5709,6 +5734,12 @@ impl P2PCore {
             }
         }
         removed || !peers.is_empty()
+    }
+
+    /// Android calls this only after its outgoing delivery status is committed.
+    /// Legacy mesh receipts alone never enter this cleanup path.
+    pub fn confirm_message_delivered(&self, message_id: &str) -> bool {
+        self.release_delivered(message_id)
     }
 
     /// Прямая отправка через общий QUIC-endpoint (K1).

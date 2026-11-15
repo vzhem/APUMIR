@@ -276,11 +276,8 @@ class ChatRepository @Inject constructor(
             if (sentDirectly) {
                 // Guarded update: an early delivery ACK must not be downgraded
                 // back to SENT by this transport completion callback.
-                messageDao.updateOutgoingRetryResult(
-                    messageId,
-                    MessageStatus.SENT.name,
-                    MessageChannel.LOCAL.name,
-                )
+                messageDao.updateOutgoingRetryResult(messageId, MessageStatus.SENT.name, MessageChannel.LOCAL.name)
+                confirmDirectDelivery(messageId)
                 // Диагностика (2026-10-07): считаем ЗДЕСЬ, а не в конце функции:
                 // отложенное до сети — это ещё не отправка, и путать их нельзя.
                 com.vladimir.messenger.data.diagnostics.TransferDiagnostics
