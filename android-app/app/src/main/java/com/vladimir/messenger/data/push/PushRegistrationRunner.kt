@@ -1,5 +1,6 @@
 package com.vladimir.messenger.data.push
 
+import com.vladimir.messenger.data.diagnostics.PushRegisterReason
 import java.util.concurrent.CancellationException
 import java.util.logging.Logger
 
@@ -29,7 +30,22 @@ internal class PushRegistrationRunner(
     private val flow: (PushRegistrationStore.Participants) -> PushRegistrationFlow,
     private val nowMs: () -> Long = System::currentTimeMillis,
     private val recordFailure: () -> Unit = {},
+    /**
+     * Where this pass stopped. A phase alone cannot say it: `failed` used to
+     * cover a service refusal, an unreachable network and an unprepared pair
+     * with the same word, and each of those is fixed somewhere else.
+     */
+    private val recordReason: (PushRegisterReason) -> Unit = {},
 ) {
+    /**
+     * Where the last [register] stopped. Read by the caller that has to name
+     * the step for the owner's report; a phase alone cannot say it.
+     */
+    @Volatile
+    private var stoppedAt: PushRegisterReason = PushRegisterReason.NONE
+
+    fun lastReason(): PushRegisterReason = stoppedAt
+
     sealed interface Outcome {
         /** Server accepted the operation and the route hint is indexed. */
         object Registered : Outcome
@@ -51,6 +67,7 @@ internal class PushRegistrationRunner(
             throw cancelled
         } catch (_: Exception) {
             diag()
+            reason(PushRegisterReason.PEER_NOT_READY)
             null
         } ?: return Outcome.NotReady
         return try {
@@ -66,8 +83,14 @@ internal class PushRegistrationRunner(
             }
             // The epoch is read back from the journal: a record created a moment
             // ago was not in the trust pass that resolved this peer.
-            val state = (stored as? PushRegistrationStore.Result.Ready)?.state ?: return Outcome.NotReady
-            val material = resolved.derive(state.epochHex) ?: return Outcome.NotReady
+            val state = (stored as? PushRegistrationStore.Result.Ready)?.state ?: run {
+                reason(PushRegisterReason.STORAGE_UNAVAILABLE)
+                return Outcome.NotReady
+            }
+            val material = resolved.derive(state.epochHex) ?: run {
+                reason(PushRegisterReason.PEER_NOT_READY)
+                return Outcome.NotReady
+            }
             try {
                 return when (
                     flow(participants).register(
@@ -78,9 +101,34 @@ internal class PushRegistrationRunner(
                         deriveRoute = { material.routeHex() },
                     )
                 ) {
-                    PushRegistrationFlow.Result.Registered -> Outcome.Registered
-                    PushRegistrationFlow.Result.Rejected -> Outcome.NotReady
-                    else -> Outcome.Failed
+                    PushRegistrationFlow.Result.Registered -> {
+                        reason(PushRegisterReason.REGISTERED)
+                        Outcome.Registered
+                    }
+                    // Nothing was sent: the state, token, trust or reservation was
+                    // unusable, or the service answered 400/403.
+                    PushRegistrationFlow.Result.Rejected -> {
+                        reason(PushRegisterReason.REQUEST_INVALID)
+                        Outcome.NotReady
+                    }
+                    PushRegistrationFlow.Result.Conflict -> {
+                        reason(PushRegisterReason.SERVER_STALE)
+                        Outcome.Failed
+                    }
+                    PushRegistrationFlow.Result.Throttled -> {
+                        reason(PushRegisterReason.SERVER_THROTTLED)
+                        Outcome.Failed
+                    }
+                    PushRegistrationFlow.Result.Unavailable -> {
+                        reason(PushRegisterReason.SERVER_UNAVAILABLE)
+                        Outcome.Failed
+                    }
+                    // Unreachable from a register call, but a `when` used as an
+                    // expression must cover the whole sealed interface.
+                    PushRegistrationFlow.Result.Revoked -> {
+                        reason(PushRegisterReason.REQUEST_INVALID)
+                        Outcome.NotReady
+                    }
                 }
             } finally {
                 material.close()
@@ -89,6 +137,7 @@ internal class PushRegistrationRunner(
             throw cancelled
         } catch (_: Exception) {
             diag()
+            reason(PushRegisterReason.PEER_NOT_READY)
             Outcome.Failed
         } finally {
             resolved.close()
@@ -103,6 +152,7 @@ internal class PushRegistrationRunner(
             throw cancelled
         } catch (_: Exception) {
             diag()
+            reason(PushRegisterReason.PEER_NOT_READY)
             null
         } ?: return false
         return try {
@@ -126,6 +176,18 @@ internal class PushRegistrationRunner(
             false
         } finally {
             resolved.close()
+        }
+    }
+
+    /** Never throws: a broken reason sink must not turn a failure into a silent one. */
+    private fun reason(value: PushRegisterReason) {
+        stoppedAt = value
+        try {
+            recordReason(value)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            Logger.getLogger("PushRegistrationRunner").warning("Registration reason unavailable")
         }
     }
 

@@ -1,5 +1,6 @@
 package com.vladimir.messenger.data.push
 
+import com.vladimir.messenger.data.diagnostics.PushRegisterReason
 import java.util.concurrent.CancellationException
 import java.util.logging.Logger
 
@@ -35,6 +36,14 @@ internal class PushTokenRegistrar(
     private val forgetToken: () -> Boolean = { true },
     private val nowMs: () -> Long = System::currentTimeMillis,
     private val recordFailure: () -> Unit = {},
+    /** See [PushRegistrationRunner]: the phase says what, the reason says where. */
+    private val recordReason: (PushRegisterReason) -> Unit = {},
+    /**
+     * Reader of the per-peer runner's own reason. Production wiring supplies
+     * it, so `registered == 0` can name the step that stopped; tests and
+     * older callers leave it out and keep the coarse outcome.
+     */
+    private val reasonSink: (() -> PushRegisterReason)? = null,
 ) {
     sealed interface Outcome {
         object Disabled : Outcome
@@ -59,6 +68,10 @@ internal class PushTokenRegistrar(
     @Volatile
     private var noTargets = false
 
+    /** Where the last per-peer attempt stopped; see [recordReason]. */
+    @Volatile
+    private var lastReason: PushRegisterReason = PushRegisterReason.NONE
+
     suspend fun run(): Outcome = runSafely()
 
     private suspend fun runSafely(): Outcome {
@@ -74,13 +87,24 @@ internal class PushTokenRegistrar(
                                 // still stands; an empty peer set never reaches here.
                                 Outcome.AlreadyCurrent
                             is PushRuntimeCoordinator.TokenOutcome.Registered -> Outcome.Registered
-                            PushRuntimeCoordinator.TokenOutcome.Failed ->
+                            PushRuntimeCoordinator.TokenOutcome.Failed -> {
+                                reason(if (noTargets) PushRegisterReason.NO_PINNED_PEERS else lastReason)
                                 if (noTargets) Outcome.NoTargets else Outcome.Failed
+                            }
                         }
                     }
-                    PushFirebaseSignals.Outcome.NotConfigured -> Outcome.NotConfigured
-                    PushFirebaseSignals.Outcome.NoPlayServices -> Outcome.NoPlayServices
-                    PushFirebaseSignals.Outcome.Failed -> Outcome.Failed
+                    PushFirebaseSignals.Outcome.NotConfigured -> {
+                        reason(PushRegisterReason.TOKEN_UNAVAILABLE)
+                        Outcome.NotConfigured
+                    }
+                    PushFirebaseSignals.Outcome.NoPlayServices -> {
+                        reason(PushRegisterReason.TOKEN_UNAVAILABLE)
+                        Outcome.NoPlayServices
+                    }
+                    PushFirebaseSignals.Outcome.Failed -> {
+                        reason(PushRegisterReason.TOKEN_UNAVAILABLE)
+                        Outcome.Failed
+                    }
                 }
             }
         } catch (cancelled: CancellationException) {
@@ -103,14 +127,19 @@ internal class PushTokenRegistrar(
             throw cancelled
         } catch (_: Exception) {
             diag()
+            reason(PushRegisterReason.TARGETS_UNREADABLE)
             return false
         }
         // An unreadable index must not be mistaken for "no peers".
-        if (state != PushTargets.Outcome.COMPLETED) return false
+        if (state != PushTargets.Outcome.COMPLETED) {
+            reason(PushRegisterReason.TARGETS_UNREADABLE)
+            return false
+        }
         // Nothing to address: no pin and no indexed route. Recorded as its own
         // outcome by [runSafely] rather than as a failure of the server.
         if (list.isEmpty()) {
             noTargets = true
+            reason(PushRegisterReason.NO_PINNED_PEERS)
             return false
         }
         var registered = 0
@@ -125,12 +154,20 @@ internal class PushTokenRegistrar(
                     return false
                 }
             }
+            reasonSink?.let { sink -> lastReason = sink() }
         }
         // NotReady peers have no usable registration record. They must not be
         // counted as registered, and a pass that registered nobody is not a
         // success either: the caller retries with backoff instead of believing
         // this device is reachable.
-        if (registered == 0) diag()
+        if (registered == 0) {
+            diag()
+            // Nothing was sent: the last per-peer reason already names the step
+            // that stopped, so keep it instead of a generic failure.
+            reason(lastReason)
+        } else {
+            reason(PushRegisterReason.REGISTERED)
+        }
         return registered > 0
     }
 
@@ -157,6 +194,17 @@ internal class PushTokenRegistrar(
             if (!revoke(peer.peerId)) all = false
         }
         return all
+    }
+
+    /** Never throws: a broken reason sink must not turn a failure into a silent one. */
+    private fun reason(value: PushRegisterReason) {
+        try {
+            recordReason(value)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            Logger.getLogger("PushTokenRegistrar").warning("Registration reason unavailable")
+        }
     }
 
     private fun diag() {

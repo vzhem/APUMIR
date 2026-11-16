@@ -136,6 +136,44 @@ class DiagnosticsContractsTest(unittest.TestCase):
                 self.assertIn(marker, wake)
         self.assertNotIn("startForegroundService", wake, "пробуждение не поднимает службу само")
 
+    def test_a_failed_registration_names_the_step_that_stopped(self):
+        """«фаза=failed» обязана сопровождаться причиной, иначе отчёт бесполезен.
+
+        Отчёт 2026-11-16 с телефона: гейт открыт, служба отвечает, а
+        `маршрутов=0` и `фаза=failed`. Подсказка под фазой перечисляла сеть,
+        отказ службы и неготовый ключ обмена одновременно — то есть не
+        отвечала ни на один вопрос, и разбор каждым новым отчётом начинался
+        заново. Причина должна быть отдельной строкой с фиксированным именем.
+        """
+        reasons = source(DIAG / "PushRegisterReason.kt")
+        report = source(DIAG / "PushDiagnosticsReport.kt")
+        store = source(MAIN / "data/push/PushDiagnostics.kt")
+        runner = source(MAIN / "data/push/PushRegistrationRunner.kt")
+        registrar = source(MAIN / "data/push/PushTokenRegistrar.kt")
+        for name in (
+            "PEER_NOT_READY", "TARGETS_UNREADABLE", "NO_PINNED_PEERS",
+            "REQUEST_INVALID", "SERVER_STALE",
+            "SERVER_THROTTLED", "SERVER_UNAVAILABLE", "STORAGE_UNAVAILABLE",
+            "TOKEN_UNAVAILABLE", "JOURNAL_UNAVAILABLE", "REGISTERED",
+        ):
+            with self.subTest(reason=name):
+                self.assertIn(name, reasons)
+        # Строка в отчёте и хранение причины: без записи вPreferences причина
+        # не доживёт до следующего открытия «Логов».
+        self.assertIn("причина=${push.registrationReason.name.lowercase()}", report)
+        self.assertIn("val registrationReason: PushRegisterReason", report)
+        self.assertIn("fun noteRegistrationReason", store)
+        self.assertIn("regReason", store)
+        # И её действительно пишут на каждом шаге регистрации, а не только на
+        # удаче: причина отказа важнее причины успеха.
+        self.assertIn("private val recordReason: (PushRegisterReason) -> Unit", runner)
+        self.assertIn("private val recordReason: (PushRegisterReason) -> Unit", registrar)
+        self.assertIn("reason(PushRegisterReason.PEER_NOT_READY)", runner)
+        self.assertIn("reason(PushRegisterReason.TARGETS_UNREADABLE)", registrar)
+        self.assertIn("reasonSink", registrar)
+        # Причина не заменяет фазу: фаза говорит «что вышло», причина — «где встали».
+        self.assertIn('appendLine("фаза=${push.phase.name.lowercase()}")', report)
+
     def test_every_presence_constant_the_code_names_is_declared(self):
         """Ссылка на необъявленную константу должна падать здесь, а не на компиляции.
 

@@ -49,6 +49,15 @@ data class PushSnapshot(
     /** Сколько маршрутов в индексе; null — индекс не читается. */
     val registeredRoutes: Int?,
     val phase: PushPhase,
+    /**
+     * Why the last registration pass ended where it did.
+     *
+     * Separate from [phase] on purpose: `failed` used to name a service
+     * refusal, an unreachable network and an unprepared exchange key at once,
+     * so the hint below it listed all three and answered none. This is the one
+     * line that says which of them actually happened.
+     */
+    val registrationReason: PushRegisterReason = PushRegisterReason.NONE,
     val lastRegisterAtMs: Long,
     val signalsReceived: Long,
     val signalsRejected: Long,
@@ -113,6 +122,15 @@ internal fun StringBuilder.appendPush(facts: DiagnosticsFacts) {
         else -> Unit
     }
     appendLine("регистрация_назад=${agoOrNever(facts.createdAtMs, push.lastRegisterAtMs)}")
+    // Причина печатается рядом с фазой, а не вместо неё: фаза — что вышло, причина — на каком шаге.
+    // Раньше "failed" одновременно обозначал и отказ службы, и недоступную сеть, и неготовый ключ обмена,
+    // поэтому подсказка выше перечисляла все три сразу — то есть ни одну.
+    if (push.registrationReason != PushRegisterReason.NONE) {
+        appendLine(
+            "причина=${push.registrationReason.name.lowercase()} " +
+                "(${push.registrationReason.hint})",
+        )
+    }
     appendLine("сигналов=${push.signalsReceived} · отклонено=${push.signalsRejected}")
     appendLine("сигнал_назад=${agoOrNever(facts.createdAtMs, push.lastSignalAtMs)}")
     // Прямой ответ на вопрос «разбудили или нет»: раньше этот факт нигде не

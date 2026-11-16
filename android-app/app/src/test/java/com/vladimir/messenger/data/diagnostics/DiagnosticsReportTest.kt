@@ -1323,6 +1323,59 @@ class DiagnosticsReportTest {
         assertTrue(report.contains("регистрировать некого"))
     }
 
+    @Test fun aFailedRegistrationNamesTheStepInsteadOfThreeGuesses() {
+        // Отчёт 2026-11-16 с телефона: «фаза=failed · маршрутов=0», и подсказка
+        // под ним перечисляла сеть, отказ службы и неготовый ключ разом — то
+        // есть не отвечала ни на один вопрос. Причина обязана быть строкой.
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = false,
+            endpointConfigured = true,
+            registeredRoutes = 0,
+            phase = PushPhase.FAILED,
+            lastRegisterAtMs = 1_700_000_000_000L,
+            signalsReceived = 0,
+            signalsRejected = 0,
+            lastSignalAtMs = 0L,
+            wakeAttempts = 0,
+            lastWake = PushWakeOutcome.NONE,
+            lastWakeAtMs = 0L,
+            registrationReason = PushRegisterReason.PEER_NOT_READY,
+            inboxPending = "0",
+            endpointReachable = true,
+            lastError = "-",
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        assertTrue(report.contains("причина=peer_not_ready (пара не готова"))
+        // Маршрут, токен и идентификаторы по-прежнему не попадают в отчёт.
+        assertFalse(report.contains("capability="))
+        assertFalse(report.contains("signature="))
+    }
+
+    @Test fun noRecordedReasonPrintsNoReasonLine() {
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = true,
+            endpointConfigured = true,
+            registeredRoutes = 1,
+            phase = PushPhase.REGISTERED,
+            lastRegisterAtMs = 1_700_000_000_000L,
+            signalsReceived = 0,
+            signalsRejected = 0,
+            lastSignalAtMs = 0L,
+            wakeAttempts = 0,
+            lastWake = PushWakeOutcome.NONE,
+            lastWakeAtMs = 0L,
+            inboxPending = "0",
+            endpointReachable = true,
+            lastError = "-",
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        assertFalse(report.contains("причина="))
+    }
+
     @Test fun aLiveEngineNudgeIsReportedSeparatelyFromTheWorker() {
         // Сигнал, нашедший живой процесс, обязан быть виден: «разбудили на
         // месте» и «ушли в фоновую задачу» — разные ответы на вопрос владельца.

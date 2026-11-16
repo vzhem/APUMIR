@@ -1,8 +1,10 @@
 package com.vladimir.messenger.data.push
 
+import com.vladimir.messenger.data.diagnostics.PushRegisterReason
 import java.util.concurrent.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PushTokenRegistrarTest {
@@ -20,6 +22,8 @@ class PushTokenRegistrarTest {
         var revokeOutcome: (String) -> Boolean = { true },
         var calls: MutableList<String> = mutableListOf(),
         var failures: Int = 0,
+        var peerReason: PushRegisterReason = PushRegisterReason.PEER_NOT_READY,
+        val reasons: MutableList<PushRegisterReason> = mutableListOf(),
     ) {
         fun build() = PushTokenRegistrar(
             enabled = { enabledValue },
@@ -47,6 +51,8 @@ class PushTokenRegistrarTest {
             forgetToken = { calls += "forget"; true },
             nowMs = { 1_700_000_000_000 },
             recordFailure = { failures++ },
+            recordReason = { reason -> reasons += reason },
+            reasonSink = { peerReason },
         )
     }
 
@@ -150,5 +156,50 @@ class PushTokenRegistrarTest {
         }
         assertEquals(true, cancelled)
         assertEquals(emptyList<String>(), harness.calls)
+    }
+
+    @Test fun aPassThatRegisteredNobodyNamesTheStepThatStopped() {
+        // Отчёт с телефона показывал только «фаза=failed», и по нему нельзя было
+        // отличить отказ службы от незакреплённой пары. Причина обязана дойти.
+        val harness = Harness(
+            targets = PushTargets.Outcome.COMPLETED to listOf(peer(peerA), peer(peerB)),
+            registerOutcome = { PushRegistrationRunner.Outcome.NotReady },
+            peerReason = PushRegisterReason.PEER_NOT_READY,
+        )
+        runBlocking { assertEquals(PushTokenRegistrar.Outcome.Failed, harness.build().run()) }
+        assertTrue(
+            "причина пары не записана: ${harness.reasons}",
+            harness.reasons.contains(PushRegisterReason.PEER_NOT_READY),
+        )
+    }
+
+    @Test fun anUnreadablePeerSetIsNotMistakenForAnEmptyOne() {
+        // Пустой набор — это NO_TARGETS, непрочитанный — FAILED. Раньше оба
+        // выглядели как «failed», и причина «нет закреплённых» терялась.
+        val unreadable = Harness(
+            targets = PushTargets.Outcome.RETRY to emptyList(),
+            peerReason = PushRegisterReason.PEER_NOT_READY,
+        )
+        runBlocking { assertEquals(PushTokenRegistrar.Outcome.Failed, unreadable.build().run()) }
+        assertTrue(
+            "непрочитанный список назван пустым: ${unreadable.reasons}",
+            unreadable.reasons.contains(PushRegisterReason.TARGETS_UNREADABLE),
+        )
+
+        val empty = Harness(targets = PushTargets.Outcome.COMPLETED to emptyList())
+        runBlocking { assertEquals(PushTokenRegistrar.Outcome.NoTargets, empty.build().run()) }
+        assertTrue(
+            "пустой набор не назван своим именем: ${empty.reasons}",
+            empty.reasons.contains(PushRegisterReason.NO_PINNED_PEERS),
+        )
+    }
+
+    @Test fun aRegisteredPassRecordsSuccessNotAFailure() {
+        val harness = Harness(
+            targets = PushTargets.Outcome.COMPLETED to listOf(peer(peerA)),
+            registerOutcome = { PushRegistrationRunner.Outcome.Registered },
+        )
+        runBlocking { assertEquals(PushTokenRegistrar.Outcome.Registered, harness.build().run()) }
+        assertEquals(listOf(PushRegisterReason.REGISTERED), harness.reasons)
     }
 }

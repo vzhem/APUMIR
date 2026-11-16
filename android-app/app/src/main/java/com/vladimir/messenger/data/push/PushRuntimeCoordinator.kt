@@ -1,6 +1,8 @@
 package com.vladimir.messenger.data.push
 
+import com.vladimir.messenger.data.diagnostics.PushRegisterReason
 import java.util.concurrent.CancellationException
+import java.util.logging.Logger
 
 /**
  * Local-only coordinator for the future remote-push runtime. It owns three
@@ -31,6 +33,8 @@ internal class PushRuntimeCoordinator(
     private val register: suspend (String) -> Boolean,
     private val enqueueCheck: (Long) -> Boolean,
     private val recordFailure: () -> Unit = {},
+    /** The step that stopped a registration; a phase alone cannot say it. */
+    private val recordReason: (PushRegisterReason) -> Unit = {},
 ) {
     /** Injectable view of the immutable build-time configuration. */
     interface Gate {
@@ -78,6 +82,7 @@ internal class PushRuntimeCoordinator(
             throw cancelled
         } catch (_: Exception) {
             diag()
+            reason(PushRegisterReason.JOURNAL_UNAVAILABLE)
             return TokenOutcome.Failed
         }
         return when (state) {
@@ -96,7 +101,9 @@ internal class PushRuntimeCoordinator(
                     false
                 }
                 if (!registered) {
-                    // Never pretend a rotated token replaced the old one.
+                    // Never pretend a rotated token replaced the old one. The reason is
+                    // NOT recorded here: the per-peer runner already named the exact
+                    // step, and a coarser guess from this level would only hide it.
                     journal.forget()
                     TokenOutcome.Failed
                 } else {
@@ -142,6 +149,18 @@ internal class PushRuntimeCoordinator(
     } catch (_: Exception) {
         diag()
         SignalOutcome.Failed
+    }
+
+    /** Never throws: a broken reason sink must not turn a failure into a silent one. */
+    private fun reason(value: PushRegisterReason) {
+        try {
+            recordReason(value)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // A broken reason sink must not turn a failure into success.
+            Logger.getLogger("PushRuntimeCoordinator").warning("Registration reason unavailable")
+        }
     }
 
     private fun diag() {

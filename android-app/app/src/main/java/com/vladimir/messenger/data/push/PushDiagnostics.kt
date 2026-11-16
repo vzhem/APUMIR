@@ -3,6 +3,7 @@ package com.vladimir.messenger.data.push
 import android.content.Context
 import android.util.Log
 import com.vladimir.messenger.data.diagnostics.PushPhase
+import com.vladimir.messenger.data.diagnostics.PushRegisterReason
 import com.vladimir.messenger.data.diagnostics.PushSnapshot
 import com.vladimir.messenger.data.diagnostics.PushWakeOutcome
 
@@ -36,6 +37,17 @@ object PushDiagnostics {
         "phase=${phase.name}",
         "lastRegisterAt=${System.currentTimeMillis()}",
     )
+
+    /**
+     * Why the last registration pass ended where it did.
+     *
+     * A phase alone named three different illnesses with one word: `failed`
+     * covered a service refusal, an unreachable network and an unprepared
+     * exchange key, and the report's hint listed all three at once - which
+     * answers none of them. Only a fixed name from [PushRegisterReason] is
+     * stored, so the snapshot stays as private as the rest of this file.
+     */
+    fun noteRegistrationReason(reason: PushRegisterReason) = write("regReason=${reason.name}")
 
     fun noteSignal(accepted: Boolean) = write(
         if (accepted) "signals=+1" else "signalsRejected=+1",
@@ -101,6 +113,9 @@ object PushDiagnostics {
             tokenRecorded = tokenPresent(app),
             endpointConfigured = endpointConfigured,
             registeredRoutes = routeCount(app),
+            registrationReason = runCatching {
+                PushRegisterReason.valueOf(text("regReason") ?: PushRegisterReason.NONE.name)
+            }.getOrDefault(PushRegisterReason.NONE),
             phase = runCatching { PushPhase.valueOf(text("phase") ?: "UNKNOWN") }.getOrDefault(PushPhase.UNKNOWN),
             lastRegisterAtMs = number("lastRegisterAt"),
             signalsReceived = number("signals"),

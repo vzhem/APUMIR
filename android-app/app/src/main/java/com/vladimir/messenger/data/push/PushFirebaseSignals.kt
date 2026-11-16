@@ -7,6 +7,7 @@ import com.google.android.gms.common.GoogleApiAvailability
 import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
 import com.vladimir.messenger.BuildConfig
+import com.vladimir.messenger.data.diagnostics.PushRegisterReason
 
 /**
  * The only place that talks to Google Play Services and Firebase Messaging.
@@ -66,6 +67,9 @@ internal object PushFirebaseSignals {
                 else -> {
                     val token = com.google.android.gms.tasks.Tasks.await(FirebaseMessaging.getInstance().token)
                     if (token.isNullOrBlank() || token.length > MAX_TOKEN_CHARS) {
+                        // «Токена нет» без причины — не диагноз: сборка может быть
+                        // не настроена, а может быть отказ самой службы Google.
+                        PushDiagnostics.noteRegistrationReason(PushRegisterReason.TOKEN_UNAVAILABLE)
                         Outcome.Failed
                     } else {
                         Outcome.Token(token)
@@ -79,6 +83,7 @@ internal object PushFirebaseSignals {
             // a fixed public name, and it is what the report needs: "no token"
             // without a reason is not a diagnosis.
             PushDiagnostics.noteTokenError(PushTokenErrorCode.classify(error))
+            PushDiagnostics.noteRegistrationReason(PushRegisterReason.TOKEN_UNAVAILABLE)
             Log.w(TAG, "token request failed")
             Outcome.Failed
         }

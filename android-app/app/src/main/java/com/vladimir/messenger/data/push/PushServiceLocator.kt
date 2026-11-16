@@ -317,6 +317,12 @@ internal object PushServiceLocator {
                     journal = shared.journals.registrations,
                     flow = { participants -> PushRegistrationFlow.of(shared.journals.registrations, http) },
                     recordFailure = { log("Registration failure") },
+                    // Где именно остановилась попытка: без этой строки отчёт с
+                    // телефона показывает только «фаза=failed», и разбор
+                    // начинается заново на каждом новом отчёте.
+                    recordReason = { reason ->
+                        PushDiagnostics.noteRegistrationReason(reason)
+                    },
                 )
                 PushTokenRegistrar(
                     enabled = { enabled(app) },
@@ -335,6 +341,9 @@ internal object PushServiceLocator {
                                 shared.journals.inbox.enqueueRecovery(now) == PushWakeInbox.EnqueueResult.RECOVERY_QUEUED
                             },
                             recordFailure = { log("Token coordinator failure") },
+                            recordReason = { reason ->
+                                PushDiagnostics.noteRegistrationReason(reason)
+                            },
                         )
                     },
                     peers = targets(app),
@@ -348,6 +357,10 @@ internal object PushServiceLocator {
                     },
                     forgetToken = { shared.journals.tokens.forget() },
                     recordFailure = { log("Registration attempt failure") },
+                    recordReason = { reason ->
+                        PushDiagnostics.noteRegistrationReason(reason)
+                    },
+                    reasonSink = { runner.lastReason() },
                 )
             }
         } catch (cancelled: CancellationException) {

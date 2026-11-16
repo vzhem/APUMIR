@@ -35,6 +35,9 @@ class PushTokenWorker(
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val app = applicationContext
         if (!PushServiceLocator.enabled(app)) return@withContext Result.success()
+        // Причина отказа должна дожить до отчёта даже если рабочий процесс
+        // поднят системой раньше, чем кто-либо установил счётчики.
+        com.vladimir.messenger.data.push.PushDiagnostics.install(app)
         val registrar = PushServiceLocator.registrar(app) ?: return@withContext Result.success()
         try {
             val outcome = registrar.run()
