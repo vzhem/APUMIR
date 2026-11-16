@@ -10,14 +10,12 @@ import android.util.Log
 import java.io.File
 import java.security.KeyStore
 import java.util.concurrent.CancellationException
-import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
-import javax.crypto.spec.GCMParameterSpec
 
 /**
  * Device-bound journal of the last FCM registration token this installation
- * saw, stored only as an encrypted blob under `noBackupFilesDir`.
+ * saw, stored only as an encrypted fingerprint under `noBackupFilesDir`.
  *
  * Purpose is narrow and local: when the provider rotates a token, the runtime
  * must notice *that* it rotated (fingerprint change) and re-register the new
@@ -60,19 +58,20 @@ internal class FcmTokenJournal(
         synchronized(LOCK) {
             if (!TOKEN.matches(token)) return@synchronized State.Unavailable
             val fingerprint = PushWakeCrypto.tokenFingerprint(token) ?: return@synchronized State.Unavailable
-            val plaintext = token.toByteArray(Charsets.UTF_8)
             try {
                 val db = db()
                 db.beginTransaction()
                 try {
-                    val previous = readFingerprint(db) ?: ""
+                    val previous = readFingerprint(db, token, fingerprint)
                     val state = when {
-                        previous.isEmpty() -> State.Missing
-                        previous == fingerprint -> State.Unchanged
+                        previous == null || previous.legacy || !previous.confirmed -> State.Missing
+                        previous.fingerprint == fingerprint -> State.Unchanged
                         else -> State.Rotated
                     }
-                    val blob = encrypt(fingerprint, plaintext, allowCreate = previous.isEmpty())
-                    if (previous.isEmpty()) {
+                    val blob = FcmTokenCipher.encrypt(
+                        fingerprint, secretKey(allowCreate = previous == null), confirmed = state == State.Unchanged,
+                    )
+                    if (previous == null) {
                         check(db.insertOrThrow(TABLE, null, ContentValues().apply { put(BLOB, blob) }) != -1L)
                     } else {
                         check(db.update(TABLE, ContentValues().apply { put(BLOB, blob) }, "id=1", null) == 1)
@@ -86,10 +85,30 @@ internal class FcmTokenJournal(
                 // Never print the token, fingerprint, key alias or exception text.
                 Log.w(TAG, "FCM token journal unavailable: ${error.javaClass.simpleName}")
                 State.Unavailable
-            } finally {
-                plaintext.fill(0)
             }
         }
+
+    /** Mark only this exact token as registered, after all route operations succeeded. */
+    fun confirmRegistered(token: String): Boolean = synchronized(LOCK) {
+        val fingerprint = PushWakeCrypto.tokenFingerprint(token) ?: return@synchronized false
+        try {
+            val db = db()
+            db.beginTransaction()
+            try {
+                val current = readFingerprint(db, token, fingerprint)
+                if (current == null || current.legacy || current.fingerprint != fingerprint) return@synchronized false
+                val blob = FcmTokenCipher.encrypt(fingerprint, secretKey(false), confirmed = true)
+                check(db.update(TABLE, ContentValues().apply { put(BLOB, blob) }, "id=1", null) == 1)
+                db.setTransactionSuccessful()
+                true
+            } finally { db.endTransaction() }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w(TAG, "FCM token journal confirmation failed: ${error.javaClass.simpleName}")
+            false
+        }
+    }
 
     /** Remove the record after a revoke, so the next token is treated as new. */
     fun forget(): Boolean = synchronized(LOCK) {
@@ -129,12 +148,14 @@ internal class FcmTokenJournal(
 
     fun close() = synchronized(LOCK) { helper?.close(); helper = null }
 
-    private fun readFingerprint(db: SQLiteDatabase): String? =
+    private fun readFingerprint(
+        db: SQLiteDatabase, token: String? = null, fingerprint: String? = null,
+    ): FcmTokenCipher.Result? =
         db.rawQuery("SELECT length($BLOB), CASE WHEN length($BLOB) BETWEEN 40 AND 4096 THEN $BLOB ELSE NULL END FROM $TABLE WHERE id=1", null)
             .use { cursor ->
                 if (!cursor.moveToFirst()) return null
                 check(cursor.getInt(0) in 40..4096)
-                decrypt(cursor.getBlob(1))
+                FcmTokenCipher.decrypt(cursor.getBlob(1), secretKey(false), token, fingerprint)
             }
 
     private fun db(): SQLiteDatabase {
@@ -148,29 +169,6 @@ internal class FcmTokenJournal(
             }
         }
         return helper!!.writableDatabase
-    }
-
-    private fun aad(fingerprint: String) = "apu-push-fcm-token-v1\u0000$fingerprint".toByteArray(Charsets.US_ASCII)
-
-    private fun encrypt(fingerprint: String, plaintext: ByteArray, allowCreate: Boolean): ByteArray {
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, secretKey(allowCreate))
-        cipher.updateAAD(aad(fingerprint))
-        val iv = cipher.iv
-        check(iv.size == 12)
-        val body = cipher.doFinal(plaintext)
-        return byteArrayOf(1) + iv + body
-    }
-
-    private fun decrypt(blob: ByteArray): String {
-        check(blob.size in 30..4096 && blob[0] == 1.toByte())
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.DECRYPT_MODE, secretKey(false), GCMParameterSpec(128, blob.copyOfRange(1, 13)))
-        val body = cipher.doFinal(blob.copyOfRange(13, blob.size))
-        val fingerprint = body.toString(Charsets.US_ASCII)
-        body.fill(0)
-        check(HASH.matches(fingerprint) && fingerprint.any { it != '0' })
-        return fingerprint
     }
 
     private fun secretKey(allowCreate: Boolean): SecretKey {
@@ -192,10 +190,8 @@ internal class FcmTokenJournal(
         const val TABLE = "fcm_token"
         const val BLOB = "payload"
         const val ANDROID_KEYSTORE = "AndroidKeyStore"
-        const val TRANSFORMATION = "AES/GCM/NoPadding"
         const val TAG = "FcmTokenJournal"
         val LOCK = Any()
-        val HASH = Regex("^[0-9a-f]{64}$")
         val TOKEN = Regex("^[A-Za-z0-9_:.-]{20,2048}$")
     }
 }

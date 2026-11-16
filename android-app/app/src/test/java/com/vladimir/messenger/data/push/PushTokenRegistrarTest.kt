@@ -35,6 +35,7 @@ class PushTokenRegistrarTest {
                     journal = object : PushRuntimeCoordinator.TokenJournal {
                         override fun record(token: String, nowMs: Long) = journal.also { calls += "journal" }
                         override fun forget(): Boolean = true
+                        override fun confirmRegistered(token: String): Boolean = true
                     },
                     register = register,
                     enqueueCheck = { record() },

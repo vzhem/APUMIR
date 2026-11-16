@@ -335,6 +335,7 @@ internal object PushServiceLocator {
                             journal = object : PushRuntimeCoordinator.TokenJournal {
                                 override fun record(token: String, nowMs: Long) = shared.journals.tokens.record(token, nowMs)
                                 override fun forget(): Boolean = shared.journals.tokens.forget()
+                                override fun confirmRegistered(token: String) = shared.journals.tokens.confirmRegistered(token)
                             },
                             register = register,
                             enqueueCheck = { now ->

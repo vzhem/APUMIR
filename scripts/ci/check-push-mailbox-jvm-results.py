@@ -215,12 +215,18 @@ EXPECTED = {
         "theReviewedHostIsTheOnlyDefaultAndStillNeedsBothBuildFacts",
         "anApprovedHostCannotBeChosenByAnythingButTheReviewedConstant",
     },
+    PREFIX + "FcmTokenCipherTest": {
+        "currentRoundTripNeedsNoTokenAndDetectsTampering",
+        "legacyRequiresMatchingTokenAndAuthentication",
+        "unknownVersionIsNotSilentlyAccepted",
+    },
     PREFIX + "PushRuntimeCoordinatorTest": {
         "closedGateStoresNothingAndSchedulesNothing",
         "aFreshTokenIsRegisteredOnlyThroughThePinnedRoute",
         "anUnchangedTokenMakesNoNetworkRequest",
         "aRotatedTokenMustBeReRegisteredAndFailureIsNotSuccess",
         "corruptJournalOrRegistrationErrorFailsClosed",
+        "confirmationFailureIsNotRegistrationSuccess",
         "providerSignalMayOnlyRequestABoundedCheck",
         "gapAndCheckFailuresAreReportedRatherThanSwallowed",
         "cancellationIsNeverConvertedIntoAnOutcome",

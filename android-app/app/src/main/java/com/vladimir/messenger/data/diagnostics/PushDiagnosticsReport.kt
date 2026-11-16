@@ -116,8 +116,8 @@ internal fun StringBuilder.appendPush(facts: DiagnosticsFacts) {
         PushPhase.NO_TARGETS -> appendLine(
             "  ↳ регистрировать некого: ни у одного собеседника нет закрепления",
         )
-        PushPhase.FAILED -> appendLine(
-            "  ↳ сервер не принял ни одного маршрута: сеть, отказ или неготовый ключ обмена",
+        PushPhase.FAILED -> if (push.registrationReason == PushRegisterReason.NONE) appendLine(
+            "  ↳ регистрация не завершена; точный шаг не записан",
         )
         else -> Unit
     }
@@ -138,7 +138,7 @@ internal fun StringBuilder.appendPush(facts: DiagnosticsFacts) {
     // «сигнал пришёл, но разбудить не удалось».
     appendLine(
         "разбудили_на_месте=" + when (push.inProcessWakeAtMs) {
-            0L -> "нет (ядра не было — ставили фоновую задачу)"
+            0L -> "нет подтверждённого пробуждения на месте"
             else -> "да (${agoOrNever(facts.createdAtMs, push.inProcessWakeAtMs)})"
         },
     )

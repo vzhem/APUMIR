@@ -26,6 +26,9 @@ class PushRuntimeCoordinatorTest {
             return state
         }
 
+        var confirmationSucceeds = true
+        override fun confirmRegistered(token: String) = confirmationSucceeds
+
         override fun forget(): Boolean {
             forgets++
             return true
@@ -113,6 +116,13 @@ class PushRuntimeCoordinatorTest {
         thrown.tokenJournal.throws = true
         assertEquals(PushRuntimeCoordinator.TokenOutcome.Failed, thrown.coordinator.onToken(token, 1))
         assertEquals(1, thrown.failures)
+    }
+
+    @Test fun confirmationFailureIsNotRegistrationSuccess() = runBlocking {
+        val fake = Fake()
+        fake.tokenJournal.confirmationSucceeds = false
+        assertEquals(PushRuntimeCoordinator.TokenOutcome.Failed, fake.coordinator.onToken(token, 1))
+        assertEquals(listOf(token), fake.registered)
     }
 
     @Test fun providerSignalMayOnlyRequestABoundedCheck() {

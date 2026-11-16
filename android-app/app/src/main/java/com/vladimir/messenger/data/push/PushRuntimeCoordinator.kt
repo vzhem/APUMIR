@@ -46,6 +46,7 @@ internal class PushRuntimeCoordinator(
     interface TokenJournal {
         fun record(token: String, nowMs: Long): FcmTokenJournal.State
         fun forget(): Boolean
+        fun confirmRegistered(token: String): Boolean
     }
 
     sealed interface TokenOutcome {
@@ -96,9 +97,8 @@ internal class PushRuntimeCoordinator(
                 reason(PushRegisterReason.JOURNAL_UNAVAILABLE)
                 TokenOutcome.Failed
             }
-            // Missing and Rotated both require a registration attempt. A failed
-            // attempt leaves the journal at the new token, so a retry sees
-            // Unchanged and must be redriven by the caller's pending state.
+            // Missing and Rotated require registration. The journal stays pending
+            // across process death until all route operations have succeeded.
             FcmTokenJournal.State.Missing, FcmTokenJournal.State.Rotated -> {
                 val registered = try {
                     register(token)
@@ -113,6 +113,9 @@ internal class PushRuntimeCoordinator(
                     // NOT recorded here: the per-peer runner already named the exact
                     // step, and a coarser guess from this level would only hide it.
                     journal.forget()
+                    TokenOutcome.Failed
+                } else if (!journal.confirmRegistered(token)) {
+                    reason(PushRegisterReason.JOURNAL_UNAVAILABLE)
                     TokenOutcome.Failed
                 } else {
                     TokenOutcome.Registered(state == FcmTokenJournal.State.Rotated)

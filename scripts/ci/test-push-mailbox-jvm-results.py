@@ -75,7 +75,7 @@ class MailboxResultsTest(unittest.TestCase):
                                *((name, checker.EXPECTED[checker.PREFIX + name]) for name in (
                                    "PushHttpClientTest", "PushWakeCryptoTest", "PushMailboxHttpClientTest",
                                    "PushMailboxHttpsTransportTest", "PushHttpLoopbackTlsTest", "PushMailboxDrainTest",
-                                   "PushSignalPolicyTest", "PushRuntimeConfigTest", "PushRuntimeCoordinatorTest",
+                                   "PushSignalPolicyTest", "PushRuntimeConfigTest", "PushRuntimeCoordinatorTest", "FcmTokenCipherTest",
                                    "PushDrainTrustGateTest", "PushRegistrationFlowTest",
                                    "PushSignalInboxTest", "PushReceiveWindowTest", "PushWakeSyncTest",
                                    "PushFullScanTest", "PushSignalSinkTest", "PushTargetsTest",
