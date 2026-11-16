@@ -25,7 +25,15 @@ enum class PushPhase {
 }
 
 /** Итог последней попытки разбудить собеседника. */
-enum class PushWakeOutcome { NONE, ACCEPTED, WITHIN_BUDGET, NOT_REGISTERED, UNAVAILABLE, SKIPPED }
+enum class PushWakeOutcome {
+    NONE, ACCEPTED, WITHIN_BUDGET, NOT_REGISTERED, UNAVAILABLE, SKIPPED,
+    /**
+     * Собеседник ещё не присылал свою эпоху, поэтому адресовать пробуждение
+     * нечем. Отдельно от [NOT_REGISTERED]: там не готова своя регистрация,
+     * здесь — нечего адресовать на его стороне.
+     */
+    NO_PEER_EPOCH,
+}
 
 /**
  * Снимок состояния push для отчёта. Чистый JVM-тип: ни Android, ни Firebase, ни
@@ -83,6 +91,18 @@ data class PushSnapshot(
      */
     val tokenError: String? = null,
     val inboxPending: String,
+    /**
+     * Сколько эпох собеседников лежит в защищённом журнале; null — не читается.
+     *
+     * Это вторая половина адреса: без эпохи собеседника пробуждение некуда
+     * отправить, и ноль объясняет «зарегистрирован, а сигналов нет» лучше
+     * любого предположения.
+     */
+    val peerEpochs: Int? = null,
+    /** Когда последний раз проверяли /health; 0 — не проверяли. */
+    val endpointCheckedAtMs: Long = 0L,
+    /** Когда служба последний раз ПРИНИМАЛА запрос на пробуждение; 0 — не было. */
+    val lastWakeAcceptedAtMs: Long = 0L,
     /** null — проверка доступности службы не проводилась. */
     val endpointReachable: Boolean?,
     val lastError: String,
@@ -133,6 +153,11 @@ internal fun StringBuilder.appendPush(facts: DiagnosticsFacts) {
     }
     appendLine("сигналов=${push.signalsReceived} · отклонено=${push.signalsRejected}")
     appendLine("сигнал_назад=${agoOrNever(facts.createdAtMs, push.lastSignalAtMs)}")
+    // «Готов принимать» и «меня никто не будил» — разные состояния, и раньше
+    // они выглядели одинаково: ноль сигналов при успешной регистрации.
+    if (push.phase == PushPhase.REGISTERED && push.signalsReceived == 0L) appendLine(
+        "  ↳ этот телефон готов принимать, но ни один сигнал не приходил: его ещё никто не будил",
+    )
     // Прямой ответ на вопрос «разбудили или нет»: раньше этот факт нигде не
     // печатался, и по отчёту нельзя было отличить «сигнала не было» от
     // «сигнал пришёл, но разбудить не удалось».
@@ -149,12 +174,29 @@ internal fun StringBuilder.appendPush(facts: DiagnosticsFacts) {
         "пробуждения=${push.wakeAttempts} · последнее=${push.lastWake.name.lowercase()} " +
             "(${agoOrNever(facts.createdAtMs, push.lastWakeAtMs)})",
     )
+    // Отдельно от «пробуждения»: там попытки, здесь — сколько из них служба
+    // приняла. Без этой строки «30 попыток» читается и как «30 запросов
+    // ушло», и как «30 раз не смогли даже начать».
     appendLine(
-        "служба=" + when (push.endpointReachable) {
-            true -> "доступна (/health ответил)"
-            false -> "недоступна (сеть или фильтрация)"
-            null -> "не проверялась"
-        },
+        "принято_службой=${agoOrNever(facts.createdAtMs, push.lastWakeAcceptedAtMs)} " +
+            "(принятие заявки — не доставка)",
+    )
+    val serviceState = when (push.endpointReachable) {
+        true -> "доступна (/health ответил)"
+        false -> "недоступна (сеть или фильтрация)"
+        null -> "не проверялась"
+    }
+    // Без отметки времени старая неудачная проба читается как текущее состояние
+    // службы и перечёркивает успешную регистрацию, которая прошла позже неё.
+    val probedAt = if (push.endpointCheckedAtMs > 0L) {
+        " · проверено ${agoOrNever(facts.createdAtMs, push.endpointCheckedAtMs)}"
+    } else {
+        ""
+    }
+    appendLine("служба=$serviceState$probedAt")
+    appendLine("эпох_собеседников=${push.peerEpochs ?: "не читается"}")
+    if (push.peerEpochs == 0) appendLine(
+        "  ↳ ни один собеседник ещё не присылал свою эпоху: пробуждение некуда отправить",
     )
     appendLine("ящик_пробуждения=${push.inboxPending}")
     appendLine("последняя_ошибка=${push.lastError}")

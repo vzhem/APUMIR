@@ -81,8 +81,25 @@ object PushDiagnostics {
 
     fun noteInbox(pending: String) = write("inbox=$pending")
 
-    /** Whether the public health route answered; null until it was probed. */
-    fun noteEndpoint(reachable: Boolean) = write("endpoint=${if (reachable) "ok" else "no"}")
+    /**
+     * Whether the public health route answered, and when it was asked.
+     *
+     * The timestamp is part of the record, not decoration: the probe ran once at
+     * process start, so an unreachable answer printed hours later contradicted a
+     * successful registration and read as "the service is down" when it was only
+     * "the first seconds of the process were bad".
+     */
+    fun noteEndpoint(reachable: Boolean) = write(
+        "endpoint=${if (reachable) "ok" else "no"}",
+        "endpointAt=${System.currentTimeMillis()}",
+    )
+
+    /**
+     * The service took a wake request. Not delivery: only that the queue accepted
+     * the capability. Kept apart from the attempt counter so "30 attempts" stops
+     * reading like "30 requests left the phone".
+     */
+    fun noteWakeAccepted() = write("lastWakeAcceptedAt=${System.currentTimeMillis()}")
 
     /** Fixed vocabulary only: never an exception message, never a path. */
     fun noteError(kind: String) = write("lastError=${kind.take(40)}")
@@ -125,6 +142,9 @@ object PushDiagnostics {
             lastWake = runCatching { PushWakeOutcome.valueOf(text("lastWake") ?: "NONE") }
                 .getOrDefault(PushWakeOutcome.NONE),
             lastWakeAtMs = number("lastWakeAt"),
+            lastWakeAcceptedAtMs = number("lastWakeAcceptedAt"),
+            endpointCheckedAtMs = number("endpointAt"),
+            peerEpochs = epochCount(app),
             inProcessWakeAtMs = number("inProcessWakeAt"),
             workerWakeAtMs = number("workerWakeAt"),
             inboxPending = text("inbox") ?: "?",
@@ -145,6 +165,19 @@ object PushDiagnostics {
         // A missing journal is reported as "no token", never as a crash.
         Log.w(TAG, "token journal unreadable")
         false
+    }
+
+    /**
+     * Number of epochs announced by correspondents, or null when unreadable.
+     *
+     * The other half of the address: a registered route of ours lets the peer
+     * wake us, and the peer's epoch is the only thing that lets us wake them.
+     */
+    private fun epochCount(app: Context): Int? = try {
+        PushServiceLocator.sharedOrNull(app)?.journals?.epochs?.indexedEpochs()
+    } catch (_: Exception) {
+        Log.w(TAG, "push epoch store unreadable")
+        null
     }
 
     /** Number of indexed routes, or null when the index cannot be read. */
@@ -186,6 +219,7 @@ object PushDiagnostics {
     private val KEY_IS_NUMBER = setOf(
         "lastRegisterAt", "lastSignalAt", "lastWakeAt",
         "inProcessWakeAt", "workerWakeAt",
+        "endpointAt", "lastWakeAcceptedAt",
     )
 
     /**

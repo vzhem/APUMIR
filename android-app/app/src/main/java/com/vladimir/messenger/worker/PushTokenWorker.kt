@@ -75,6 +75,9 @@ class PushTokenWorker(
                     // peers know it; this is a best-effort announcement, not a
                     // delivery claim, so its result does not change ours.
                     com.vladimir.messenger.data.push.PushEpochPublish.noteAllRegistered(app)
+                    // The network just worked, so this is the honest moment to ask
+                    // /health: the report stops showing a stale startup failure.
+                    com.vladimir.messenger.data.push.PushServiceLocator.probeEndpoint(app)
                     Result.success()
                 }
                 PushTokenRegistrar.Outcome.Partial,

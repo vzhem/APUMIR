@@ -136,6 +136,29 @@ internal object PushServiceLocator {
     }
 
     /**
+     * One health probe for the report, refreshed at a moment when the network is
+     * demonstrably working (a registration just went through).
+     *
+     * The startup probe alone is not enough: it runs in the first second of a
+     * process, and a single failed connect there was printed for the rest of the
+     * process lifetime as "the service is unreachable".
+     */
+    fun probeEndpoint(context: Context) {
+        val app = context.applicationContext
+        if (!enabled(app)) return
+        val approved = endpoint(app) ?: return
+        try {
+            PushDiagnostics.install(app)
+            PushDiagnostics.noteEndpoint(healthReachable(approved))
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // A probe is evidence about the network, never a delivery failure.
+            diag("Health probe failed")
+        }
+    }
+
+    /**
      * The already-built runtime, or null. Diagnostics must never *construct* the
      * push runtime just to read a counter: building it opens journals and a
      * crypto object, and a report may be taken in a build where push is off.
@@ -467,6 +490,9 @@ internal object PushServiceLocator {
             // never be reached. Not awaited here - startup must not block on
             // Google - and the result is only a local fact for diagnostics.
             PushDiagnostics.install(app)
+            // Retry pumps wake the correspondent through this installed context;
+            // without it a queued message can only sit and wait.
+            com.vladimir.messenger.data.push.PushWakePublish.install(app)
             startupScope.launch {
                 try {
                     val on = preparingReceive(app)

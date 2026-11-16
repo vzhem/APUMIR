@@ -1294,6 +1294,80 @@ class DiagnosticsReportTest {
         assertFalse(report.contains("маршрут="))
     }
 
+    @Test fun pushSectionNamesWhichHalfOfTheAddressIsMissing() {
+        // Отчёт 523: регистрация прошла (`маршрутов=8`), а сигналов ноль.
+        // Владелец спрашивал «может push работает, а я не вижу». Раздел обязан
+        // отвечать по-разному: «меня ещё никто не будил» и «мне нечем будить».
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = true,
+            endpointConfigured = true,
+            registeredRoutes = 8,
+            phase = PushPhase.REGISTERED,
+            lastRegisterAtMs = 1_699_998_800_000L,
+            signalsReceived = 0,
+            signalsRejected = 0,
+            lastSignalAtMs = 0L,
+            wakeAttempts = 30,
+            lastWake = PushWakeOutcome.NO_PEER_EPOCH,
+            lastWakeAtMs = 1_699_940_000_000L,
+            peerEpochs = 0,
+            endpointReachable = false,
+            endpointCheckedAtMs = 1_699_998_810_000L,
+            lastWakeAcceptedAtMs = 0L,
+            inboxPending = "?",
+            lastError = "-",
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        for (line in listOf(
+            "маршрутов=8",
+            "фаза=registered",
+            "последнее=no_peer_epoch",
+            "принято_службой=не было",
+            "принятие заявки — не доставка",
+            "эпох_собеседников=0",
+            "ни один собеседник ещё не присылал свою эпоху",
+            "этот телефон готов принимать, но ни один сигнал не приходил",
+            "проверено",
+        )) {
+            assertTrue("нет строки: $line", report.contains(line))
+        }
+    }
+
+    @Test fun anAcceptedWakeSaysWhenItWasAccepted() {
+        // «30 пробуждений» читалось и как «30 запросов ушло», и как «30 раз не
+        // смогли начать». Принятие заявки печатается отдельно и со временем.
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = true,
+            endpointConfigured = true,
+            registeredRoutes = 8,
+            phase = PushPhase.REGISTERED,
+            lastRegisterAtMs = 1_699_998_800_000L,
+            signalsReceived = 1,
+            signalsRejected = 0,
+            lastSignalAtMs = 1_699_999_000_000L,
+            wakeAttempts = 31,
+            lastWake = PushWakeOutcome.ACCEPTED,
+            lastWakeAtMs = 1_699_998_900_000L,
+            peerEpochs = 3,
+            endpointReachable = true,
+            endpointCheckedAtMs = 1_699_999_000_000L,
+            lastWakeAcceptedAtMs = 1_699_998_900_000L,
+            inboxPending = "0",
+            lastError = "-",
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        assertTrue(report.contains("последнее=accepted"))
+        assertTrue(report.contains("принято_службой="))
+        assertTrue(report.contains("принятие заявки — не доставка"))
+        assertTrue(report.contains("эпох_собеседников=3"))
+        // Своя регистрация есть и сигнал пришёл — подсказки «никто не будил» нет.
+        assertFalse(report.contains("его ещё никто не будил"))
+    }
+
     @Test fun aTokenThatNeverArrivedSaysWhy() {
         // Отчёт 514 с телефона Б: гейт открыт, приём on, а токена нет — и ни
         // слова о причине. «нет» без причины не диагноз.

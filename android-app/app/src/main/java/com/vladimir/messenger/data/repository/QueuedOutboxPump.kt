@@ -9,11 +9,22 @@ import com.vladimir.messenger.domain.model.MessageChannel
 import com.vladimir.messenger.domain.model.MessageStatus
 import kotlinx.coroutines.CancellationException
 
-/** Room-backed, bounded fair scan of PENDING and phone-owned QUEUED_OFFLINE messages. */
+/**
+ * Room-backed, bounded fair scan of PENDING and phone-owned QUEUED_OFFLINE messages.
+ *
+ * A row in this queue has already failed at least once, so the correspondent is
+ * the exact case the push wake exists for. The wake is requested per retry and
+ * bounded inside push (a minute per peer in-process, ten minutes per accepted
+ * request), so a stuck message cannot become a stream of provider calls.
+ */
 internal class QueuedOutboxPump(
     private val messages: MessageDao,
     private val chats: ChatDao,
     private val send: suspend (String, String, String, String) -> Boolean?,
+    /** Best-effort wake through the installed push runtime; no-op when closed. */
+    private val wake: suspend (String) -> Unit = { peer ->
+        com.vladimir.messenger.data.push.PushWakePublish.wakeInstalled(peer)
+    },
 ) {
     private val scan = FairOutboxScan<MessageEntity>()
 
@@ -41,6 +52,16 @@ internal class QueuedOutboxPump(
                     if (!peer.startsWith("pk_")) {
                         false
                     } else {
+                        // Ask the other phone to come online before the retry: the
+                        // transport accepts a publish nobody is subscribed to, so
+                        // without a nudge this row can wait for hours.
+                        try {
+                            wake(peer)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: Exception) {
+                            Log.w("QueuedOutboxPump", "Wake request skipped: ${error.javaClass.simpleName}")
+                        }
                         val delivered = send(
                             row.id, row.chatId, peer,
                             TextColorWire.wrap(row.content, row.textColor, row.senderNameColor),

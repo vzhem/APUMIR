@@ -33,14 +33,28 @@ internal object PushEpochPublish {
         if (!PushServiceLocator.enabled(app)) return
         try {
             val shared = PushServiceLocator.shared(app)
-            val delivery = shared.epochs ?: return
             shared.resolver.resolveForRegistration(peerId)?.use { pass ->
                 val state = pass.registration ?: return@use
                 if (state.phase != PushRegistrationState.Phase.ACTIVE || state.registeredAtMs <= 0) return@use
-                when (delivery.offer(state, peerId, pass.localBinding, pass.pinnedPeerBinding, pass.localSecret)) {
-                    PushEpochDelivery.Outcome.Handled,
-                    PushEpochDelivery.Outcome.Stored -> Unit
-                    else -> diag("Epoch offer not accepted")
+                val byMailbox = shared.epochs?.let { delivery ->
+                    when (
+                        delivery.offer(
+                            state, peerId,
+                            pass.localBinding, pass.pinnedPeerBinding, pass.localSecret,
+                        )
+                    ) {
+                        PushEpochDelivery.Outcome.Handled,
+                        PushEpochDelivery.Outcome.Stored -> true
+                        else -> false
+                    }
+                } ?: false
+                // The mailbox is the second path, not the only one. While it was
+                // the only one, a phone whose mailbox was unavailable could never
+                // learn a peer's epoch - and an epoch is the whole address of a
+                // wake. The ordinary transport already has a sealed service-text
+                // receive path that consumes exactly this packet before any chat.
+                if (!byMailbox && !announceOverTransport(app, peerId, state)) {
+                    diag("Epoch offer not accepted")
                 }
             }
         } catch (cancelled: CancellationException) {
@@ -48,6 +62,33 @@ internal object PushEpochPublish {
         } catch (_: Exception) {
             // Never log the peer, the epoch or exception text.
             diag("Epoch offer failed")
+        }
+    }
+
+    /**
+     * Offers the epoch inside a sealed service text over the ordinary transport.
+     *
+     * The receiving phone opens the envelope, recognises the reserved
+     * `APUTYP1|APUPUSH1|` family and stores the epoch before the text can reach a
+     * chat, so this path adds no chat row, no notification and no ACK. It exists
+     * because an epoch is only an address hint: without it the other phone has
+     * nothing to wake us *with*, regardless of how healthy the mailbox is.
+     */
+    private fun announceOverTransport(
+        app: android.content.Context,
+        peerId: String,
+        state: PushRegistrationState.State,
+    ): Boolean {
+        val text = state.announcement() ?: return false
+        val sealed = com.vladimir.messenger.data.security.MessageSealer.seal(app, peerId, text) ?: return false
+        return try {
+            com.vladimir.messenger.data.RustBridge.sendDirectPayload(peerId, sealed)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // Never log the peer, the epoch or exception text.
+            diag("Epoch transport announce failed")
+            false
         }
     }
 

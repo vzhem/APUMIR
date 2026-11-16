@@ -136,6 +136,24 @@ internal class PushEpochStore(
             }
         }
 
+    /**
+     * How many announced epochs are stored, for diagnostics only.
+     *
+     * A count, never an epoch, a peer or a binding: the report has to answer
+     * "could this phone wake anyone at all" without carrying a capability. Null
+     * means the store could not be read, which is different from zero.
+     */
+    fun indexedEpochs(): Int? = synchronized(LOCK) {
+        try {
+            count(db())
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            Log.w(TAG, "Push epoch count unavailable")
+            null
+        }
+    }
+
     fun close() = synchronized(LOCK) { helper?.close(); helper = null }
 
     private fun bindingsMatch(

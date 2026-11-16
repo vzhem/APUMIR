@@ -16,15 +16,49 @@ import kotlinx.coroutines.CancellationException
  * arrives. This is a separate, slower fair scan: a backlog of these rows must
  * not block the primary PENDING/QUEUED_OFFLINE pump. Room remains the durable
  * source, retries keep the original ID, and terminal statuses are never reset.
+ *
+ * This is also the only place where a wake is requested for a message that was
+ * *accepted by the transport* and still nobody answered - and that is the normal
+ * case for a sleeping phone: the broker accepts a publish with no subscriber,
+ * the row stays SENT, and until now nothing ever asked the other side to look.
+ * A retry alone could never help there, because the message is not in the queue
+ * any more.
  */
 internal class UnconfirmedOutboxPump(
     private val messages: MessageDao,
     private val chats: ChatDao,
     private val send: suspend (String, String, String, String) -> Boolean?,
     private val mirrorIsActive: () -> Boolean = { MirrorHub.routeOutgoing() != null },
+    /**
+     * Best-effort wake of the correspondent whose phone may be asleep.
+     *
+     * Default goes through the installed push runtime, so the call site needs no
+     * Context; a build with a closed gate turns this into a no-op inside push.
+     */
+    private val wake: suspend (String) -> Unit = { peer ->
+        com.vladimir.messenger.data.push.PushWakePublish.wakeInstalled(peer)
+    },
+    private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
+    /** A message younger than this may still be ACKed on its own; do not nudge yet. */
+    private val wakeMinAgeMs = 15_000L
     // A single older retry per turn leaves room for fresh sends on the same peer.
     private val scan = FairOutboxScan<MessageEntity>(maxAttemptsPerCycle = 1)
+
+    /**
+     * A wake must never break or delay the retry that carries the message itself,
+     * so every failure is reduced to one log line with no peer and no content.
+     */
+    private suspend fun wakeQuietly(peer: String, messageTimestampMs: Long) {
+        if (messageTimestampMs > 0 && nowMs() - messageTimestampMs < wakeMinAgeMs) return
+        try {
+            wake(peer)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            Log.w("UnconfirmedOutbox", "Wake request skipped")
+        }
+    }
 
     suspend fun pump(pageSize: Int): OutboxProgress {
         // The active mirror partner owns network sends while it is present.
@@ -54,10 +88,17 @@ internal class UnconfirmedOutboxPump(
                     } else {
                         val peer = OutboxRecipient.forMessage(current, chats.getChatById(current.chatId)?.contactId)
                         if (!peer.startsWith("pk_") || mirrorIsActive()) false
-                        else send(
-                            current.id, current.chatId, peer,
-                            TextColorWire.wrap(current.content, current.textColor, current.senderNameColor),
-                        )
+                        else {
+                            // The row has been unconfirmed for at least one sweep:
+                            // the other phone is very likely asleep. Ask the push
+                            // service to wake it, then retry as before. The wake is
+                            // bounded per peer inside push and cannot change status.
+                            wakeQuietly(peer, current.timestamp)
+                            send(
+                                current.id, current.chatId, peer,
+                                TextColorWire.wrap(current.content, current.textColor, current.senderNameColor),
+                            )
+                        }
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
