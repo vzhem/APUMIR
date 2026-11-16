@@ -21,10 +21,6 @@ internal class QueuedOutboxPump(
     private val messages: MessageDao,
     private val chats: ChatDao,
     private val send: suspend (String, String, String, String) -> Boolean?,
-    /** Best-effort wake through the installed push runtime; no-op when closed. */
-    private val wake: suspend (String) -> Unit = { peer ->
-        com.vladimir.messenger.data.push.PushWakePublish.wakeInstalled(peer)
-    },
 ) {
     private val scan = FairOutboxScan<MessageEntity>()
 
@@ -55,13 +51,7 @@ internal class QueuedOutboxPump(
                         // Ask the other phone to come online before the retry: the
                         // transport accepts a publish nobody is subscribed to, so
                         // without a nudge this row can wait for hours.
-                        try {
-                            wake(peer)
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (error: Exception) {
-                            Log.w("QueuedOutboxPump", "Wake request skipped: ${error.javaClass.simpleName}")
-                        }
+                        com.vladimir.messenger.data.push.PushWakeHook.wakeIfMessageStale(peer, row.timestamp)
                         val delivered = send(
                             row.id, row.chatId, peer,
                             TextColorWire.wrap(row.content, row.textColor, row.senderNameColor),

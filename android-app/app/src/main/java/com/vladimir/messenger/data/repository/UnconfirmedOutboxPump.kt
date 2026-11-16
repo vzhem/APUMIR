@@ -29,35 +29,18 @@ internal class UnconfirmedOutboxPump(
     private val chats: ChatDao,
     private val send: suspend (String, String, String, String) -> Boolean?,
     private val mirrorIsActive: () -> Boolean = { MirrorHub.routeOutgoing() != null },
-    /**
-     * Best-effort wake of the correspondent whose phone may be asleep.
-     *
-     * Default goes through the installed push runtime, so the call site needs no
-     * Context; a build with a closed gate turns this into a no-op inside push.
-     */
-    private val wake: suspend (String) -> Unit = { peer ->
-        com.vladimir.messenger.data.push.PushWakePublish.wakeInstalled(peer)
-    },
-    private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
-    /** A message younger than this may still be ACKed on its own; do not nudge yet. */
-    private val wakeMinAgeMs = 15_000L
     // A single older retry per turn leaves room for fresh sends on the same peer.
     private val scan = FairOutboxScan<MessageEntity>(maxAttemptsPerCycle = 1)
 
     /**
-     * A wake must never break or delay the retry that carries the message itself,
-     * so every failure is reduced to one log line with no peer and no content.
+     * A wake never delays the retry that carries the message itself: it is handed
+     * to the push hook, which is a no-op while the gate is closed and swallows its
+     * own failures. Fresh rows are skipped - a phone that answered a moment later
+     * needs no nudge.
      */
-    private suspend fun wakeQuietly(peer: String, messageTimestampMs: Long) {
-        if (messageTimestampMs > 0 && nowMs() - messageTimestampMs < wakeMinAgeMs) return
-        try {
-            wake(peer)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            Log.w("UnconfirmedOutbox", "Wake request skipped")
-        }
+    private fun wakeIfStale(peer: String, messageTimestampMs: Long) {
+        com.vladimir.messenger.data.push.PushWakeHook.wakeIfMessageStale(peer, messageTimestampMs)
     }
 
     suspend fun pump(pageSize: Int): OutboxProgress {
@@ -93,7 +76,7 @@ internal class UnconfirmedOutboxPump(
                             // the other phone is very likely asleep. Ask the push
                             // service to wake it, then retry as before. The wake is
                             // bounded per peer inside push and cannot change status.
-                            wakeQuietly(peer, current.timestamp)
+                            wakeIfStale(peer, current.timestamp)
                             send(
                                 current.id, current.chatId, peer,
                                 TextColorWire.wrap(current.content, current.textColor, current.senderNameColor),
