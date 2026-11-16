@@ -52,6 +52,12 @@ object PersonSegmenter {
      * иначе фон молча не работал бы весь сеанс из-за одной ранней ошибки.
      */
     fun compositeOrNull(source: Bitmap, background: Bitmap?, singleImage: Boolean = false): Bitmap? {
+        // В процессе без экрана ML Kit не поднимаем: причина и цена — в MlKitGate.
+        if (!com.vladimir.messenger.data.mlkit.MlKitGate.mayInitialise()) {
+            com.vladimir.messenger.data.mlkit.MlKitGate.refusal("PersonSegmenter", "background cutout")
+            lastFailure = "ML Kit не поднимается в процессе без экрана"
+            return null
+        }
         val mask = try {
             val segmenter = if (singleImage) singleImageSegmenter else streamSegmenter
             val result = Tasks.await(

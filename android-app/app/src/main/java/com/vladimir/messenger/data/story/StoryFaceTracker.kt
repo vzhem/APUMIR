@@ -149,6 +149,14 @@ internal class StoryFaceTracker(
  * фильтры лица выключаются, запись остаётся.
  */
 internal fun newStoryFaceDetectorOrNull(context: Context): FaceDetector? {
+    // Процесс без экрана (задача, сигнал, служба) ML Kit не трогает: его
+    // провайдер ставится позже, и первая же инициализация отсюда роняет процесс
+    // (data/mlkit/MlKitGate.kt). Фоновая выпечка без фильтров лица — меньшая
+    // цена, чем потерянный входящий сигнал.
+    if (!com.vladimir.messenger.data.mlkit.MlKitGate.mayInitialise()) {
+        com.vladimir.messenger.data.mlkit.MlKitGate.refusal("StoryFaceTracker", "face detector")
+        return null
+    }
     if (!com.vladimir.messenger.data.featurepacks.FeaturePackRuntime.ensureLoaded(
             context,
             com.vladimir.messenger.data.featurepacks.FeaturePackFeature.VIDEO_FACE_EFFECTS,

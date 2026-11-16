@@ -95,6 +95,11 @@ object MessageTranslator {
      * Возвращает null, если перевод не нужен, язык не определён или перевод не удался.
      */
     suspend fun translateForeign(text: String, targetCode: String): MessageTranslation? {
+        // ML Kit не поднимаем в процессе без экрана: см. data/mlkit/MlKitGate.kt.
+        if (!com.vladimir.messenger.data.mlkit.MlKitGate.mayInitialise()) {
+            com.vladimir.messenger.data.mlkit.MlKitGate.refusal("MessageTranslator", "translation")
+            return null
+        }
         val key = targetCode + "|" + text
         synchronized(cache) {
             if (cache.containsKey(key)) return cache[key]
