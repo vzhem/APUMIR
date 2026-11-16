@@ -273,6 +273,9 @@ EXPECTED = {
         "aPeerWithoutAUsableRecordIsNotCountedButDoesNotBlockOthers",
         "forgetRevokesEveryLiveRoute",
         "cancellationFromTheProviderIsNotConvertedIntoAnOutcome",
+        "aPassThatRegisteredNobodyNamesTheStepThatStopped",
+        "anUnreadablePeerSetIsNotMistakenForAnEmptyOne",
+        "aRegisteredPassRecordsSuccessNotAFailure",
     },
     PREFIX + "PushRegistrationFlowTest": {
         "aStoredRegistrationIndexesTheRouteOnlyForTheReservedSequence",
