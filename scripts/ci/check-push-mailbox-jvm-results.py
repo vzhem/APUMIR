@@ -276,6 +276,8 @@ EXPECTED = {
         "aPassThatRegisteredNobodyNamesTheStepThatStopped",
         "anUnreadablePeerSetIsNotMistakenForAnEmptyOne",
         "aRegisteredPassRecordsSuccessNotAFailure",
+        "aRefusedOperationKeepsTheStepThatStopped",
+        "anUnavailableTokenJournalNamesItself",
     },
     PREFIX + "PushRegistrationFlowTest": {
         "aStoredRegistrationIndexesTheRouteOnlyForTheReservedSequence",

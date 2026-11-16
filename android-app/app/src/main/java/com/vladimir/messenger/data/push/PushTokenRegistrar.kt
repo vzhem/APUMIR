@@ -88,7 +88,18 @@ internal class PushTokenRegistrar(
                                 Outcome.AlreadyCurrent
                             is PushRuntimeCoordinator.TokenOutcome.Registered -> Outcome.Registered
                             PushRuntimeCoordinator.TokenOutcome.Failed -> {
-                                reason(if (noTargets) PushRegisterReason.NO_PINNED_PEERS else lastReason)
+                                // Whoever stopped already wrote its own step
+                                // straight to the report: the coordinator for the
+                                // token journal, the per-peer runner for the
+                                // operation. A coarse guess from this level
+                                // erased exactly that line - the report went
+                                // back to naming a service refusal, a dead
+                                // network and an unprepared pair at once, which
+                                // answers none of them. Only the empty-peer
+                                // case is decided here; anything else keeps the
+                                // step that actually stopped.
+                                if (noTargets) reason(PushRegisterReason.NO_PINNED_PEERS)
+                                else if (lastReason != PushRegisterReason.NONE) reason(lastReason)
                                 if (noTargets) Outcome.NoTargets else Outcome.Failed
                             }
                         }
@@ -151,6 +162,11 @@ internal class PushTokenRegistrar(
                 PushRegistrationRunner.Outcome.NotReady -> Unit
                 PushRegistrationRunner.Outcome.Failed -> {
                     diag()
+                    // The runner named the step before returning. Keep it here,
+                    // or the caller's fallback below would overwrite it with
+                    // "no reason recorded" - which is how a phone report ended
+                    // up naming three illnesses at once again.
+                    reasonSink?.let { sink -> lastReason = sink() }
                     return false
                 }
             }

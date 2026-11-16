@@ -4,7 +4,6 @@ import com.vladimir.messenger.data.diagnostics.PushRegisterReason
 import java.util.concurrent.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PushTokenRegistrarTest {
@@ -167,9 +166,12 @@ class PushTokenRegistrarTest {
             peerReason = PushRegisterReason.PEER_NOT_READY,
         )
         runBlocking { assertEquals(PushTokenRegistrar.Outcome.Failed, harness.build().run()) }
-        assertTrue(
-            "причина пары не записана: ${harness.reasons}",
-            harness.reasons.contains(PushRegisterReason.PEER_NOT_READY),
+        // Отчёт читает ПОСЛЕДНЕЕ записанное значение: перезапись грубой
+        // догадкой стирает ту самую причину, ради которой строка добавлена.
+        assertEquals(
+            "причина пары не дожила до отчёта: ${harness.reasons}",
+            PushRegisterReason.PEER_NOT_READY,
+            harness.reasons.lastOrNull(),
         )
     }
 
@@ -181,16 +183,18 @@ class PushTokenRegistrarTest {
             peerReason = PushRegisterReason.PEER_NOT_READY,
         )
         runBlocking { assertEquals(PushTokenRegistrar.Outcome.Failed, unreadable.build().run()) }
-        assertTrue(
+        assertEquals(
             "непрочитанный список назван пустым: ${unreadable.reasons}",
-            unreadable.reasons.contains(PushRegisterReason.TARGETS_UNREADABLE),
+            PushRegisterReason.TARGETS_UNREADABLE,
+            unreadable.reasons.lastOrNull(),
         )
 
         val empty = Harness(targets = PushTargets.Outcome.COMPLETED to emptyList())
         runBlocking { assertEquals(PushTokenRegistrar.Outcome.NoTargets, empty.build().run()) }
-        assertTrue(
+        assertEquals(
             "пустой набор не назван своим именем: ${empty.reasons}",
-            empty.reasons.contains(PushRegisterReason.NO_PINNED_PEERS),
+            PushRegisterReason.NO_PINNED_PEERS,
+            empty.reasons.lastOrNull(),
         )
     }
 
@@ -201,5 +205,41 @@ class PushTokenRegistrarTest {
         )
         runBlocking { assertEquals(PushTokenRegistrar.Outcome.Registered, harness.build().run()) }
         assertEquals(listOf(PushRegisterReason.REGISTERED), harness.reasons)
+    }
+
+    @Test fun aRefusedOperationKeepsTheStepThatStopped() {
+        // Ровно тот путь, которым на телефоне закончилась последняя попытка:
+        // токен получен, журнал записан, операция для пары не прошла. Раннер
+        // назвал шаг, но регистратор возвращался досрочно и затирал его
+        // «причина не записана» — и отчёт снова показывал три болезни сразу.
+        val harness = Harness(
+            targets = PushTargets.Outcome.COMPLETED to listOf(peer(peerA), peer(peerB)),
+            registerOutcome = { PushRegistrationRunner.Outcome.Failed },
+            peerReason = PushRegisterReason.SERVER_UNAVAILABLE,
+        )
+        runBlocking { assertEquals(PushTokenRegistrar.Outcome.Failed, harness.build().run()) }
+        // Первый же отказ обрывает проход: до второй пары он не доходит.
+        assertEquals(1, harness.calls.count { it.startsWith("register:") })
+        assertEquals(
+            "шаг, на котором остановилась операция, затёрт: ${harness.reasons}",
+            PushRegisterReason.SERVER_UNAVAILABLE,
+            harness.reasons.lastOrNull(),
+        )
+    }
+
+    @Test fun anUnavailableTokenJournalNamesItself() {
+        // Журнал отказал токену: до перебора пар дело не дошло, и назвать шаг
+        // больше некому. Без этой строки причина оставалась от прошлого прохода.
+        val harness = Harness(
+            targets = PushTargets.Outcome.COMPLETED to listOf(peer(peerA)),
+            journal = FcmTokenJournal.State.Unavailable,
+        )
+        runBlocking { assertEquals(PushTokenRegistrar.Outcome.Failed, harness.build().run()) }
+        assertEquals(0, harness.calls.count { it.startsWith("register:") })
+        assertEquals(
+            "отказ журнала не назван: ${harness.reasons}",
+            PushRegisterReason.JOURNAL_UNAVAILABLE,
+            harness.reasons.lastOrNull(),
+        )
     }
 }

@@ -171,6 +171,18 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertIn("reason(PushRegisterReason.PEER_NOT_READY)", runner)
         self.assertIn("reason(PushRegisterReason.TARGETS_UNREADABLE)", registrar)
         self.assertIn("reasonSink", registrar)
+        # Отчёт читает ПОСЛЕДНЮЮ записанную причину: значение в Preferences
+        # перезаписывается. Поэтому на отказе нельзя писать грубую догадку
+        # поверх уже названного шага — иначе отчёт снова показывает три
+        # болезни сразу. Ровно это и случилось на телефоне: токен получен,
+        # журнал записан, операция для пары не прошла, раннер назвал шаг, а
+        # регистратор вернулся досрочно и затёр причину «причина не записана».
+        self.assertIn("lastReason != PushRegisterReason.NONE", registrar)
+        self.assertNotIn("reason(if (noTargets) PushRegisterReason.NO_PINNED_PEERS else lastReason)", registrar)
+        # Отказ журнала токена некому назвать, кроме координатора: до перебора
+        # пар дело не доходит, и без этой строки причина остаётся от прошлого
+        # прохода — то есть от другой ошибки.
+        self.assertIn("JOURNAL_UNAVAILABLE", source(MAIN / "data/push/PushRuntimeCoordinator.kt"))
         # Причина не заменяет фазу: фаза говорит «что вышло», причина — «где встали».
         self.assertIn('appendLine("фаза=${push.phase.name.lowercase()}")', report)
 

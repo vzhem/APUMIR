@@ -87,7 +87,15 @@ internal class PushRuntimeCoordinator(
         }
         return when (state) {
             FcmTokenJournal.State.Unchanged -> TokenOutcome.AlreadyCurrent
-            FcmTokenJournal.State.Unavailable -> TokenOutcome.Failed
+            FcmTokenJournal.State.Unavailable -> {
+                // Nothing else names this step: the journal refused the token
+                // (malformed, a lost Keystore key, an unreadable row), so no
+                // per-peer pass ran and no runner recorded anything. Without
+                // this line the report showed a bare "failed" and the reason
+                // stayed whatever an earlier pass had written.
+                reason(PushRegisterReason.JOURNAL_UNAVAILABLE)
+                TokenOutcome.Failed
+            }
             // Missing and Rotated both require a registration attempt. A failed
             // attempt leaves the journal at the new token, so a retry sees
             // Unchanged and must be redriven by the caller's pending state.
