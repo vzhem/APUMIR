@@ -163,6 +163,70 @@ internal class PushTrustResolver(
         }
     }
 
+    /**
+     * Why a pass could not be built, as one fixed name.
+     *
+     * `resolveForRegistration` returns a single `null` for six different states,
+     * and a report that says only `not_registered` sends the reader looking at
+     * the wrong side of the pair: a peer without a pin and an unprepared local
+     * exchange key are fixed in completely different places. This reads the same
+     * seams in the same order and names the first one that is missing. It never
+     * creates a pin, never derives anything and wipes every copy it made.
+     */
+    suspend fun availability(peerId: String): String {
+        var local: ByteArray? = null
+        var pin: ByteArray? = null
+        var secret: ByteArray? = null
+        try {
+            val node = try {
+                localNodeId()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                diag()
+                return "unreadable"
+            }
+            if (node.isBlank()) return "no_node"
+            val localValue = try {
+                localBinding()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                diag()
+                return "unreadable"
+            } ?: return "no_binding"
+            local = localValue
+            val pinValue = try {
+                pinnedPeer(peerId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                diag()
+                return "unreadable"
+            } ?: return "no_pin"
+            pin = pinValue
+            if (pinValue.isEmpty()) return "no_pin"
+            if (MessageDigest.isEqual(localValue, pinValue)) return "same_key"
+            val secretValue = try {
+                localSecret()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                diag()
+                return "no_secret"
+            } ?: return "no_secret"
+            secret = secretValue
+            if (localValue.size !in 1..512 || pinValue.size !in 1..512 || secretValue.size != 32) {
+                return "bad_key"
+            }
+            return "ready"
+        } finally {
+            local?.fill(0)
+            pin?.fill(0)
+            secret?.fill(0)
+        }
+    }
+
     private fun diag() {
         try {
             recordFailure()

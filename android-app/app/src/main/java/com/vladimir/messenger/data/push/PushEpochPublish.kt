@@ -23,6 +23,20 @@ import kotlinx.coroutines.launch
 internal object PushEpochPublish {
 
     /**
+     * How often this phone re-offers its epoch to one correspondent.
+     *
+     * An offer is one small frame, but every ordinary send would otherwise add
+     * one: a live conversation would put dozens of useless copies into the relay
+     * queue that is already full on the phones that need this most. Five minutes
+     * is short enough that a peer who missed the last offer learns the epoch in
+     * the same conversation.
+     */
+    private const val OFFER_INTERVAL_MS = 5 * 60_000L
+
+    /** Process-lifetime throttle per peer; a restart may re-offer once. */
+    private val lastOfferAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /**
      * Offers our current registered epoch to [peerId] if, and only if, this peer
      * has a live pin and an accepted registration. Otherwise it does nothing: a
      * pin is never created here, and an unregistered epoch cannot be offered.
@@ -31,31 +45,41 @@ internal object PushEpochPublish {
         if (peerId.isBlank()) return
         val app = context.applicationContext
         if (!PushServiceLocator.enabled(app)) return
+        val now = System.currentTimeMillis()
+        val previous = lastOfferAtMs[peerId]
+        if (previous != null && now >= previous && now - previous < OFFER_INTERVAL_MS) return
+        lastOfferAtMs[peerId] = now
         try {
             val shared = PushServiceLocator.shared(app)
             shared.resolver.resolveForRegistration(peerId)?.use { pass ->
                 val state = pass.registration ?: return@use
                 if (state.phase != PushRegistrationState.Phase.ACTIVE || state.registeredAtMs <= 0) return@use
-                val byMailbox = shared.epochs?.let { delivery ->
-                    when (
-                        delivery.offer(
-                            state, peerId,
-                            pass.localBinding, pass.pinnedPeerBinding, pass.localSecret,
-                        )
-                    ) {
-                        PushEpochDelivery.Outcome.Handled,
-                        PushEpochDelivery.Outcome.Stored -> true
-                        else -> false
-                    }
-                } ?: false
+                val mailbox = shared.epochs?.let { delivery ->
+                    delivery.offer(
+                        state, peerId,
+                        pass.localBinding, pass.pinnedPeerBinding, pass.localSecret,
+                    )
+                }
+                val byMailbox = mailbox == PushEpochDelivery.Outcome.Handled ||
+                    mailbox == PushEpochDelivery.Outcome.Stored
                 // The mailbox is the second path, not the only one. While it was
                 // the only one, a phone whose mailbox was unavailable could never
                 // learn a peer's epoch - and an epoch is the whole address of a
                 // wake. The ordinary transport already has a sealed service-text
                 // receive path that consumes exactly this packet before any chat.
-                if (!byMailbox && !announceOverTransport(app, peerId, state)) {
-                    diag("Epoch offer not accepted")
+                val byMessage = !byMailbox && announceOverTransport(app, peerId, state)
+                if (byMailbox) {
+                    // A server answer to our own write is proof the endpoint is
+                    // reachable, and it is fresher than the startup probe that
+                    // kept reading as an outage in the report.
+                    PushDiagnostics.noteEndpoint(true)
                 }
+                PushDiagnostics.noteEpochOffer(
+                    overMessage = byMessage,
+                    overMailbox = byMailbox,
+                    blockedReason = if (byMailbox || byMessage) null else offerReason(mailbox),
+                )
+                if (!byMailbox && !byMessage) diag("Epoch offer not accepted")
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -74,15 +98,44 @@ internal object PushEpochPublish {
      * because an epoch is only an address hint: without it the other phone has
      * nothing to wake us *with*, regardless of how healthy the mailbox is.
      */
-    private fun announceOverTransport(
+    private suspend fun announceOverTransport(
         app: android.content.Context,
         peerId: String,
         state: PushRegistrationState.State,
     ): Boolean {
         val text = state.announcement() ?: return false
-        val sealed = com.vladimir.messenger.data.security.MessageSealer.seal(app, peerId, text) ?: return false
+        // The ordinary message path is the only one that reaches a phone that is
+        // asleep, offline or simply not directly connected: the core keeps the
+        // frame in its relay queue and delivers it when the peer appears. A direct
+        // payload needs a live channel - exactly what a sleeping phone does not
+        // have - so it is only the last resort.
+        //
+        // The text goes in UNSEALED: `RustBridge.sendMessage` seals it itself and
+        // a second envelope would reach the peer as sealed-sealed, fail the
+        // reserved-family check and land in the chat as a broken message.
+        val chatId = chatFor(app, peerId)
+        if (chatId != null) {
+            val accepted = try {
+                com.vladimir.messenger.data.RustBridge.sendMessage(
+                    java.util.UUID.randomUUID().toString(),
+                    chatId,
+                    peerId,
+                    text,
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                diag("Epoch transport announce failed")
+                false
+            }
+            // `false` here means "not delivered by a direct channel", not "lost":
+            // the core still owns the frame and relays it. Counting it as a
+            // failure would send a second copy over the direct path every time.
+            if (!accepted) diag("Epoch announce queued for relay")
+            return true
+        }
         return try {
-            com.vladimir.messenger.data.RustBridge.sendDirectPayload(peerId, sealed)
+            com.vladimir.messenger.data.RustBridge.sendDirectPayload(peerId, text)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -90,6 +143,26 @@ internal object PushEpochPublish {
             diag("Epoch transport announce failed")
             false
         }
+    }
+
+    /** The direct chat with [peerId], or null when this pair has never talked. */
+    private suspend fun chatFor(app: android.content.Context, peerId: String): String? = try {
+        PushServiceLocator.shared(app).database.chatDao().getChatByContactId(peerId)?.id
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        diag("Epoch announce chat lookup failed")
+        null
+    }
+
+    /** Fixed name for the report; never a server response and never a host. */
+    private fun offerReason(outcome: PushEpochDelivery.Outcome?): String = when (outcome) {
+        null -> "no_mailbox"
+        PushEpochDelivery.Outcome.Deferred -> "deferred"
+        PushEpochDelivery.Outcome.NotReady -> "not_ready"
+        PushEpochDelivery.Outcome.Throttled -> "throttled"
+        PushEpochDelivery.Outcome.Failed -> "failed"
+        else -> "no_text"
     }
 
     /**

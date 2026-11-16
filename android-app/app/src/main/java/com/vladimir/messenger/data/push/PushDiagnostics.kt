@@ -105,6 +105,39 @@ object PushDiagnostics {
     fun noteError(kind: String) = write("lastError=${kind.take(40)}")
 
     /**
+     * Why our own epoch announcement did or did not leave the phone.
+     *
+     * `эпох_собеседников=0` on both phones used to be the whole story: the
+     * announcement is the address of every wake, and nothing in the report said
+     * whether it was never sent, sent and lost, or refused on arrival. Only fixed
+     * names are stored: no peer, no epoch, no route, no host.
+     */
+    fun noteEpochOffer(overMessage: Boolean, overMailbox: Boolean, blockedReason: String?) = write(
+        when {
+            overMessage -> "epochOfferMessage=+1"
+            overMailbox -> "epochOfferMailbox=+1"
+            else -> "epochOfferBlocked=+1"
+        },
+        "lastEpochOffer=${(blockedReason ?: "ready").take(24)}",
+        "epochOfferAt=${System.currentTimeMillis()}",
+    )
+
+    /** What happened to a correspondent's announcement on this phone. */
+    fun noteEpochImport(applied: Boolean, reason: String) = write(
+        if (applied) "epochImportApplied=+1" else "epochImportRejected=+1",
+        "lastEpochImport=${reason.take(24)}",
+        "epochImportAt=${System.currentTimeMillis()}",
+    )
+
+    /**
+     * Why a wake for this peer could not even be addressed.
+     *
+     * `not_registered` covered a peer without a pinned key, an unprepared local
+     * exchange secret and an unreadable store at once - three different fixes.
+     */
+    fun noteWakeDetail(tag: String) = write("lastWakeDetail=${tag.take(24)}")
+
+    /**
      * Read the stored record plus the facts that can be read live. Never throws:
      * a report built while the push files are unreadable must still render.
      */
@@ -155,6 +188,14 @@ object PushDiagnostics {
             },
             lastError = text("lastError") ?: "-",
             tokenError = text("tokenError"),
+            epochOfferMessage = number("epochOfferMessage"),
+            epochOfferMailbox = number("epochOfferMailbox"),
+            epochOfferBlocked = number("epochOfferBlocked"),
+            epochOfferBlockReason = text("lastEpochOffer") ?: "-",
+            epochImportApplied = number("epochImportApplied"),
+            epochImportRejected = number("epochImportRejected"),
+            epochImportReason = text("lastEpochImport") ?: "-",
+            lastWakeDetail = text("lastWakeDetail") ?: "-",
         )
     }
 

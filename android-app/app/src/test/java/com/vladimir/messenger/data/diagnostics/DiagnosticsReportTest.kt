@@ -1335,6 +1335,71 @@ class DiagnosticsReportTest {
         }
     }
 
+    @Test fun aWakeWithoutTrustNamesTheMissingHalf() {
+        // «not_registered» покрывал три разные поломки сразу: у собеседника нет
+        // закреплённого ключа, свой ключ обмена не готов, хранилище не читается.
+        // Чинят их в разных местах, поэтому причина печатается рядом с исходом.
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = true,
+            endpointConfigured = true,
+            registeredRoutes = 8,
+            phase = PushPhase.REGISTERED,
+            lastRegisterAtMs = 1_699_998_800_000L,
+            signalsReceived = 0,
+            signalsRejected = 0,
+            lastSignalAtMs = 0L,
+            wakeAttempts = 28,
+            lastWake = PushWakeOutcome.NOT_REGISTERED,
+            lastWakeAtMs = 1_699_998_780_000L,
+            lastWakeDetail = "no_pin",
+            inboxPending = "?",
+            lastError = "-",
+            endpointReachable = null,
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        assertTrue(report.contains("последнее=not_registered · у собеседника нет закреплённого ключа"))
+    }
+
+    @Test fun theEpochExchangeSaysWhichHalfIsMissing() {
+        // «эпох_собеседников=0» на обеих сторонах читается одинаково, хотя
+        // причины разные: свой анонс не ушёл, ушёл и не дошёл, дошёл и был
+        // отвергнут. Счётчики разделяют эти три случая.
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = true,
+            endpointConfigured = true,
+            registeredRoutes = 7,
+            phase = PushPhase.REGISTERED,
+            lastRegisterAtMs = 1_699_998_800_000L,
+            signalsReceived = 0,
+            signalsRejected = 0,
+            lastSignalAtMs = 0L,
+            wakeAttempts = 7,
+            lastWake = PushWakeOutcome.NO_PEER_EPOCH,
+            lastWakeAtMs = 1_699_998_790_000L,
+            peerEpochs = 0,
+            epochOfferMessage = 2,
+            epochOfferBlocked = 3,
+            epochOfferBlockReason = "deferred",
+            epochImportRejected = 1,
+            epochImportReason = "rejected",
+            inboxPending = "?",
+            lastError = "-",
+            endpointReachable = true,
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        for (line in listOf(
+            "эпоха_своя: обычным_сообщением=2 через_ящик=0 не_ушла=3 (ящик отложил отправку)",
+            "эпоха_чужая: принято=0 отклонено=1 (доверие не совпало)",
+            "анонсы доходили, но не прошли проверку",
+        )) {
+            assertTrue("нет строки: $line", report.contains(line))
+        }
+    }
+
     @Test fun anAcceptedWakeSaysWhenItWasAccepted() {
         // «30 пробуждений» читалось и как «30 запросов ушло», и как «30 раз не
         // смогли начать». Принятие заявки печатается отдельно и со временем.

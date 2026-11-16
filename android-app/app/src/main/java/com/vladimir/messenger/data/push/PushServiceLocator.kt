@@ -2,6 +2,7 @@ package com.vladimir.messenger.data.push
 
 import android.content.Context
 import com.vladimir.messenger.data.chatclear.ChatClearRegistry
+import com.vladimir.messenger.data.diagnostics.PushRegisterReason
 import com.vladimir.messenger.data.file.FileExchangePeerStore
 import com.vladimir.messenger.data.local.AppDatabase
 import com.vladimir.messenger.worker.PushWakeRecoveryWorker
@@ -345,6 +346,12 @@ internal object PushServiceLocator {
                     // начинается заново на каждом новом отчёте.
                     recordReason = { reason ->
                         PushDiagnostics.noteRegistrationReason(reason)
+                        // A confirmed registration is a live answer from the
+                        // service, and it is newer than the startup /health probe
+                        // that kept reading as an outage two minutes later.
+                        if (reason == PushRegisterReason.REGISTERED) {
+                            PushDiagnostics.noteEndpoint(true)
+                        }
                     },
                 )
                 PushTokenRegistrar(

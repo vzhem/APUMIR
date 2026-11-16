@@ -106,6 +106,26 @@ data class PushSnapshot(
     /** null — проверка доступности службы не проводилась. */
     val endpointReachable: Boolean?,
     val lastError: String,
+    /**
+     * Как уходил НАШ анонс эпохи: сколько раз через обычное сообщение, сколько
+     * через ящик и сколько раз не ушло вовсе.
+     *
+     * Без этих счётчиков «эпох_собеседников=0» на обеих сторонах читается
+     * одинаково, хотя причины разные: анонс не отправлялся, отправлялся и не
+     * дошёл, или дошёл и был отвергнут при приёме.
+     */
+    val epochOfferMessage: Long = 0L,
+    val epochOfferMailbox: Long = 0L,
+    val epochOfferBlocked: Long = 0L,
+    /** Фиксированное имя причины, по которой анонс не ушёл; `-` — не было. */
+    val epochOfferBlockReason: String = "-",
+    /** Что стало с анонсами собеседников при приёме. */
+    val epochImportApplied: Long = 0L,
+    val epochImportRejected: Long = 0L,
+    /** Фиксированное имя последней причины отказа приёма; `-` — не было. */
+    val epochImportReason: String = "-",
+    /** Почему доверие к собеседнику не сложилось в последней попытке побудки. */
+    val lastWakeDetail: String = "-",
 )
 
 /**
@@ -170,8 +190,11 @@ internal fun StringBuilder.appendPush(facts: DiagnosticsFacts) {
     if (push.workerWakeAtMs > 0L) {
         appendLine("фоновая_задача_пробуждения=${agoOrNever(facts.createdAtMs, push.workerWakeAtMs)} назад")
     }
+    // Причина рядом с исходом: not_registered у собеседника без закреплённого
+    // ключа и not_registered при неготовом своём ключе обмена — разные поломки.
+    val wakeDetail = if (push.lastWakeDetail == "-") "" else " · ${trustView(push.lastWakeDetail)}"
     appendLine(
-        "пробуждения=${push.wakeAttempts} · последнее=${push.lastWake.name.lowercase()} " +
+        "пробуждения=${push.wakeAttempts} · последнее=${push.lastWake.name.lowercase()}$wakeDetail " +
             "(${agoOrNever(facts.createdAtMs, push.lastWakeAtMs)})",
     )
     // Отдельно от «пробуждения»: там попытки, здесь — сколько из них служба
@@ -198,9 +221,55 @@ internal fun StringBuilder.appendPush(facts: DiagnosticsFacts) {
     if (push.peerEpochs == 0) appendLine(
         "  ↳ ни один собеседник ещё не присылал свою эпоху: пробуждение некуда отправить",
     )
+    appendLine(
+        "эпоха_своя: обычным_сообщением=${push.epochOfferMessage} через_ящик=${push.epochOfferMailbox} " +
+            "не_ушла=${push.epochOfferBlocked} (${epochOfferView(push.epochOfferBlockReason)})",
+    )
+    appendLine(
+        "эпоха_чужая: принято=${push.epochImportApplied} отклонено=${push.epochImportRejected} " +
+            "(${epochImportView(push.epochImportReason)})",
+    )
+    if (push.epochImportApplied == 0L && push.epochImportRejected > 0L) appendLine(
+        "  ↳ анонсы доходили, но не прошли проверку: доверие или формат",
+    )
     appendLine("ящик_пробуждения=${push.inboxPending}")
     appendLine("последняя_ошибка=${push.lastError}")
     appendLine()
+}
+
+/** Фиксированное имя причины отказа анонса → короткая фраза для владельца. */
+internal fun epochOfferView(tag: String): String = when (tag) {
+    "deferred" -> "ящик отложил отправку"
+    "not_ready" -> "своя эпоха не готова к анонсу"
+    "throttled" -> "ящик придержал по своему лимиту"
+    "failed" -> "служба не приняла анонс"
+    "no_mailbox" -> "ящик недоступен, обычное сообщение не ушло"
+    "no_text" -> "анонс не собрался из записи"
+    "ready" -> "анонс ушёл"
+    else -> "-"
+}
+
+/** Фиксированное имя причины отказа приёма → короткая фраза. */
+internal fun epochImportView(tag: String): String = when (tag) {
+    "applied" -> "эпоха собеседника принята"
+    "duplicate" -> "повтор уже принятой эпохи"
+    "rejected" -> "доверие не совпало"
+    "not_applicable" -> "не наш пакет, не запечатан или чужой отправитель"
+    "unavailable" -> "хранилище эпох недоступно"
+    else -> "-"
+}
+
+/** Почему доверие к собеседнику не сложилось. */
+internal fun trustView(tag: String): String = when (tag) {
+    "no_pin" -> "у собеседника нет закреплённого ключа"
+    "no_secret" -> "свой ключ обмена не готов"
+    "no_binding" -> "своя привязка обмена не готова"
+    "no_node" -> "свой узел ещё не известен"
+    "same_key" -> "закреплён собственный ключ"
+    "bad_key" -> "ключ неподходящего размера"
+    "unreadable" -> "хранилище доверия не читается"
+    "ready" -> "доверие есть"
+    else -> "-"
 }
 
 /** «5 мин назад» или «не было»: отсутствие события — тоже факт. */

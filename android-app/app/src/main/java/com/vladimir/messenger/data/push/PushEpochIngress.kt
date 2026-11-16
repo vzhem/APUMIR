@@ -30,11 +30,22 @@ internal object PushEpochIngress {
         if (!PushServiceLocator.enabled(app)) return false
         return try {
             val importer = PushServiceLocator.shared(app).epochImport ?: return false
-            when (importer.import(senderId, wire)) {
-                PushEpochImport.Outcome.APPLIED,
-                PushEpochImport.Outcome.DUPLICATE -> true
-                else -> false
-            }
+            val outcome = importer.import(senderId, wire)
+            // Every outcome is recorded, because "the peer never offered" and
+            // "the peer offered and we refused" look identical in a report that
+            // only counts stored epochs.
+            PushDiagnostics.noteEpochImport(
+                applied = outcome == PushEpochImport.Outcome.APPLIED ||
+                    outcome == PushEpochImport.Outcome.DUPLICATE,
+                reason = when (outcome) {
+                    PushEpochImport.Outcome.APPLIED -> "applied"
+                    PushEpochImport.Outcome.DUPLICATE -> "duplicate"
+                    PushEpochImport.Outcome.REJECTED -> "rejected"
+                    PushEpochImport.Outcome.NOT_APPLICABLE -> "not_applicable"
+                    PushEpochImport.Outcome.UNAVAILABLE -> "unavailable"
+                },
+            )
+            outcome == PushEpochImport.Outcome.APPLIED || outcome == PushEpochImport.Outcome.DUPLICATE
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {

@@ -88,8 +88,27 @@ internal object PushWakePublish {
                 Outcome.Skipped -> PushWakeOutcome.SKIPPED
             },
         )
-        if (outcome == Outcome.Accepted) PushDiagnostics.noteWakeAccepted()
+        if (outcome == Outcome.Accepted) {
+            PushDiagnostics.noteWakeAccepted()
+            // A 202 proves the endpoint answers; the startup /health probe can be
+            // hours old and would otherwise keep reporting an outage.
+            PushDiagnostics.noteEndpoint(true)
+        }
+        // `not_registered` alone named three different fixes: a peer without a
+        // pinned key, an unprepared local exchange secret, an unreadable store.
+        if (outcome == Outcome.NotRegistered) PushDiagnostics.noteWakeDetail(trustTag(app, peerId))
         return outcome
+    }
+
+    /** Fixed name describing why trust did not resolve for this peer. */
+    private suspend fun trustTag(app: android.content.Context, peerId: String): String = try {
+        PushServiceLocator.shared(app).resolver.availability(peerId)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        // The detail is a hint, never the diagnosis itself.
+        diag("Trust detail unavailable")
+        "unreadable"
     }
 
     /** The bounded attempt itself; [wake] only measures and records it. */
