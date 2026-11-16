@@ -39,6 +39,10 @@ class PushTokenRegistrarTest {
                     register = register,
                     enqueueCheck = { record() },
                     recordFailure = { failures++ },
+                    // Координатор называет свой шаг (отказ журнала токена) прямо
+                    // в отчёт; без этой связи харнесс его не видел и проверка
+                    // причины проходила вслепую.
+                    recordReason = { reason -> reasons += reason },
                 )
             },
             peers = { targets },
