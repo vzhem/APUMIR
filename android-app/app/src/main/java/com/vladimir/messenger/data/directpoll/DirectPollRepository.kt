@@ -278,9 +278,12 @@ class DirectPollRepository @Inject constructor(
         private const val TAG = "DirectPollRepository"
 
         /** Свой голос помечается так же, как свои сообщения в базе. */
-        const val SELF = "self"
+        const val SELF = DIRECT_POLL_SELF
     }
 }
+
+/** Свой голос помечается так же, как свои сообщения в базе. */
+internal const val DIRECT_POLL_SELF = "self"
 
 /**
  * Карточки опросов по уже прочитанным строкам, ключ — id СООБЩЕНИЯ.
@@ -316,7 +319,7 @@ internal fun directPollSummary(
             if (index in counts.indices) counts[index]++
         }
     }
-    val mine = votes.firstOrNull { it.voterId == SELF }?.choices().orEmpty()
+    val mine = votes.firstOrNull { it.voterId == DIRECT_POLL_SELF }?.choices().orEmpty()
     return PollSummary(
         pollId = row.pollId,
         // В личном чате группы нет: поле остаётся пустым, а карточка
