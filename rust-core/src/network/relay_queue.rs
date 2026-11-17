@@ -1468,6 +1468,18 @@ mod tests {
         assert_eq!(q.own_count(), 1);
     }
 
+    /// «Печатает…» — обычный служебный сигнал (класс «прочее»): уступает переписке.
+    fn typing_msg(msg_id: &str, recipient: &str) -> RelayMessage {
+        RelayMessage::new_at_ms(
+            utc_now_ms(),
+            msg_id.into(),
+            recipient.into(),
+            "pk_origin".into(),
+            "chat-1".into(),
+            b"APUTYP1|1".to_vec(),
+        )
+    }
+
     #[test]
     fn explicit_retry_never_replaces_a_foreign_message() {
         let q = RelayQueue::with_all_limits(10, 10, 10, 10);
@@ -1709,13 +1721,30 @@ mod tests {
         // Резерв переписки занят одним письмом, рядом лежит сигнал.
         let q = RelayQueue::with_all_limits(10, 10, 10, 1);
         q.enqueue_own(own_msg("o_old", "pk_b")).unwrap();
-        q.enqueue_own(signal_msg("s1", "pk_b")).unwrap();
+        q.enqueue_own(typing_msg("t1", "pk_b")).unwrap();
 
         assert!(q.enqueue_own(own_msg("o_new", "pk_b")).unwrap());
 
         assert_eq!(q.is_own("o_new"), Some(true));
         assert_eq!(q.own_transient_count(), 0, "первым уступает сигнал");
         assert_eq!(q.own_count(), 1);
+    }
+
+    #[test]
+    fn a_held_address_outranks_correspondence_in_a_tight_own_budget() {
+        // Тот же тесный запас, но вместо «печатает…» лежит адрес собеседника:
+        // уступает письмо, а адрес остаётся — иначе разбудить некому.
+        let q = RelayQueue::with_all_limits(10, 10, 10, 1);
+        q.enqueue_own(own_msg("o_old", "pk_b")).unwrap();
+        q.enqueue_own(signal_msg("udp-sig-1", "pk_b")).unwrap();
+
+        assert!(q.enqueue_own(own_msg("o_new", "pk_b")).unwrap());
+
+        assert_eq!(q.is_own("udp-sig-1"), Some(true), "адрес обязан остаться");
+        assert_eq!(q.is_own("o_new"), Some(true));
+        assert_eq!(q.is_own("o_old"), None, "уступает самое старое письмо");
+        assert_eq!(q.own_count(), 1);
+        assert_eq!(q.own_transient_count(), 1);
     }
 
     #[test]
@@ -2485,10 +2514,14 @@ mod tests {
     }
 
     /// Кусок файла: служебное, живёт в запасе служебного.
-    fn file_msg(msg_id: &str, recipient: &str) -> RelayMessage {
+    ///
+    /// ID строится по формату `FileTransferWire`: `f` + ровно 32 hex-знака
+    /// передачи + вид пакета. Длину нельзя набирать руками — ошибка в один
+    /// символ превращает кусок файла в обычную переписку и ломает класс.
+    fn file_msg(recipient: &str) -> RelayMessage {
         RelayMessage::new_at_ms(
             utc_now_ms(),
-            msg_id.into(),
+            format!("f{}o", "0".repeat(32)),
             recipient.into(),
             "pk_origin".into(),
             "chat-1".into(),
@@ -2530,7 +2563,7 @@ mod tests {
             assert!(q.enqueue_own(signal_msg(&format!("udp-sig-{i}"), "pk_b")).unwrap());
         }
         assert_eq!(q.own_transient_count(), MAX_OWN_TRANSIENT);
-        assert!(!q.enqueue_own(file_msg("f0000000000000000000000000000000o", "pk_b")).unwrap());
+        assert!(!q.enqueue_own(file_msg("pk_b")).unwrap());
         assert_eq!(q.own_transient_count(), MAX_OWN_TRANSIENT);
         assert_eq!(q.is_own("udp-sig-0"), Some(true), "адрес вытеснен служебным пакетом");
     }
@@ -2556,7 +2589,7 @@ mod tests {
         assert!(q.enqueue_own(own_msg("personal-1", "pk_b")).unwrap());
         assert!(q.enqueue_own(signal_msg("udp-sig-1", "pk_b")).unwrap());
         assert!(q.enqueue_own(alert_msg("sos1-1", "pk_b")).unwrap());
-        assert!(q.enqueue_own(file_msg("f0000000000000000000000000000000o", "pk_b")).unwrap());
+        assert!(q.enqueue_own(file_msg("pk_b")).unwrap());
         let counts: std::collections::HashMap<_, _> = q
             .counts_by_class()
             .into_iter()
