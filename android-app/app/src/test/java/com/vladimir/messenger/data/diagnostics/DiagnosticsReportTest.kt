@@ -1335,6 +1335,42 @@ class DiagnosticsReportTest {
         }
     }
 
+    @Test fun aMissingPeerEpochNamesWhichHalfIsMissing() {
+        // «no_peer_epoch» покрывал четыре разные поломки: собеседник ещё не
+        // присылал эпоху, присылал и мы её потеряли, отозвал, или запись есть,
+        // но больше не совпадает с привязками этой пары. Чинят их в разных
+        // местах — на его телефоне и на нашем.
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = true,
+            endpointConfigured = true,
+            registeredRoutes = 10,
+            phase = PushPhase.REGISTERED,
+            lastRegisterAtMs = 1_699_998_800_000L,
+            signalsReceived = 2,
+            signalsRejected = 0,
+            lastSignalAtMs = 1_699_998_000_000L,
+            wakeAttempts = 378,
+            lastWake = PushWakeOutcome.NO_PEER_EPOCH,
+            lastWakeAtMs = 1_699_998_790_000L,
+            lastWakeDetail = "epoch_unreadable",
+            peerEpochs = 4,
+            endpointReachable = true,
+            endpointCheckedAtMs = 1_699_998_810_000L,
+            lastWakeAcceptedAtMs = 1_699_998_800_000L,
+            inboxPending = "?",
+            lastError = "-",
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        assertTrue(
+            report.contains("последнее=no_peer_epoch · запись эпохи не совпала с привязками этой пары"),
+        )
+        // Счётчик строк и причина чтения — два разных факта: 4 записи могут
+        // все не подходить этой паре, и отчёт не должен это скрывать.
+        assertTrue(report.contains("эпох_собеседников=4"))
+    }
+
     @Test fun aWakeWithoutTrustNamesTheMissingHalf() {
         // «not_registered» покрывал три разные поломки сразу: у собеседника нет
         // закреплённого ключа, свой ключ обмена не готов, хранилище не читается.

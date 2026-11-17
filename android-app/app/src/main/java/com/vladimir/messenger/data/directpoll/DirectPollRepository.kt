@@ -42,12 +42,8 @@ class DirectPollRepository @Inject constructor(
         combine(
             pollDao.observeChatPolls(chatId),
             pollDao.observeChatVotes(chatId),
-        ) { polls, votes ->
-            val byPoll = votes.groupBy { it.pollId }
-            polls.associate { row ->
-                row.pollId to toSummary(row, byPoll[row.pollId].orEmpty())
-            }
-        }.flowOn(Dispatchers.IO)
+        ) { polls, votes -> directPollCards(polls, votes, nodeId()) }
+            .flowOn(Dispatchers.IO)
 
     /** Опрос по id сообщения (карточка ищет его по строке переписки). */
     suspend fun pollForMessage(messageId: String): PollSummary? = withContext(Dispatchers.IO) {
@@ -109,7 +105,7 @@ class DirectPollRepository @Inject constructor(
         withContext(Dispatchers.IO) {
             val poll = pollDao.getPoll(pollId) ?: return@withContext null
             if (poll.closed) return@withContext null
-            val size = decodeOptions(poll.optionsCsv).size
+            val size = directPollDecodeOptions(poll.optionsCsv).size
             val clean = choices.distinct().filter { DirectPollTally.isValidChoice(size, it) }
             // Один выбор: опрос личного чата не поддерживает «несколько
             // вариантов» — это осознанное упрощение, чтобы итоги двух голосов
@@ -224,7 +220,7 @@ class DirectPollRepository @Inject constructor(
     ) {
         val poll = pollDao.getPoll(packet.pollId) ?: return
         if (poll.closed) return
-        val size = decodeOptions(poll.optionsCsv).size
+        val size = directPollDecodeOptions(poll.optionsCsv).size
         val clean = packet.choices.distinct().filter { DirectPollTally.isValidChoice(size, it) }
         val final = if (clean.isEmpty()) emptyList() else listOf(clean.first())
         pollDao.putVote(
@@ -252,47 +248,7 @@ class DirectPollRepository @Inject constructor(
     private fun toSummary(
         row: DirectPollEntity,
         votes: List<DirectPollVoteEntity>,
-    ): PollSummary {
-        val options = decodeOptions(row.optionsCsv)
-        val counts = IntArray(options.size)
-        for (vote in votes) {
-            for (index in vote.choices()) {
-                if (index in counts.indices) counts[index]++
-            }
-        }
-        val mine = votes.firstOrNull { it.voterId == SELF }?.choices().orEmpty()
-        return PollSummary(
-            pollId = row.pollId,
-            // В личном чате группы нет: поле остаётся пустым, а карточка
-            // опирается на messageId.
-            groupId = "",
-            topicId = "",
-            messageId = row.messageId,
-            question = row.question,
-            options = options.mapIndexed { index, text ->
-                PollOption(index, text, counts.getOrNull(index) ?: 0)
-            },
-            anonymous = row.anonymous,
-            multiChoice = false,
-            creatorId = row.creatorId,
-            createdAtMs = row.createdAtMs,
-            closed = row.closed,
-            isMine = row.creatorId.isNotBlank() && row.creatorId == nodeId(),
-            myChoices = mine,
-            voters = if (row.anonymous) {
-                emptyList()
-            } else {
-                // В личном чате имена не нужны: участников двое, и подпись
-                // «проголосовали N из 2» точнее любого списка.
-                votes.filter { it.choices().isNotEmpty() }
-                    .map { PollVoter(it.voterId, "", it.choices()) }
-            },
-        )
-    }
-
-    private fun decodeOptions(csv: String): List<String> =
-        if (csv.isBlank()) emptyList()
-        else csv.split(',').mapNotNull { DirectPollWire.dec(it)?.trim() }.filter { it.isNotBlank() }
+    ): PollSummary = directPollSummary(row, votes, nodeId())
 
     private fun nodeId(): String = runCatching { RustBridge.nodeId() }.getOrNull().orEmpty()
 
@@ -325,3 +281,72 @@ class DirectPollRepository @Inject constructor(
         const val SELF = "self"
     }
 }
+
+/**
+ * Карточки опросов по уже прочитанным строкам, ключ — id СООБЩЕНИЯ.
+ *
+ * Ключ именно `messageId`, а не `pollId`: экран личного чата ищет карточку по
+ * id пузыря (`uiState.polls[message.id]`), как и групповые опросы
+ * ([com.vladimir.messenger.data.group.GroupPolls]). Пока ключом был `dp:<id>`,
+ * карточка не находилась НИКОГДА — вопрос уходил, строка сохранялась, а опроса
+ * в ленте не было ни у автора, ни у собеседника.
+ */
+internal fun directPollCards(
+    rows: List<DirectPollEntity>,
+    votes: List<DirectPollVoteEntity>,
+    self: String,
+): Map<String, PollSummary> {
+    if (rows.isEmpty()) return emptyMap()
+    val byPoll = votes.groupBy { it.pollId }
+    return rows.associate { row ->
+        row.messageId to directPollSummary(row, byPoll[row.pollId].orEmpty(), self)
+    }
+}
+
+/** Один опрос для карточки: голоса считаются здесь, сеть не нужна. */
+internal fun directPollSummary(
+    row: DirectPollEntity,
+    votes: List<DirectPollVoteEntity>,
+    self: String,
+): PollSummary {
+    val options = directPollDecodeOptions(row.optionsCsv)
+    val counts = IntArray(options.size)
+    for (vote in votes) {
+        for (index in vote.choices()) {
+            if (index in counts.indices) counts[index]++
+        }
+    }
+    val mine = votes.firstOrNull { it.voterId == SELF }?.choices().orEmpty()
+    return PollSummary(
+        pollId = row.pollId,
+        // В личном чате группы нет: поле остаётся пустым, а карточка
+        // опирается на messageId.
+        groupId = "",
+        topicId = "",
+        messageId = row.messageId,
+        question = row.question,
+        options = options.mapIndexed { index, text ->
+            PollOption(index, text, counts.getOrNull(index) ?: 0)
+        },
+        anonymous = row.anonymous,
+        multiChoice = false,
+        creatorId = row.creatorId,
+        createdAtMs = row.createdAtMs,
+        closed = row.closed,
+        isMine = row.creatorId.isNotBlank() && row.creatorId == self,
+        myChoices = mine,
+        voters = if (row.anonymous) {
+            emptyList()
+        } else {
+            // В личном чате имена не нужны: участников двое, и подпись
+            // «проголосовали N из 2» точнее любого списка.
+            votes.filter { it.choices().isNotEmpty() }
+                .map { PollVoter(it.voterId, "", it.choices()) }
+        },
+    )
+}
+
+/** Варианты: `,` внутри текста экранируется base64url ([DirectPollWire.enc]). */
+internal fun directPollDecodeOptions(csv: String): List<String> =
+    if (csv.isBlank()) emptyList()
+    else csv.split(',').mapNotNull { DirectPollWire.dec(it)?.trim() }.filter { it.isNotBlank() }

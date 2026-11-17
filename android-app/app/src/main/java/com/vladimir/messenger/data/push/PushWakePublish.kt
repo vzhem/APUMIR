@@ -77,7 +77,11 @@ internal object PushWakePublish {
             return Outcome.WithinBudget
         }
         lastAttemptAtMs[peerId] = now
-        val outcome = attempt(app, peerId)
+        val attempted = attempt(app, peerId)
+        val outcome = attempted.outcome
+        // Всегда, а не только при отказе: иначе подпись от прошлой попытки
+        // читалась бы рядом с «принято».
+        PushDiagnostics.noteWakeDetail(attempted.detail)
         PushDiagnostics.noteWake(
             when (outcome) {
                 Outcome.Accepted -> PushWakeOutcome.ACCEPTED
@@ -94,9 +98,6 @@ internal object PushWakePublish {
             // hours old and would otherwise keep reporting an outage.
             PushDiagnostics.noteEndpoint(true)
         }
-        // `not_registered` alone named three different fixes: a peer without a
-        // pinned key, an unprepared local exchange secret, an unreadable store.
-        if (outcome == Outcome.NotRegistered) PushDiagnostics.noteWakeDetail(trustTag(app, peerId))
         return outcome
     }
 
@@ -111,10 +112,19 @@ internal object PushWakePublish {
         "unreadable"
     }
 
+    /**
+     * What one attempt concluded, plus the fixed-name reason for it.
+     *
+     * [detail] is a name from the same vocabulary as [trustView] - never a peer,
+     * a binding or a packet - so the report can tell "the correspondent has not
+     * spoken yet" from "we have its epoch but cannot read it".
+     */
+    private class Attempt(val outcome: Outcome, val detail: String = NO_DETAIL)
+
     /** The bounded attempt itself; [wake] only measures and records it. */
-    private suspend fun attempt(app: android.content.Context, peerId: String): Outcome {
+    private suspend fun attempt(app: android.content.Context, peerId: String): Attempt {
         return try {
-            val endpoint = PushServiceLocator.endpoint(app) ?: return Outcome.Skipped
+            val endpoint = PushServiceLocator.endpoint(app) ?: return Attempt(Outcome.Skipped)
             val shared = PushServiceLocator.shared(app)
             val http = PushHttpClient(endpoint, recordFailure = { diag("Wake transport failure") })
             val budget = budget(app)
@@ -122,15 +132,25 @@ internal object PushWakePublish {
             // Wake needs trust (pin, own binding, exchange secret), not our own
             // registration: that record says how *we* are reached, and using its
             // epoch here addresses a route the correspondent never registered.
-            resolver.resolveForRegistration(peerId)?.use { pass ->
-                val peerEpoch = peerEpoch(shared, pass) ?: return Outcome.NoPeerEpoch
+            val pass = resolver.resolveForRegistration(peerId)
+                // `not_registered` alone named three different fixes: a peer
+                // without a pinned key, an unprepared local exchange secret, an
+                // unreadable store.
+                ?: return Attempt(Outcome.NotRegistered, trustTag(app, peerId))
+            pass.use {
+                val epoch = when (val lookup = epochLookup(shared, pass)) {
+                    is EpochLookup.Found -> lookup.epoch
+                    // The four ways a peer epoch can be unusable are different
+                    // repairs, and until now all of them were one word.
+                    else -> return Attempt(Outcome.NoPeerEpoch, lookup.tag)
+                }
                 val material = shared.crypto.derive(
                     pass.localBinding,
                     pass.pinnedPeerBinding,
                     pass.localSecret,
-                    peerEpoch,
+                    epoch,
                     localIsSender = true,
-                ) ?: return Outcome.Unavailable
+                ) ?: return Attempt(Outcome.Unavailable, "no_material")
                 try {
                     val last = when (val recorded = budget.last(peerId)) {
                         is PushWakeBudget.Last.At -> recorded.atMs
@@ -145,47 +165,74 @@ internal object PushWakePublish {
                                 // or unreachable service must not silence the peer
                                 // for the whole interval.
                                 budget.record(peerId)
-                                Outcome.Accepted
+                                Attempt(Outcome.Accepted)
                             } else {
-                                Outcome.Unavailable
+                                Attempt(Outcome.Unavailable)
                             }
                         }
-                        PushWakeSignal.Decision.TooSoon -> Outcome.WithinBudget
-                        PushWakeSignal.Decision.NotRegistered -> Outcome.NoPeerEpoch
+                        PushWakeSignal.Decision.TooSoon -> Attempt(Outcome.WithinBudget)
+                        PushWakeSignal.Decision.NotRegistered -> Attempt(Outcome.NoPeerEpoch, "signal_not_registered")
                     }
                 } finally {
                     material.close()
                 }
-            } ?: Outcome.NotRegistered
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
             // Never log the peer, the capability or exception text.
             diag("Wake attempt failed")
-            Outcome.Unavailable
+            Attempt(Outcome.Unavailable)
         }
     }
 
     private val signal = PushWakeSignal()
 
     /**
-     * The epoch the correspondent chose for this pair, or null when it has not
-     * announced one yet.
+     * The epoch the correspondent chose for this pair.
      *
      * A revoke is not an address: only an offer carries an epoch, and a stored
-     * revoke means the peer asked us to stop using the previous one.
+     * revoke means the peer asked us to stop using the previous one. Every miss
+     * carries its own name, because "never announced" is fixed by the other
+     * phone, while "stored but unreadable" is fixed here.
      */
-    private fun peerEpoch(shared: PushServiceLocator.Shared, pass: PushTrustResolver.Pass): String? {
+    private fun epochLookup(shared: PushServiceLocator.Shared, pass: PushTrustResolver.Pass): EpochLookup {
         val stored = shared.journals.epochs.read(
             pass.localId,
             pass.peerId,
             pass.pinnedPeerBinding,
             pass.localBinding,
         )
-        val state = (stored as? PushEpochStore.ReadResult.Found)?.state ?: return null
-        if (state.action != PushEpochProtocol.Action.OFFER) return null
-        val epoch = state.epochHex ?: return null
-        return epoch.takeIf { it.length == 32 }
+        val state = when (stored) {
+            PushEpochStore.ReadResult.Missing -> return EpochLookup.Missing
+            PushEpochStore.ReadResult.Unavailable -> return EpochLookup.Unreadable
+            is PushEpochStore.ReadResult.Found -> stored.state
+        }
+        if (state.action != PushEpochProtocol.Action.OFFER) return EpochLookup.Revoked
+        val epoch = state.epochHex ?: return EpochLookup.Malformed
+        if (epoch.length != 32) return EpochLookup.Malformed
+        return EpochLookup.Found(epoch)
+    }
+
+    private sealed interface EpochLookup {
+        class Found(val epoch: String) : EpochLookup
+        /** The correspondent never announced an epoch to us. */
+        object Missing : EpochLookup
+        /** A record exists but no longer matches this pair's bindings. */
+        object Unreadable : EpochLookup
+        /** The correspondent revoked the epoch it gave us. */
+        object Revoked : EpochLookup
+        /** An offer we cannot address: no epoch, or the wrong length. */
+        object Malformed : EpochLookup
+
+        val tag: String
+            get() = when (this) {
+                is Found -> "ready_epoch"
+                Missing -> "epoch_missing"
+                Unreadable -> "epoch_unreadable"
+                Revoked -> "epoch_revoked"
+                Malformed -> "epoch_malformed"
+            }
     }
 
     /**
@@ -209,6 +256,9 @@ internal object PushWakePublish {
     /** In-memory throttle; never persisted, so a restart retries immediately. */
     private val lastAttemptAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private const val MIN_ATTEMPT_INTERVAL_MS = 60_000L
+
+    /** «Причины нет»: отчёт печатает подпись только когда она не пустая. */
+    private const val NO_DETAIL = "-"
 
     private fun budget(app: Context): PushWakeBudget = synchronized(LOCK) {
         instance ?: PushWakeBudget(app).also { instance = it }
