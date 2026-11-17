@@ -187,6 +187,30 @@ class NotificationArrivalContract(unittest.TestCase):
         self.assertIn('check-android-notification-results.py', runner)
         self.assertIn('notification_status', runner)
 
+    def test_message_channel_has_its_own_sound_and_vibration(self):
+        # Владелец 2026-11-17: «если приходит всплывающее сообщение, телефон
+        # должен вибрировать на вибрации и подавать звук на громкой». На Android
+        # 8+ это решает канал, а настройки уже созданного канала код не меняет —
+        # поэтому у сообщений собственный канал с явным звуком и вибрацией.
+        app = (ROOT / 'android-app/app/src/main/java/com/vladimir/messenger/MessengerApplication.kt').read_text(encoding='utf-8')
+        self.assertIn('CHANNEL_MESSAGES_ID = "apu_messages_v2"', app)
+        self.assertIn('CHANNEL_MESSAGES_QUIET_ID = "apu_messages_quiet_v1"', app)
+        loud = app.split('CHANNEL_MESSAGES_ID,', 1)[1].split('manager.createNotificationChannel(messages)', 1)[0]
+        self.assertIn('NotificationManager.IMPORTANCE_HIGH', loud)
+        self.assertIn('enableVibration(true)', loud)
+        self.assertIn('vibrationPattern', loud)
+        self.assertIn('setSound(', loud)
+        quiet = app.split('CHANNEL_MESSAGES_QUIET_ID,', 1)[1].split('manager.createNotificationChannel(quiet)', 1)[0]
+        self.assertIn('NotificationManager.IMPORTANCE_LOW', quiet)
+        self.assertIn('enableVibration(false)', quiet)
+        self.assertIn('setSound(null, null)', quiet)
+        # Уведомление о сообщении идёт в свой канал, а тихое — в тихий.
+        helper = (ROOT / 'android-app/app/src/main/java/com/vladimir/messenger/service/NotificationHelper.kt').read_text(encoding='utf-8')
+        self.assertIn('MessengerApplication.CHANNEL_MESSAGES_QUIET_ID', helper)
+        self.assertIn('MessengerApplication.CHANNEL_MESSAGES_ID', helper)
+        self.assertIn('canPost(notificationManager, channelId)', helper)
+        self.assertNotIn('MessengerApplication.CHANNEL_ID', helper)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

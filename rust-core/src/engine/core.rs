@@ -2832,11 +2832,15 @@ impl P2PCore {
     fn pending_own_fallback(
         queue: &RelayQueue, own_id: &str, cursor: usize, now_ms: i64,
     ) -> (Vec<(String, String, String)>, usize) {
-        const BATCH: usize = 16;
-        let (candidates, total) = queue.gossip_candidates(&[], cursor, BATCH);
-        let next = if total == 0 { 0 } else { (cursor + BATCH) % total };
+        // Окно — только свои записи. Раньше 16 кандидатов брались из общей
+        // очереди и чужие отбрасывались уже после выборки: при трёх тысячах
+        // чужих своё почти не попадало в окно, и старейшее своё висело в
+        // очереди десятками минут (владелец 2026-11-17: «то стабильно, то не
+        // пробиться»). Порядок внутри своих — по важности, а не по карте.
+        const BATCH: usize = 32;
+        let (candidates, next) = queue.own_pending_page(cursor, BATCH);
         let pending = candidates.into_iter().filter_map(|msg| {
-            if queue.is_own(&msg.msg_id) != Some(true) || msg.origin_sender != own_id {
+            if msg.origin_sender != own_id {
                 return None;
             }
             let wire = Self::own_fallback_wire(&msg, now_ms)?;
@@ -3308,7 +3312,11 @@ impl P2PCore {
             // некому. Теперь своё недоставленное (оно лежит в очереди до
             // получения квитанции) предлагается снова каждые полминуты —
             // так же настойчиво, как рой пересылает смену аватарки.
-            if last_own_reoffer_at.elapsed() >= std::time::Duration::from_secs(30) {
+            // Владелец 2026-11-17: «нужно чтобы push работал всегда и в первой
+            // очереди». Своё недоставленное предлагается каждые 10 секунд
+            // страницей из 32 записей: раньше было 30 и окно делили чужие, из-за
+            // чего своя очередь из сотни записей не разбиралась часами.
+            if last_own_reoffer_at.elapsed() >= std::time::Duration::from_secs(10) {
                 last_own_reoffer_at = std::time::Instant::now();
                 if let Some(q) = relay_queue.as_ref() {
                     let (owned, next) = Self::pending_own_fallback(

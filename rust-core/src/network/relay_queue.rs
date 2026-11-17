@@ -1321,6 +1321,49 @@ impl RelayQueue {
     }
 
     /// Сводка для логов и диагностики: свои и чужие по отдельности.
+    /// Страница СВОЕГО недоставленного — без чужих в окне.
+    ///
+    /// Владелец 2026-11-17: «связь то стабильно, то не пробиться… очереди нужно
+    /// на каждую функцию, чтобы они не спорили, кто главнее». Прежняя страница
+    /// брала 16 кандидатов из ОБЩЕЙ очереди и отбрасывала чужих уже после
+    /// выборки: при трёх тысячах чужих записей своё почти не попадало в окно, и
+    /// старейшее своё висело в очереди десятками минут. Здесь окно — только свои
+    /// записи, и первыми идут важные классы: пробуждение, личное, тревога.
+    pub fn own_pending_page(&self, cursor: usize, limit: usize) -> (Vec<RelayMessage>, usize) {
+        let entries = self.entries.lock().unwrap();
+        let now_ms = utc_now_ms();
+        let mut own: Vec<&QueueEntry> = entries
+            .values()
+            .filter(|e| e.own && !e.message.is_expired_at(now_ms))
+            .collect();
+        own.sort_by(|a, b| {
+            (
+                a.class.rank(),
+                a.message.created_at_ms,
+                a.message.msg_id.as_str(),
+            )
+                .cmp(&(
+                    b.class.rank(),
+                    b.message.created_at_ms,
+                    b.message.msg_id.as_str(),
+                ))
+        });
+        let total = own.len();
+        if total == 0 {
+            return (Vec::new(), 0);
+        }
+        let limit = limit.max(1);
+        let start = cursor % total;
+        let page: Vec<RelayMessage> = own
+            .iter()
+            .skip(start)
+            .take(limit)
+            .map(|entry| entry.message.clone())
+            .collect();
+        let next = (start + limit) % total;
+        (page, next)
+    }
+
     /// Сколько СВОИХ записей в каждом классе важности.
     ///
     /// Нужно отчёту и журналу: «своих=181» ничего не говорит о том, есть ли
@@ -2600,6 +2643,31 @@ mod tests {
         assert_eq!(counts[&traffic_priority::TrafficClass::Alert], 1);
         assert_eq!(counts[&traffic_priority::TrafficClass::GroupOther], 1);
         assert_eq!(counts[&traffic_priority::TrafficClass::Foreign], 0);
+    }
+
+
+    #[test]
+    fn own_page_never_spends_its_window_on_foreign_entries() {
+        // Чужих — сотни, своих — три. Окно из 2 записей обязано состоять
+        // только из своих: иначе своё вытесняется из окна чужим потоком.
+        let q = RelayQueue::with_all_limits(500, 10_000, 100, 1_000);
+        for i in 0..300 {
+            assert!(q.enqueue(msg(&format!("foreign-{i}"), "pk_far")).unwrap());
+        }
+        assert!(q.enqueue_own(own_msg("personal-1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(signal_msg("udp-sig-1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(alert_msg("sos1-1", "pk_b")).unwrap());
+
+        let (page, next) = q.own_pending_page(0, 2);
+        assert_eq!(page.len(), 2, "все места окна — свои");
+        assert!(page.iter().all(|message| !message.msg_id.starts_with("foreign-")));
+        // Первым идёт самое важное: пробуждение и личное, а не тревога.
+        assert_eq!(page[0].msg_id, "udp-sig-1");
+        assert_eq!(page[1].msg_id, "personal-1");
+
+        let (rest, _) = q.own_pending_page(next, 2);
+        assert_eq!(rest.len(), 1, "осталась тревога");
+        assert_eq!(rest[0].msg_id, "sos1-1");
     }
 
 }

@@ -261,7 +261,9 @@ class DirectReplyScopeTest(unittest.TestCase):
         # Плашка над полем ввода называет автора ЦИТИРУЕМОГО сообщения, а не
         # автора его собственной цитаты (старое поведение подставляло чужое имя).
         self.assertNotIn("uiState.replyTo?.replyAuthor", screen)
-        self.assertIn("if (uiState.replyTo?.isFromMe == true)", screen)
+        # И плашка обязана исчезать: без `?.let` имя подставлялось даже при
+        # пустом выборе, и «Ответ …» висел вечно — владелец: «закрыть не получается».
+        self.assertIn("uiState.replyTo?.let {", screen)
         # Отправка прикладывает метаданные ответа к своему сообщению.
         view_model = (BASE / "ui/screens/chat/ChatDetailViewModel.kt").read_text(encoding="utf-8")
         self.assertIn("DirectReplyWire.Target(", view_model)

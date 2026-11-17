@@ -460,8 +460,8 @@ fun ChatDetailScreen(
                 onVoiceReady = { uri -> viewModel.onFileSelected(uri) },
                 onVoiceLocked = viewModel::onVoiceLocked,
                 onCancelScheduled = { id -> com.vladimir.messenger.worker.ScheduledSendWorker.cancel(context, id) },
-                // Автор - тот, чьё сообщение цитируем (не автор его собственной цитаты).
-                replyAuthor  = if (uiState.replyTo?.isFromMe == true) stringResource(R.string.grp_you) else contactName,
+                // `?.let` обязателен: без него имя подставлялось и без выбора, и плашка не закрывалась.
+                replyAuthor  = uiState.replyTo?.let { if (it.isFromMe) stringResource(R.string.grp_you) else contactName },
                 replyText    = uiState.replyTo?.content.orEmpty(),
                 onClearReply = viewModel::clearReply,
                 isSending    = uiState.isSending,

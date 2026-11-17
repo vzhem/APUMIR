@@ -54,11 +54,16 @@ internal class PushWakeSignal(
 
     companion object {
         /**
-         * Ten minutes per correspondent. Long enough that a conversation does not
-         * cost one provider call per message, short enough that a peer who went
-         * offline mid-conversation is still reachable.
+         * Одна минута на собеседника.
+         *
+         * Владелец 2026-11-17: «нужно чтобы push работал всегда и в первой
+         * очереди». Десять минут были неверны: одно принятое пробуждение
+         * глушило следующие девять минут, и новое сообщение ждало, пока
+         * собеседник сам проснётся по таймеру. Минута остаётся заслоном от
+         * лавины (серия сообщений — не серия вызовов службы), но не отказом
+         * разбудить по новому сообщению.
          */
-        const val MIN_INTERVAL_MS: Long = 10 * 60 * 1000
+        const val MIN_INTERVAL_MS: Long = 60 * 1000
 
         /**
          * `ACCEPTED` means the Worker took the request. It does not mean the peer

@@ -103,7 +103,14 @@ class NotificationHelper @Inject constructor(
         }
 
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (!canPost(notificationManager, MessengerApplication.CHANNEL_ID)) return IncomingNotificationPost.BLOCKED
+        // Тихие сообщения не должны звонить: на Android 8+ это решает канал,
+        // а не флаг уведомления, поэтому у тихого свой канал без сигнала.
+        val channelId = if (silent) {
+            MessengerApplication.CHANNEL_MESSAGES_QUIET_ID
+        } else {
+            MessengerApplication.CHANNEL_MESSAGES_ID
+        }
+        if (!canPost(notificationManager, channelId)) return IncomingNotificationPost.BLOCKED
 
         // Получить имя и аватар отправителя
         val contact = contactRepository.getContactById(senderId)
@@ -139,7 +146,7 @@ class NotificationHelper @Inject constructor(
         )
         
         // Создать notification
-        val notification = NotificationCompat.Builder(context, MessengerApplication.CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_notification)  // Нужна иконка
             .setContentTitle(title)
             .setContentText(body)
@@ -154,7 +161,11 @@ class NotificationHelper @Inject constructor(
                 putString(LocalMessageNotifications.EXTRA_SNAPSHOT, snapshot)
             })
             .setContentIntent(pendingIntent)
-            .build()
+        // До Android 8 канала нет: звук и вибрация задаются самим уведомлением.
+        if (!silent && Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            builder.setDefaults(NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_VIBRATE)
+        }
+        val notification = builder.build()
 
         // Tags group by the entire chat, not 1,000 colliding integer buckets.
         try {
@@ -163,7 +174,7 @@ class NotificationHelper @Inject constructor(
             return IncomingNotificationPost.BLOCKED
         }
         // Permission may have changed while the notification was being built.
-        if (!canPost(notificationManager, MessengerApplication.CHANNEL_ID)) return IncomingNotificationPost.BLOCKED
+        if (!canPost(notificationManager, channelId)) return IncomingNotificationPost.BLOCKED
         flashlightBlinker.blinkForMessage(
             kind = FlashlightMessageKind.classify(
                 hasGroup = group != null,

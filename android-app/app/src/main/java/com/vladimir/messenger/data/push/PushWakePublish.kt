@@ -255,7 +255,15 @@ internal object PushWakePublish {
 
     /** In-memory throttle; never persisted, so a restart retries immediately. */
     private val lastAttemptAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
-    private const val MIN_ATTEMPT_INTERVAL_MS = 60_000L
+    /**
+     * Между попытками — 15 секунд.
+     *
+     * Было 60: первая попытка сразу после отправки часто заставала собеседника
+     * в сне, а следующая начиналась только через минуту. Ядро всё равно не
+     * шлёт пробуждение чаще, чем нужно, а лавину держит бюджет
+     * ([PushWakeSignal.MIN_INTERVAL_MS]).
+     */
+    private const val MIN_ATTEMPT_INTERVAL_MS = 15_000L
 
     /** «Причины нет»: отчёт печатает подпись только когда она не пустая. */
     private const val NO_DETAIL = "-"
