@@ -178,6 +178,9 @@ internal class GroupPolls(
             } else {
                 votes.map { PollVoter(it.voterId, it.voterName, it.choices()) }
             },
+            // Анонимность скрывает имена, а не участие: без этого числа карточка
+            // писала «пока никто не голосовал» при уже отданных голосах.
+            anonymousVoters = if (row.anonymous) votes.count { it.choices().isNotEmpty() } else 0,
         )
     }
 

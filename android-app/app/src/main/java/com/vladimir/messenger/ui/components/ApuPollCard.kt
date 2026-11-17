@@ -63,14 +63,40 @@ fun ApuPollCard(
     modifier: Modifier = Modifier,
     /** Показывать ли кнопку «Закрыть опрос» (права решает вызывающий экран). */
     canClose: Boolean = false,
+    /**
+     * Печатать ли вопрос внутри карточки.
+     *
+     * В личном чате вопрос — это обычное сообщение, и его пузырь стоит прямо
+     * над карточкой: там [showQuestion] = false, иначе вопрос виден дважды.
+     * В группе и канале пузыря-вопроса может не быть, поэтому по умолчанию true.
+     */
+    showQuestion: Boolean = true,
+    /**
+     * Открыть опрос во весь экран (окно с итогами). Необязательный: в группе
+     * карточки хватает, а личный чат так возвращается к закрытому опросу.
+     */
+    onOpen: (() -> Unit)? = null,
+    /** Фон карточки: по умолчанию непрозрачный, поверх обоев переписки. */
+    containerColor: Color = MaterialTheme.colorScheme.surface,
 ) {
     val shape = RoundedCornerShape(12.dp)
+    val open = onOpen
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(shape)
             .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f), shape)
+            // Сначала непрозрачная подложка, потом оттенок: один полупрозрачный
+            // слой поверх обоев читался как «опроса нет, видно стену».
+            .background(containerColor)
             .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.06f))
+            .then(
+                if (open != null) {
+                    Modifier.clickable(onClick = open)
+                } else {
+                    Modifier
+                }
+            )
             .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -98,11 +124,13 @@ fun ApuPollCard(
                 )
             }
         }
-        Text(
-            poll.question,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
+        if (showQuestion) {
+            Text(
+                poll.question,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
         // До голосования проценты не показываем: считаем, что подглядывать в
         // пустой опрос незачем, а спорных цифр «0 %» на экране меньше.
         val voted = poll.myChoices.isNotEmpty()

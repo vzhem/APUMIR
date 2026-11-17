@@ -166,15 +166,17 @@ fun ChatDetailScreen(
     // р252: опрос в личном чате. Вопрос уходит обычным сообщением, варианты -
     // конвертом APUPOLL1 (ранг 3 проверяет ViewModel).
     var showCreatePoll by remember { mutableStateOf(false) }
-    if (showCreatePoll) {
-        com.vladimir.messenger.ui.components.CreatePollDialog(
-            onDismiss = { showCreatePoll = false },
-            onCreate = { draft ->
-                showCreatePoll = false
-                viewModel.createPoll(draft.question, draft.options, draft.anonymous)
-            },
-        )
-    }
+    var openPollMessageId by remember { mutableStateOf<String?>(null) }
+    DirectPollDialogs(
+        showCreate = showCreatePoll,
+        onDismissCreate = { showCreatePoll = false },
+        onCreate = viewModel::createPoll,
+        polls = uiState.polls,
+        openMessageId = openPollMessageId,
+        onDismissOpen = { openPollMessageId = null },
+        onToggle = { poll, index -> viewModel.togglePollChoice(poll, index) },
+        onClose = { viewModel.closePoll(it) },
+    )
 
     if (showGifCatalog) {
         // Раунд 138: единая панель ввода - Эмодзи / Гиф / Стикеры в одном
@@ -875,16 +877,14 @@ fun ChatDetailScreen(
                                     onRetry = { viewModel.retryMessage(message) },
                                 )
                                 }
-                                // р252: карточка опроса - сразу под пузырём
-                                // вопроса, во всю ширину ленты (как в группах).
                                 uiState.polls[message.id]?.let { poll ->
-                                    com.vladimir.messenger.ui.components.ApuPollCard(
+                                    DirectPollFeedCard(
                                         poll = poll,
                                         onToggle = { index -> viewModel.togglePollChoice(poll, index) },
                                         onClose = { viewModel.closePoll(poll) },
                                         canClose = poll.isMine && !poll.closed,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
+                                        onOpen = { openPollMessageId = message.id },
+                                        modifier = Modifier.fillMaxWidth()
                                             .padding(horizontal = 14.dp, vertical = 4.dp),
                                     )
                                 }

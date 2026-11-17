@@ -967,6 +967,7 @@
     <string name="poll_label">Опрос</string>
     <string name="poll_closed">Опрос закрыт</string>
     <string name="poll_close">Закрыть опрос</string>
+    <string name="poll_results_done">Понятно</string>
     <string name="poll_your_choice">Ваш выбор</string>
     <string name="poll_member">Участник</string>
     <string name="poll_and_others">и другие</string>

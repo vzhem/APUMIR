@@ -65,13 +65,25 @@ class DirectPollCardsTest {
     }
 
     @Test
-    fun `anonymous poll hides voters but keeps tallies`() {
+    fun `anonymous poll hides voters but keeps tallies and the head count`() {
         val votes = listOf(DirectPollVoteEntity(pollId = "dp:m-3", voterId = "pk_peer", choicesCsv = "0"))
         val card = directPollCards(listOf(row("m-3", anonymous = true)), votes, self = "pk_me")
             .getValue("m-3")
 
         assertTrue(card.voters.isEmpty())
         assertEquals(1, card.options.first().votes)
+        // Имена скрыты, но человек проголосовал: иначе карточка печатала
+        // «пока никто не голосовал» рядом с реальными процентами.
+        assertEquals(1, card.totalVoters)
+    }
+
+    @Test
+    fun `withdrawn vote does not count as a voter in an anonymous poll`() {
+        val votes = listOf(DirectPollVoteEntity(pollId = "dp:m-6", voterId = "pk_peer", choicesCsv = ""))
+        val card = directPollCards(listOf(row("m-6", anonymous = true)), votes, self = "pk_me")
+            .getValue("m-6")
+
+        assertEquals(0, card.totalVoters)
     }
 
     @Test

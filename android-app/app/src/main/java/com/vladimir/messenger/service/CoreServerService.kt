@@ -477,7 +477,7 @@ class CoreServerService : Service() {
         ) {
             return true
         }
-        return false
+        return announceUnroutedIncoming(applicationContext, senderId)
     }
 
     /**

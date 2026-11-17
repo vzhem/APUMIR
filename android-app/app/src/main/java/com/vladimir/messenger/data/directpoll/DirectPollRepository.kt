@@ -219,7 +219,10 @@ class DirectPollRepository @Inject constructor(
         voteAsSelf: Boolean = false,
     ) {
         val poll = pollDao.getPoll(packet.pollId) ?: return
-        if (poll.closed) return
+        // Закрытый опрос голос всё равно принимает: голос отдан ДО закрытия, а
+        // конверт дошёл позже — раньше такой голос молча пропадал, и в итогах
+        // закрытого опроса не было ответа собеседника. Новые голоса по-прежнему
+        // запрещены в [vote], то есть в самом интерфейсе.
         val size = directPollDecodeOptions(poll.optionsCsv).size
         val clean = packet.choices.distinct().filter { DirectPollTally.isValidChoice(size, it) }
         val final = if (clean.isEmpty()) emptyList() else listOf(clean.first())
@@ -346,6 +349,9 @@ internal fun directPollSummary(
             votes.filter { it.choices().isNotEmpty() }
                 .map { PollVoter(it.voterId, "", it.choices()) }
         },
+        // Имена анонимного опроса не отдаём, но число голосов обязано остаться:
+        // иначе карточка писала «пока никто не голосовал» при двух голосах.
+        anonymousVoters = if (row.anonymous) votes.count { it.choices().isNotEmpty() } else 0,
     )
 }
 
