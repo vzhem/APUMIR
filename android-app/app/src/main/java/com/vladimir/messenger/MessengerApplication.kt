@@ -421,6 +421,10 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
                 enableVibration(false)
             }
             manager.createNotificationChannel(quiet)
+            // Звук и вибрация по разделам (владелец 2026-11-17): на каждый
+            // раздел — четыре канала, потому что менять сигнал существующего
+            // канала код не может. Выбор человека живёт в NotificationAlertStore.
+            com.vladimir.messenger.data.notification.NotificationAlertChannels.ensure(this, manager)
             // Раунд 142: служебная плашка «на связи» - МИНИМАЛЬНАЯ важность:
             // без иконки в статус-баре, без звука, в самом низу шторки
             // (владелец: «это уведомление нужно спрятать от абонента, нужны

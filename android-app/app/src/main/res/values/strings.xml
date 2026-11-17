@@ -1434,6 +1434,17 @@
     <string name="notification_scope_groups_hint">Все уведомления из групп</string>
     <string name="notification_scope_channels">Каналы</string>
     <string name="notification_scope_channels_hint">Все уведомления из каналов</string>
+    <string name="notification_alert_title">Звук и вибрация</string>
+    <string name="notification_alert_hint">Личные сообщения, группы и каналы настраиваются отдельно. На громкой телефон звучит, в режиме вибрации — вибрирует.</string>
+    <string name="notification_alert_app">Всё приложение</string>
+    <string name="notification_alert_app_hint">Общий выключатель: гасит звук и вибрацию у всех разделов сразу</string>
+    <string name="notification_alert_sound">Звук</string>
+    <string name="notification_alert_vibrate">Вибрация</string>
+    <string name="notification_channel_both">звук и вибрация</string>
+    <string name="notification_channel_sound">только звук</string>
+    <string name="notification_channel_vibrate">только вибрация</string>
+    <string name="notification_channel_silent">без звука</string>
+    <string name="notification_channel_description">Входящие сообщения APU</string>
     <string name="notification_scope_topics">Темы и комментарии</string>
     <string name="notification_scope_topics_hint">Темы групп и обсуждения публикаций каналов</string>
     <string name="notification_mute_one_hour">На 1 час</string>

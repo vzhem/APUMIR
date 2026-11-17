@@ -1262,9 +1262,9 @@ private fun SettingsTabContent(
             }
             if (section == SettingsSection.Notifications) {
             item { SettingsSectionTitle(stringResource(R.string.section_notifications)) }
-            // «Как в Telegram»: что мешает письму разбудить телефон (файл рядом).
-            item { DeliveryAssuranceCard() }
+            item { DeliveryAssuranceCard() }  // «как в Telegram»: что мешает письму разбудить телефон
             item { FlashlightAlertSettingsCard() }
+            item { NotificationAlertSettingsCard() }  // звук/вибрация: приложение и разделы
             // Пауза новых сообщений: приложение целиком или нужный раздел.
             item {
                 SettingsCard {

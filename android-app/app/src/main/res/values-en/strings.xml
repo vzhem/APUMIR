@@ -1336,6 +1336,17 @@
     <string name="notification_scope_groups_hint">All notifications from groups</string>
     <string name="notification_scope_channels">Channels</string>
     <string name="notification_scope_channels_hint">All notifications from channels</string>
+    <string name="notification_alert_title">Sound and vibration</string>
+    <string name="notification_alert_hint">Personal chats, groups and channels are configured separately. On loud the phone sounds, in vibrate mode it vibrates.</string>
+    <string name="notification_alert_app">Whole app</string>
+    <string name="notification_alert_app_hint">Master switch: silences sound and vibration for every section at once</string>
+    <string name="notification_alert_sound">Sound</string>
+    <string name="notification_alert_vibrate">Vibration</string>
+    <string name="notification_channel_both">sound and vibration</string>
+    <string name="notification_channel_sound">sound only</string>
+    <string name="notification_channel_vibrate">vibration only</string>
+    <string name="notification_channel_silent">silent</string>
+    <string name="notification_channel_description">Incoming APU messages</string>
     <string name="notification_scope_topics">Topics and comments</string>
     <string name="notification_scope_topics_hint">Group topics and channel post discussions</string>
     <string name="notification_mute_one_hour">For 1 hour</string>

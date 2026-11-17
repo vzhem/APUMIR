@@ -206,11 +206,49 @@ class NotificationArrivalContract(unittest.TestCase):
         self.assertIn('setSound(null, null)', quiet)
         # Уведомление о сообщении идёт в свой канал, а тихое — в тихий.
         helper = (ROOT / 'android-app/app/src/main/java/com/vladimir/messenger/service/NotificationHelper.kt').read_text(encoding='utf-8')
-        self.assertIn('MessengerApplication.CHANNEL_MESSAGES_QUIET_ID', helper)
-        self.assertIn('MessengerApplication.CHANNEL_MESSAGES_ID', helper)
         self.assertIn('canPost(notificationManager, channelId)', helper)
         self.assertNotIn('MessengerApplication.CHANNEL_ID', helper)
+        # 533: звук и вибрация настраиваются в приложении, по разделам.
+        # Владелец 532: «в настройках не нашёл функцию со звуком и вибрацией».
+        self.assertIn('NotificationAlertChannels.ensure(this, manager)', app)
 
+        channels = (ROOT / 'android-app/app/src/main/java/com/vladimir/messenger/data/notification/NotificationAlertChannels.kt').read_text(encoding='utf-8')
+        self.assertIn('"apu_msg_${section.key}_${profile.key}"', channels)
+        for profile in ('BOTH("sv", true, true', 'SOUND("s", true, false',
+                        'VIBRATE("v", false, true', 'SILENT("n", false, false'):
+            self.assertIn(profile, channels)
+        for section in ('PERSONAL(', 'GROUPS(', 'CHANNELS('):
+            self.assertIn(section, channels)
+        self.assertIn('enableVibration(profile.vibrate)', channels)
+        self.assertIn('setSound(null, null)', channels)
+        self.assertIn('NotificationManager.IMPORTANCE_LOW', channels)
+
+        store = (ROOT / 'android-app/app/src/main/java/com/vladimir/messenger/data/notification/NotificationAlertStore.kt').read_text(encoding='utf-8')
+        self.assertIn('APP("app"', store)
+        self.assertIn('PERSONAL_CHATS("personal"', store)
+        # Общий выключатель приложения обязан запрещать, а не разрешать.
+        self.assertIn('soundEnabled(context, scope) && soundEnabled(context, NotificationAlertScope.APP)', store)
+
+        # Уведомление выбирает канал по разделу и профилю, а не один на всех.
+        self.assertIn('NotificationAlertChannels.channelId(alertSection, alertProfile)', helper)
+        self.assertIn('NotificationAlertStore.profileFor(context, alertSection.scope, silent)', helper)
+
+        # Карточка обязана быть в настройках экрана, а не только в системе Android.
+        settings = (ROOT / 'android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/SettingsScreen.kt').read_text(encoding='utf-8')
+        self.assertIn('item { NotificationAlertSettingsCard() }', settings)
+        card = (ROOT / 'android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/NotificationAlertSettings.kt').read_text(encoding='utf-8')
+        for api in ('NotificationAlertStore.setSoundEnabled', 'NotificationAlertStore.setVibrationEnabled',
+                    'ApuPremiumSwitch', 'NotificationAlertScope.entries'):
+            self.assertIn(api, card)
+
+        # Строки есть в обеих локалях: иначе английский интерфейс покажет номер.
+        for locale in ('values', 'values-en'):
+            strings = (ROOT / f'android-app/app/src/main/res/{locale}/strings.xml').read_text(encoding='utf-8')
+            for name in ('notification_alert_title', 'notification_alert_sound',
+                         'notification_alert_vibrate', 'notification_alert_app',
+                         'notification_channel_both', 'notification_channel_sound',
+                         'notification_channel_vibrate', 'notification_channel_silent'):
+                self.assertIn(f'name="{name}"', strings)
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

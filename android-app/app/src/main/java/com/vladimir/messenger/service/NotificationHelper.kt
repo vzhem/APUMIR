@@ -14,6 +14,8 @@ import androidx.core.content.ContextCompat
 import com.vladimir.messenger.MainActivity
 import com.vladimir.messenger.MessengerApplication
 import com.vladimir.messenger.R
+import com.vladimir.messenger.data.notification.NotificationAlertChannels
+import com.vladimir.messenger.data.notification.NotificationAlertStore
 import com.vladimir.messenger.data.local.dao.ChatDao
 import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.notification.FlashlightMessageKind
@@ -103,13 +105,18 @@ class NotificationHelper @Inject constructor(
         }
 
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        // Тихие сообщения не должны звонить: на Android 8+ это решает канал,
-        // а не флаг уведомления, поэтому у тихого свой канал без сигнала.
-        val channelId = if (silent) {
-            MessengerApplication.CHANNEL_MESSAGES_QUIET_ID
-        } else {
-            MessengerApplication.CHANNEL_MESSAGES_ID
+        // Звук и вибрация решаются каналом (Android 8+): выбираем раздел
+        // (личные/группы/каналы) и профиль из настроек приложения. Тихие
+        // сообщения всегда идут в тихий канал, что бы ни было выбрано.
+        val alertSection = when {
+            group == null -> NotificationAlertChannels.Section.PERSONAL
+            group.isChannel -> NotificationAlertChannels.Section.CHANNELS
+            else -> NotificationAlertChannels.Section.GROUPS
         }
+        val alertProfile = NotificationAlertChannels.profileFor(
+            NotificationAlertStore.profileFor(context, alertSection.scope, silent),
+        )
+        val channelId = NotificationAlertChannels.channelId(alertSection, alertProfile)
         if (!canPost(notificationManager, channelId)) return IncomingNotificationPost.BLOCKED
 
         // Получить имя и аватар отправителя
