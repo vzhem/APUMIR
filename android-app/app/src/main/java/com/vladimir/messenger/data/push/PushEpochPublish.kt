@@ -33,6 +33,9 @@ internal object PushEpochPublish {
      */
     private const val OFFER_INTERVAL_MS = 5 * 60_000L
 
+    /** id-подсказка ядру: анонс эпохи — пробуждение и адрес (высший класс). */
+    private const val PUSH_WAKE_ID_PREFIX = "push1-"
+
     /** Process-lifetime throttle per peer; a restart may re-offer once. */
     private val lastOfferAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
@@ -117,7 +120,11 @@ internal object PushEpochPublish {
         if (chatId != null) {
             val accepted = try {
                 com.vladimir.messenger.data.RustBridge.sendMessage(
-                    java.util.UUID.randomUUID().toString(),
+                    // Подсказка ядру: это пробуждение и адрес, самый важный
+                    // класс трафика (см. `rust-core/src/network/traffic_priority.rs`).
+                    // Анонс запечатан, по телу его не отличить, поэтому класс
+                    // передаётся в id; получателю и ACK id безразличен.
+                    PUSH_WAKE_ID_PREFIX + java.util.UUID.randomUUID(),
                     chatId,
                     peerId,
                     text,

@@ -4252,9 +4252,19 @@ impl P2PCore {
                         // своего резерва (видно «предел достигнут») и возраст
                         // старейшей своей переписки: свежий хвост минут против
                         // застрявшего хвоста суток — разные диагнозы.
+                        // Владелец 2026-11-17: «кто первый, кто потом». Одного
+                        // числа «своих» мало: надо видеть, сколько из них —
+                        // пробуждение, личное, тревога и прочее.
+                        let classes = q.counts_by_class();
+                        let class_text: String = classes
+                            .iter()
+                            .filter(|(_, count)| *count > 0)
+                            .map(|(class, count)| format!("{} {}", class.as_str(), count))
+                            .collect::<Vec<_>>()
+                            .join(", ");
                         match stats.own_oldest_age_ms {
                             Some(age_ms) => tracing::info!(
-                                "Relay-очередь: своих={} сигналов={} чужих={} всего={} получателей={} снято-по-ACK={} вытеснено-своих={} предел-своих={} старейшее-своё={}",
+                                "Relay-очередь: своих={} сигналов={} чужих={} всего={} получателей={} снято-по-ACK={} вытеснено-своих={} предел-своих={} старейшее-своё={} по-важности=[{}]",
                                 stats.own,
                                 stats.own_transients,
                                 stats.foreign,
@@ -4263,10 +4273,11 @@ impl P2PCore {
                                 q.delivered_removed(),
                                 stats.own_capacity_evictions,
                                 stats.own_limit,
-                                age_ms / 1000
+                                age_ms / 1000,
+                                class_text
                             ),
                             None => tracing::info!(
-                                "Relay-очередь: своих={} сигналов={} чужих={} всего={} получателей={} снято-по-ACK={} вытеснено-своих={} предел-своих={} старейшее-своё=нет",
+                                "Relay-очередь: своих={} сигналов={} чужих={} всего={} получателей={} снято-по-ACK={} вытеснено-своих={} предел-своих={} старейшее-своё=нет по-важности=[{}]",
                                 stats.own,
                                 stats.own_transients,
                                 stats.foreign,
@@ -4274,7 +4285,8 @@ impl P2PCore {
                                 stats.recipients,
                                 q.delivered_removed(),
                                 stats.own_capacity_evictions,
-                                stats.own_limit
+                                stats.own_limit,
+                                class_text
                             ),
                         }
                     }

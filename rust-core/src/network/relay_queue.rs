@@ -28,6 +28,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::network::traffic_priority::{self, TrafficClass};
+
 // ═══════════════════════════════════════════════════════════════════
 // КОНСТАНТЫ
 // ═══════════════════════════════════════════════════════════════════
@@ -604,6 +606,18 @@ struct QueueEntry {
     own: bool,
     /// Категория тела: переписка, сигнал транспорта или пакет передачи.
     kind: RelayPayloadKind,
+    /// Класс важности: пробуждение и адрес → личное → тревога → прочее → чужое.
+    ///
+    /// Живёт в RAM рядом с `kind` и вычисляется заново при восстановлении: ни
+    /// durable-формат, ни wire от этого не меняются.
+    class: TrafficClass,
+}
+
+impl QueueEntry {
+    /// Класс записи по её признакам (см. `traffic_priority`).
+    fn class_of(message: &RelayMessage, own: bool, kind: RelayPayloadKind) -> TrafficClass {
+        traffic_priority::class_of(own, &message.msg_id, &message.chat_scope, &message.e2e_payload, kind)
+    }
 }
 
 /// Mesh store-and-forward очередь.
@@ -721,6 +735,7 @@ impl RelayQueue {
 
         let msg_id = msg.msg_id.clone();
         let kind = message_kind(&msg.msg_id, &msg.chat_scope, &msg.e2e_payload);
+        let class = QueueEntry::class_of(&msg, true, kind);
         let mut entries = self.entries.lock().unwrap();
         if let Some(existing) = entries.get(&msg_id) {
             if !existing.own
@@ -736,6 +751,7 @@ impl RelayQueue {
                     message: msg,
                     own: true,
                     kind,
+                    class,
                 },
             );
             return Ok(true);
@@ -771,6 +787,9 @@ impl RelayQueue {
         let now_ms = utc_now_ms();
         // До перемещения сообщения в запись (см. комментарий в enqueue_foreign).
         let kind = message_kind(&msg.msg_id, &msg.chat_scope, &msg.e2e_payload);
+        // Класс важности считается здесь же: он решает, кто уступает место, а
+        // кто нет (см. `traffic_priority`).
+        let class = QueueEntry::class_of(&msg, true, kind);
 
         // Сначала — просроченное своё (освобождает запас без потерь).
         if self.own_count_locked(&entries) >= self.max_own_total
@@ -790,25 +809,43 @@ impl RelayQueue {
             // Сигнал или пакет передачи: у них свой маленький запас, и место
             // переписки они не занимают (владелец 2026-10-07: «своя переписка
             // идёт первой» — и уж точно не вытесняется служебным сигналом).
-            if self.own_transient_count_locked(&entries) >= MAX_OWN_TRANSIENT {
-                Self::evict_oldest_own_transient(&mut entries);
+            if self.own_transient_count_locked(&entries) >= MAX_OWN_TRANSIENT
+                && !Self::evict_oldest_own_transient(&mut entries, class)
+            {
+                // Уступать некому: запас служебного занят пробуждением. Тогда
+                // теряется входящий служебный пакет, а не адрес собеседника.
+                return Ok(false);
             }
         } else {
+            // Свой запас класса: группа не может занять долю личной переписки,
+            // а личная переписка — долю пробуждения (см. `traffic_priority`).
+            let class_count = entries
+                .values()
+                .filter(|e| e.own && e.class == class)
+                .count();
+            if class_count >= class.own_reserve()
+                && !Self::evict_oldest_own_of_class(&mut entries, class)
+            {
+                // Класс переполнен, вытеснять внутри него нечего: входящее не
+                // принято. «Принято» не должно оказаться ложью.
+                return Ok(false);
+            }
+
             if self.own_for_locked(&entries, &msg.recipient) >= self.max_own_per_recipient
-                && Self::evict_oldest_own_for(&mut entries, &msg.recipient)
+                && Self::evict_oldest_own_for(&mut entries, &msg.recipient, class)
             {
                 self.own_capacity_evictions.fetch_add(1, Ordering::Relaxed);
             }
 
             if self.own_count_locked(&entries) >= self.max_own_total {
                 // Первым делом уступает место сигнал, а не переписка.
-                if let Some(victim) = Self::oldest_own_transient(&entries) {
+                if let Some(victim) = Self::oldest_own_transient(&entries, class) {
                     entries.remove(&victim);
                 }
             }
 
             if self.own_count_locked(&entries) >= self.max_own_total
-                && Self::evict_oldest_own(&mut entries)
+                && Self::evict_oldest_own(&mut entries, class)
             {
                 self.own_capacity_evictions.fetch_add(1, Ordering::Relaxed);
             }
@@ -828,6 +865,7 @@ impl RelayQueue {
                 message: msg,
                 own: true,
                 kind,
+                class,
             },
         );
         Ok(true)
@@ -876,6 +914,8 @@ impl RelayQueue {
                 message: msg,
                 own: false,
                 kind,
+                // Чужая пересылка — всегда последний класс.
+                class: TrafficClass::Foreign,
             },
         );
         Ok(true)
@@ -898,47 +938,95 @@ impl RelayQueue {
 
     // ─── Вытеснение своих (только свои, чужое не трогаем) ───────────
 
-    /// Убрать самое старое своё сообщение этому получателю.
-    fn evict_oldest_own_for(entries: &mut HashMap<String, QueueEntry>, recipient: &str) -> bool {
-        let victim = entries
-            .iter()
-            .filter(|(_, e)| e.own && e.message.recipient == recipient)
-            .min_by_key(|(id, e)| (e.message.created_at_ms, (*id).clone()))
-            .map(|(id, _)| id.clone());
-        victim.is_some_and(|id| entries.remove(&id).is_some())
-    }
-
-    /// Самое старое СВОЁ служебное (сигнал или пакет передачи), если есть.
-    fn oldest_own_transient(entries: &HashMap<String, QueueEntry>) -> Option<String> {
+    /// Кого можно вытеснить ради входящей записи класса `incoming`.
+    ///
+    /// Порядок выбора — от менее важного к более важному, и только внутри
+    /// того, что вообще уступает (см. [`traffic_priority::evictable_for`]):
+    /// сначала «прочее», потом тревога, потом личное. Пробуждение не
+    /// уступает никому, кроме другого пробуждения.
+    fn eviction_victim(
+        entries: &HashMap<String, QueueEntry>,
+        incoming: TrafficClass,
+        recipient: Option<&str>,
+        transient_only: bool,
+    ) -> Option<String> {
         entries
             .iter()
-            .filter(|(_, e)| e.own && e.kind.is_transient())
-            .min_by_key(|(id, e)| (e.message.created_at_ms, (*id).clone()))
+            .filter(|(_, e)| e.own)
+            .filter(|(_, e)| recipient.map_or(true, |r| e.message.recipient == r))
+            .filter(|(_, e)| !transient_only || e.kind.is_transient())
+            .filter(|(_, e)| traffic_priority::evictable_for(incoming, e.class))
+            .min_by_key(|(id, e)| {
+                (
+                    // Сначала уступает самый неважный класс…
+                    std::cmp::Reverse(e.class.rank()),
+                    // …и только внутри класса — самая старая запись.
+                    e.message.created_at_ms,
+                    (*id).clone(),
+                )
+            })
             .map(|(id, _)| id.clone())
     }
 
-    /// Убрать самое старое служебное своё (сигнал или пакет передачи).
-    fn evict_oldest_own_transient(entries: &mut HashMap<String, QueueEntry>) {
-        let victim = Self::oldest_own_transient(entries);
-        if let Some(id) = victim {
-            let kind = entries
-                .get(&id)
-                .map(|e| e.kind.as_str())
-                .unwrap_or("служебное");
-            entries.remove(&id);
-            tracing::debug!(
-                "Relay-очередь: запас служебного исчерпан, вытеснено самое старое ({}) {}",
-                kind,
-                id
-            );
-        }
+    /// Убрать самое старое своё сообщение этому получателю, если оно уступает.
+    fn evict_oldest_own_for(
+        entries: &mut HashMap<String, QueueEntry>,
+        recipient: &str,
+        incoming: TrafficClass,
+    ) -> bool {
+        Self::eviction_victim(entries, incoming, Some(recipient), false)
+            .is_some_and(|id| entries.remove(&id).is_some())
     }
 
-    /// Убрать самое старое своё сообщение по всей очереди.
-    fn evict_oldest_own(entries: &mut HashMap<String, QueueEntry>) -> bool {
+    /// Самое старое СВОЁ служебное (сигнал или пакет передачи), если оно уступает.
+    fn oldest_own_transient(
+        entries: &HashMap<String, QueueEntry>,
+        incoming: TrafficClass,
+    ) -> Option<String> {
+        Self::eviction_victim(entries, incoming, None, true)
+    }
+
+    /// Убрать самое старое служебное своё (сигнал или пакет передачи).
+    ///
+    /// Возвращает false, если уступать некому: пробуждение не вытесняется
+    /// ради «печатает…» или куска файла.
+    fn evict_oldest_own_transient(
+        entries: &mut HashMap<String, QueueEntry>,
+        incoming: TrafficClass,
+    ) -> bool {
+        let Some(id) = Self::oldest_own_transient(entries, incoming) else {
+            return false;
+        };
+        let kind = entries
+            .get(&id)
+            .map(|e| e.kind.as_str())
+            .unwrap_or("служебное");
+        entries.remove(&id);
+        tracing::debug!(
+            "Relay-очередь: запас служебного исчерпан, вытеснено самое старое ({}) {}",
+            kind,
+            id
+        );
+        true
+    }
+
+    /// Убрать самое старое своё сообщение, которое уступает входящему.
+    fn evict_oldest_own(
+        entries: &mut HashMap<String, QueueEntry>,
+        incoming: TrafficClass,
+    ) -> bool {
+        Self::eviction_victim(entries, incoming, None, false)
+            .is_some_and(|id| entries.remove(&id).is_some())
+    }
+
+    /// Убрать самое старое сообщение ТОГО ЖЕ класса (свой запас класса).
+    fn evict_oldest_own_of_class(
+        entries: &mut HashMap<String, QueueEntry>,
+        class: TrafficClass,
+    ) -> bool {
         let victim = entries
             .iter()
-            .filter(|(_, e)| e.own)
+            .filter(|(_, e)| e.own && e.class == class)
             .min_by_key(|(id, e)| (e.message.created_at_ms, (*id).clone()))
             .map(|(id, _)| id.clone());
         victim.is_some_and(|id| entries.remove(&id).is_some())
@@ -1233,6 +1321,28 @@ impl RelayQueue {
     }
 
     /// Сводка для логов и диагностики: свои и чужие по отдельности.
+    /// Сколько СВОИХ записей в каждом классе важности.
+    ///
+    /// Нужно отчёту и журналу: «своих=181» ничего не говорит о том, есть ли
+    /// среди них личная переписка или всё занято служебным. Возвращает
+    /// фиксированный набор из пяти чисел в порядке важности.
+    pub fn counts_by_class(&self) -> [(TrafficClass, usize); 5] {
+        let entries = self.entries.lock().unwrap();
+        let mut counts = [0usize; 5];
+        for entry in entries.values() {
+            if entry.own {
+                counts[entry.class.rank() as usize] += 1;
+            }
+        }
+        [
+            (TrafficClass::WakeAddress, counts[0]),
+            (TrafficClass::Personal, counts[1]),
+            (TrafficClass::Alert, counts[2]),
+            (TrafficClass::GroupOther, counts[3]),
+            (TrafficClass::Foreign, counts[4]),
+        ]
+    }
+
     pub fn stats(&self) -> RelayQueueStats {
         let entries = self.entries.lock().unwrap();
         let own = entries
@@ -2364,6 +2474,99 @@ mod tests {
         assert_eq!(q.stats().own_transients, 1);
         assert_eq!(q.stats().own, 1);
         assert_eq!(q.stats().own_capacity_evictions, 0);
+    }
+
+
+    // ─── Лестница важности (владелец 2026-11-17: «кто первый, кто потом») ───
+
+    /// Тревога в группе (SOS) и звонок.
+    fn alert_msg(msg_id: &str, recipient: &str) -> RelayMessage {
+        RelayMessage::new(msg_id.into(), recipient.into(), "pk_origin".into(), "group-1".into(), vec![0xAA; 40])
+    }
+
+    /// Кусок файла: служебное, живёт в запасе служебного.
+    fn file_msg(msg_id: &str, recipient: &str) -> RelayMessage {
+        RelayMessage::new_at_ms(
+            utc_now_ms(),
+            msg_id.into(),
+            recipient.into(),
+            "pk_origin".into(),
+            "chat-1".into(),
+            b"sealed file chunk".to_vec(),
+        )
+    }
+
+    #[test]
+    fn alert_flood_never_evicts_personal_correspondence() {
+        // Свой запас получателя — 2. Личное пришло первым, тревога следом:
+        // уступать обязана тревога, а личное сообщение остаётся.
+        let q = RelayQueue::with_all_limits(10, 10, 2, 10);
+        assert!(q.enqueue_own(own_msg("personal-1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(alert_msg("sos1-1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(alert_msg("sos1-2", "pk_b")).unwrap());
+        assert_eq!(q.is_own("personal-1"), Some(true), "личное вытеснено тревогой");
+        assert_eq!(q.is_own("sos1-1"), None, "самая старая тревога обязана уступить");
+        assert_eq!(q.is_own("sos1-2"), Some(true));
+    }
+
+    #[test]
+    fn personal_never_yields_to_a_newer_alert() {
+        // Обратный порядок: тревога первой, личное — важнее, поэтому встаёт
+        // на место тревоги, а не отказывается.
+        let q = RelayQueue::with_all_limits(10, 10, 1, 10);
+        assert!(q.enqueue_own(alert_msg("sos1-1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(own_msg("personal-1", "pk_b")).unwrap());
+        assert_eq!(q.is_own("personal-1"), Some(true));
+        assert_eq!(q.is_own("sos1-1"), None);
+        assert_eq!(q.own_count(), 1);
+    }
+
+    #[test]
+    fn wake_signal_is_never_evicted_by_a_file_chunk() {
+        // Запас служебного занят адресом/пробуждением. Куску файла места нет —
+        // и он теряется сам, а адрес собеседника остаётся.
+        let q = RelayQueue::with_all_limits(10, 10, 100, 10);
+        for i in 0..MAX_OWN_TRANSIENT {
+            assert!(q.enqueue_own(signal_msg(&format!("udp-sig-{i}"), "pk_b")).unwrap());
+        }
+        assert_eq!(q.own_transient_count(), MAX_OWN_TRANSIENT);
+        assert!(!q.enqueue_own(file_msg("f0000000000000000000000000000000o", "pk_b")).unwrap());
+        assert_eq!(q.own_transient_count(), MAX_OWN_TRANSIENT);
+        assert_eq!(q.is_own("udp-sig-0"), Some(true), "адрес вытеснен служебным пакетом");
+    }
+
+    #[test]
+    fn foreign_flood_cannot_evict_any_own_class() {
+        // Чужие ограничены строго и своих не трогают ни в каком классе.
+        let q = RelayQueue::with_all_limits(2, 10, 10, 10);
+        assert!(q.enqueue_own(own_msg("personal-1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(signal_msg("udp-sig-1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(alert_msg("sos1-1", "pk_b")).unwrap());
+        for i in 0..6 {
+            let _ = q.enqueue(msg(&format!("foreign-{i}"), "pk_c"));
+        }
+        assert_eq!(q.is_own("personal-1"), Some(true));
+        assert_eq!(q.is_own("udp-sig-1"), Some(true));
+        assert_eq!(q.is_own("sos1-1"), Some(true));
+    }
+
+    #[test]
+    fn counts_by_class_explain_what_waits_in_the_own_reserve() {
+        let q = RelayQueue::with_all_limits(10, 10, 10, 10);
+        assert!(q.enqueue_own(own_msg("personal-1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(signal_msg("udp-sig-1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(alert_msg("sos1-1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(file_msg("f0000000000000000000000000000000o", "pk_b")).unwrap());
+        let counts: std::collections::HashMap<_, _> = q
+            .counts_by_class()
+            .into_iter()
+            .map(|(class, count)| (class, count))
+            .collect();
+        assert_eq!(counts[&traffic_priority::TrafficClass::WakeAddress], 1);
+        assert_eq!(counts[&traffic_priority::TrafficClass::Personal], 1);
+        assert_eq!(counts[&traffic_priority::TrafficClass::Alert], 1);
+        assert_eq!(counts[&traffic_priority::TrafficClass::GroupOther], 1);
+        assert_eq!(counts[&traffic_priority::TrafficClass::Foreign], 0);
     }
 
 }
