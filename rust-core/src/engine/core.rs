@@ -2175,8 +2175,7 @@ impl P2PCore {
 
     async fn run_tcp_listener(
         events: Arc<EventBus>,
-        // Живой кадр по TCP — тоже свидетельство, что отправитель в сети.
-        network: Arc<NetworkManagerFfi>,
+        _network: Arc<NetworkManagerFfi>,
         port: u16,
     ) {
         // Dual-stack с откатом на IPv4: в сети только-v6 слушатель истории на
@@ -2204,9 +2203,7 @@ impl P2PCore {
                 Ok((mut stream, peer)) => {
                     tracing::info!("TCP incoming from {}", peer);
                     let ev = Arc::clone(&events);
-                    let net = Arc::clone(&network);
                     tokio::spawn(async move {
-                        let network = net;
                         let mut buf = vec![0u8; 65536];
                         loop {
                             match stream.read(&mut buf).await {
@@ -2226,8 +2223,6 @@ impl P2PCore {
                                             text: parts[3].to_string(),
                                             timestamp: ts,
                                         });
-                                        // Живой путь: отправитель здесь и сейчас.
-                                        presence_observation::note_live_sender(&ev, &network, parts[0], "", ts);
                                     }
                                     let _ = stream.write_all(b"ACK").await;
                                 }
@@ -6698,7 +6693,21 @@ mod tests {
                 .to_vec(),
         );
         assert_eq!(adopted.as_deref(), Some("pk_2222222222222222222222222222222222222222222222222222222222222222"));
-        assert_eq!(events.len(), 1);
+        // Два события: само сообщение и «отправитель в сети». Живой кадр —
+        // достаточное свидетельство присутствия (v11.74.534): иначе друг,
+        // написавший через брокер, оставался «не в сети».
+        assert_eq!(events.len(), 2);
+        let drained = events.drain();
+        assert!(drained.iter().any(|event| matches!(
+            event,
+            CoreEvent::MessageReceived { sender_id, .. }
+                if sender_id == "pk_2222222222222222222222222222222222222222222222222222222222222222"
+        )));
+        assert!(drained.iter().any(|event| matches!(
+            event,
+            CoreEvent::PeerDiscovered { peer_id, .. }
+                if peer_id == "pk_2222222222222222222222222222222222222222222222222222222222222222"
+        )));
     }
 
     /// K4-2: вопрос «где узел …?» про нас самих уходит в очередь ответов с
