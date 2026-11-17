@@ -29,15 +29,36 @@ FTP_BLOCK_BYTES = 256 * 1024
 # многомегабайтного APK только увеличивала шанс снова не успеть.
 FTP_MAX_ATTEMPTS = 4
 FTP_RETRY_BACKOFF_SECONDS = 10
+# Дозаливка одного файла (FTP REST): 78 МБ APK на медленном канале не обязано
+# пройти с первого раза, но каждый удачный кусок уже принят сервером.
+FTP_STAGE_ATTEMPTS = 4
 
 
 class CheckedReader:
-    """Stream while detecting a local file modified after input validation."""
-    def __init__(self, source, spec: SiteFile):
+    """Stream while detecting a local file modified after input validation.
+
+    `start` — сколько байт сервер уже принял в прошлой попытке: ровно столько
+    проглатывается и попадает в контрольную сумму, чтобы итоговая сверка
+    по-прежнему считалась по всему файлу.
+    """
+    def __init__(self, source, spec: SiteFile, start: int = 0):
+        if start < 0 or start > spec.size:
+            raise ValueError("invalid staging offset")
         self.source = source
         self.spec = spec
-        self.size = 0
+        self.start = start
+        self.size = start
         self.digest = hashlib.sha256()
+        if start:
+            # Читаем префикс с начала: это и есть продолжение с `start`, а курсор
+            # после него уже стоит где нужно.
+            remaining = start
+            while remaining > 0:
+                block = source.read(min(FTP_BLOCK_BYTES, remaining))
+                if not block:
+                    raise ValueError("staged prefix is longer than the local file")
+                self.digest.update(block)
+                remaining -= len(block)
 
     def read(self, size=-1):
         # ftplib calls with a fixed block size; do not permit an unbounded read.
@@ -72,14 +93,96 @@ def normalize_host(raw: str) -> str:
     return host
 
 
+def staged_size(ftp, name: str) -> int:
+    """Сколько байт уже принято во временный файл (0, если его нет)."""
+    try:
+        size = ftp.size(name)
+    except ftplib.error_perm:
+        return 0
+    return int(size or 0)
+
+
+def new_stage_name(ftp, spec: SiteFile, token_factory=uuid.uuid4) -> str:
+    """Свежее уникальное имя временного файла рядом с публичным."""
+    suffix = Path(spec.name).suffix
+    if suffix not in {".zip", ".json", ".apk"}:
+        raise ValueError("unsafe staging extension")
+    token = token_factory().hex
+    if not re.fullmatch(r"[0-9a-f]{32}", token):
+        raise ValueError("invalid staging token")
+    name = f"apu-stage-{token}{suffix}"
+    # NLST cannot guarantee exclusive creation against an unrelated external FTP
+    # writer, so use a fresh UUID4 as well and serialize our jobs. Never
+    # overwrite or delete a pre-existing name, even on an error path.
+    if name.casefold() in _remote_names(ftp):
+        raise FileExistsError("staging name already exists")
+    return name
+
+
 def _remote_names(ftp) -> set[str]:
     # Some FTP servers return paths in NLST rather than bare filenames. Treat
     # case variants as collisions too, including on case-insensitive servers.
     return {PurePosixPath(name).name.casefold() for name in ftp.nlst()}
 
 
-def publish_one(ftp, directory: Path, spec: SiteFile, still_current, log=print, token_factory=uuid.uuid4) -> None:
-    """Stage, size-check and rename one file; keep the destination on failure."""
+def stage_bytes(ftp, directory: Path, spec: SiteFile, temp_name: str, log=print,
+                attempts: int | None = None) -> None:
+    """Дозалить временный файл, продолжая с уже принятого размера (FTP REST).
+
+    Крупный файл на медленном канале не обязан пройти целиком с первого раза.
+    `REST` просит сервер продолжить запись с текущего размера временного файла,
+    поэтому каждая удачная часть остаётся принятой, а не пропадает. Итоговая
+    сверка по-прежнему идёт по всему файлу: `CheckedReader` домешивает в
+    контрольную сумму уже принятый префикс.
+    """
+    attempts = FTP_STAGE_ATTEMPTS if attempts is None else attempts
+    offset = staged_size(ftp, temp_name)
+    if offset > spec.size:
+        raise ValueError("staged file is larger than the local file")
+    for attempt in range(1, attempts + 1):
+        if offset >= spec.size:
+            return
+        with (directory / spec.name).open("rb") as source:
+            reader = CheckedReader(source, spec, offset)
+            log(f"Staging {spec.name} from {offset} of {spec.size} bytes (attempt {attempt})")
+            try:
+                ftp.storbinary(
+                    f"STOR {temp_name}", reader, blocksize=FTP_BLOCK_BYTES, rest=offset
+                )
+            except (EOFError, OSError, ftplib.Error):
+                if attempt == attempts:
+                    raise
+                # Сколько сервер успел принять — решает, с чего продолжать.
+                # Мёртвое соединение здесь не выяснить: отдаём наверх, где
+                # сессию пересоздадут и вернутся к этому же временному имени.
+                resumed = staged_size(ftp, temp_name)
+                if resumed <= offset:
+                    if offset == 0:
+                        raise
+                    # Сервер не умеет REST или отдаёт чужой размер: начать
+                    # заново честнее, чем дозаливать поверх неизвестного.
+                    log(f"Staging {spec.name} cannot resume; restarting from 0 bytes")
+                    try:
+                        ftp.delete(temp_name)
+                    except (EOFError, OSError, ftplib.Error):
+                        raise
+                    offset = 0
+                    continue
+                offset = resumed
+                log(f"Staging {spec.name} interrupted; resuming from {offset} bytes")
+                continue
+            if not reader.matches():
+                raise ValueError("local file changed during transfer")
+            offset = spec.size
+
+
+def publish_one(ftp, directory: Path, spec: SiteFile, still_current, log=print,
+                token_factory=uuid.uuid4, stage_name: str | None = None) -> None:
+    """Stage, size-check and rename one file; keep the destination on failure.
+
+    `stage_name` передаётся внешним повтором: то же имя нужно и на новой сессии,
+    иначе дозаливка начнётся с нуля.
+    """
     # Restrict both the destination and the extension before constructing FTP
     # commands. The shorter names were tested against uCoz's FTP name rules.
     if spec.name not in SITE_NAMES:
@@ -87,24 +190,19 @@ def publish_one(ftp, directory: Path, spec: SiteFile, still_current, log=print, 
     suffix = Path(spec.name).suffix
     if suffix not in {".zip", ".json", ".apk"}:
         raise ValueError("unsafe staging extension")
-    token = token_factory().hex
-    if not re.fullmatch(r"[0-9a-f]{32}", token):
-        raise ValueError("invalid staging token")
-    temp_name = f"apu-stage-{token}{suffix}"
-    # NLST cannot guarantee exclusive creation against an unrelated external
-    # FTP writer, so use a fresh UUID4 as well and serialize our jobs.
-    # Never overwrite or delete a pre-existing name, even on an error path.
-    if temp_name.casefold() in _remote_names(ftp):
-        raise FileExistsError("staging name already exists")
+    if stage_name is None:
+        temp_name = new_stage_name(ftp, spec, token_factory)
+    else:
+        temp_name = stage_name
+        if not re.fullmatch(r"apu-stage-[0-9a-f]{32}\.(zip|json|apk)", temp_name):
+            raise ValueError("unsafe staging name")
+        if not temp_name.endswith(suffix):
+            raise ValueError("staging name does not match the file type")
     cleanup = False
     try:
-        with (directory / spec.name).open("rb") as source:
-            reader = CheckedReader(source, spec)
-            log(f"Staging {spec.name} ({spec.size} bytes)")
-            cleanup = True  # A failed STOR may leave a partial temporary file.
-            ftp.storbinary(f"STOR {temp_name}", reader, blocksize=FTP_BLOCK_BYTES)
-            if not reader.matches():
-                raise ValueError("local file changed during transfer")
+        log(f"Staging {spec.name} ({spec.size} bytes)")
+        cleanup = True  # A failed STOR may leave a partial temporary file.
+        stage_bytes(ftp, directory, spec, temp_name, log)
         ftp.voidcmd("TYPE I")
         remote_size = ftp.size(temp_name)
         if remote_size != spec.size:

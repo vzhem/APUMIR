@@ -181,6 +181,7 @@ class FakeFtp:
         self.fail_delete = False
         self.fail_listing = False
         self.list_prefix = ""
+        self.rests = []
 
     def nlst(self):
         self.commands.append(("list",))
@@ -188,10 +189,18 @@ class FakeFtp:
             raise ftplib.error_perm("550 private listing error")
         return [self.list_prefix + name for name in self.files]
 
-    def storbinary(self, command, reader, blocksize):
+    def storbinary(self, command, reader, blocksize, rest=None):
         name = command.removeprefix("STOR ")
         self.commands.append(("store", name))
-        self.files[name] = b""
+        self.rests.append(rest)
+        # REST: сервер продолжает запись с указанного смещения (или отказывает).
+        if rest:
+            buffered = self.files.get(name, b"")
+            if len(buffered) != rest:
+                raise ftplib.error_perm("553 rest offset mismatch")
+            self.files[name] = buffered
+        else:
+            self.files[name] = b""
         while True:
             block = reader.read(blocksize)
             if not block:
@@ -204,6 +213,8 @@ class FakeFtp:
         self.commands.append(("command", command))
 
     def size(self, name):
+        if name not in self.files:
+            raise ftplib.error_perm("550 no such file")
         return len(self.files[name]) if self.size_override == "actual" else self.size_override
 
     def rename(self, source, destination):
@@ -217,6 +228,32 @@ class FakeFtp:
         if self.fail_delete:
             raise OSError("cleanup failed")
         self.files.pop(name, None)
+
+
+class HalfBlockFtp(FakeFtp):
+    """Сервер принял половину первого блока и оборвал соединение."""
+
+    def __init__(self):
+        super().__init__()
+        self.stalled = False
+
+    def storbinary(self, command, reader, blocksize, rest=None):
+        name = command.removeprefix("STOR ")
+        self.commands.append(("store", name))
+        self.rests.append(rest)
+        if rest:
+            if len(self.files.get(name, b"")) != rest:
+                raise ftplib.error_perm("553 rest offset mismatch")
+        else:
+            self.files[name] = b""
+        block = reader.read(blocksize)
+        if not block:
+            return
+        if not self.stalled:
+            self.stalled = True
+            self.files[name] += block[: len(block) // 2]
+            raise TimeoutError("ftp socket stalled")
+        self.files[name] += block
 
 
 class StagedUploadTest(unittest.TestCase):
@@ -244,12 +281,27 @@ class StagedUploadTest(unittest.TestCase):
         self.assertFalse(any(k.startswith("apu-stage-") for k in self.ftp.files))
 
     def test_failed_or_interrupted_transfer_preserves_old_public_file(self):
+        # Одна попытка: оборванная заливка не публикуется и не оставляет
+        # временный файл рядом с публичным именем.
         self.ftp.fail_store = True
-        with self.assertRaises(OSError):
+        with patch.object(upload, "FTP_STAGE_ATTEMPTS", 1), self.assertRaises(OSError):
             self.send()
         self.assertEqual(self.ftp.files[self.spec.name], b"old complete APK")
         self.assertTrue(any(c[0] == "delete" for c in self.ftp.commands))
         self.assertFalse(any(k.startswith("apu-stage-") for k in self.ftp.files))
+
+    def test_stalled_transfer_resumes_from_the_received_prefix(self):
+        # Сервер принял половину блока и оборвался. Повтор не начинает файл
+        # заново: REST просит продолжить с уже принятого размера.
+        flaky = HalfBlockFtp()
+        upload.publish_one(flaky, self.directory, self.spec, lambda: True,
+                           self.messages.append, self.token)
+        self.assertEqual(flaky.files[self.spec.name],
+                         (self.directory / self.spec.name).read_bytes())
+        self.assertEqual([c[0] for c in flaky.commands],
+                         ["list", "store", "store", "command", "rename"])
+        self.assertEqual(flaky.rests[0], 0)
+        self.assertEqual(flaky.rests[1], self.spec.size // 2)
 
     def test_wrong_or_missing_size_never_promotes(self):
         for size in (None, 1, self.spec.size + 1):
@@ -292,7 +344,7 @@ class StagedUploadTest(unittest.TestCase):
         self.assertEqual(self.ftp.commands, [("list",)])
 
     def test_denied_store_with_no_created_file_never_blindly_deletes(self):
-        def deny(command, reader, blocksize):
+        def deny(command, reader, blocksize, rest=None):
             self.ftp.commands.append(("store", command.removeprefix("STOR ")))
             raise ftplib.error_perm("553 private server detail")
         with patch.object(self.ftp, "storbinary", side_effect=deny), self.assertRaises(ftplib.error_perm):
@@ -303,11 +355,13 @@ class StagedUploadTest(unittest.TestCase):
 
     def test_unavailable_cleanup_listing_reports_possible_orphan(self):
         original_store = self.ftp.storbinary
-        def interrupted(command, reader, blocksize):
+        def interrupted(command, reader, blocksize, rest=None):
             self.ftp.fail_store = True
             self.ftp.fail_listing = True
-            original_store(command, reader, blocksize)
-        with patch.object(self.ftp, "storbinary", side_effect=interrupted), self.assertRaises(OSError):
+            original_store(command, reader, blocksize, rest)
+        with patch.object(upload, "FTP_STAGE_ATTEMPTS", 1), \
+                patch.object(self.ftp, "storbinary", side_effect=interrupted), \
+                self.assertRaises(OSError):
             self.send()
         self.assertIn("Staging cleanup failed: error_perm", self.messages)
         self.assertEqual(self.ftp.files[self.spec.name], b"old complete APK")
@@ -331,7 +385,7 @@ class StagedUploadTest(unittest.TestCase):
     def test_cleanup_failure_is_visible_without_masking_original_error(self):
         self.ftp.fail_store = True
         self.ftp.fail_delete = True
-        with self.assertRaises(OSError):
+        with patch.object(upload, "FTP_STAGE_ATTEMPTS", 1), self.assertRaises(OSError):
             self.send()
         self.assertIn("Staging cleanup failed: OSError", self.messages)
         self.assertEqual(self.ftp.files[self.spec.name], b"old complete APK")
@@ -398,12 +452,12 @@ class FlakyFtp(FakeFtp):
         self.fail_connect = fail_connect
         self.stores = 0
 
-    def storbinary(self, command, reader, blocksize):
+    def storbinary(self, command, reader, blocksize, rest=None):
         self.stores += 1
-        super().storbinary(command, reader, blocksize)
         if self.stores == self.fail_on_store:
-            # Так же, как настоящий обрыв: ftplib отдаёт TimeoutError.
+            # Мёртвый сокет: сервер не принял ни байта, ftplib отдаёт TimeoutError.
             raise TimeoutError("ftp socket stalled")
+        super().storbinary(command, reader, blocksize, rest)
 
 
 class PublishWithRetryTest(unittest.TestCase):
