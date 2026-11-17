@@ -247,6 +247,26 @@ class DirectReplyScopeTest(unittest.TestCase):
         self.assertIn("MessageDigest.isEqual(pin, candidate)", pinned)
         self.assertLess(pinned.index("withPin(sender)"), pinned.index("apply(sender, packet)"))
 
+    def test_personal_message_menu_offers_reply_and_names_the_quoted_author(self):
+        # Владелец 2026-11-17: «в личных сообщениях тоже отвечать на конкретное
+        # сообщение — добавить эту функцию в меню». До этого ответ жил только на
+        # свайпе по пузырю, и его не находили.
+        screen = (BASE / "ui/screens/chat/ChatDetailScreen.kt").read_text(encoding="utf-8")
+        action = (BASE / "ui/screens/chat/ChatReplyAction.kt").read_text(encoding="utf-8")
+        self.assertIn("ChatReplyActionBubble", screen)
+        self.assertIn("viewModel.startReply(message)", screen)
+        # Тот же пункт и та же подпись, что в группах: привычка «ответ сверху».
+        self.assertIn("R.string.group_reply", action)
+        self.assertIn("Icons.AutoMirrored.Filled.Reply", action)
+        # Плашка над полем ввода называет автора ЦИТИРУЕМОГО сообщения, а не
+        # автора его собственной цитаты (старое поведение подставляло чужое имя).
+        self.assertNotIn("uiState.replyTo?.replyAuthor", screen)
+        self.assertIn("if (uiState.replyTo?.isFromMe == true)", screen)
+        # Отправка прикладывает метаданные ответа к своему сообщению.
+        view_model = (BASE / "ui/screens/chat/ChatDetailViewModel.kt").read_text(encoding="utf-8")
+        self.assertIn("DirectReplyWire.Target(", view_model)
+        self.assertIn("replyTo = null", view_model)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

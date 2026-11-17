@@ -460,7 +460,8 @@ fun ChatDetailScreen(
                 onVoiceReady = { uri -> viewModel.onFileSelected(uri) },
                 onVoiceLocked = viewModel::onVoiceLocked,
                 onCancelScheduled = { id -> com.vladimir.messenger.worker.ScheduledSendWorker.cancel(context, id) },
-                replyAuthor  = uiState.replyTo?.replyAuthor?.ifBlank { if (uiState.replyTo?.isFromMe == true) stringResource(R.string.grp_you) else contactName },
+                // Автор - тот, чьё сообщение цитируем (не автор его собственной цитаты).
+                replyAuthor  = if (uiState.replyTo?.isFromMe == true) stringResource(R.string.grp_you) else contactName,
                 replyText    = uiState.replyTo?.content.orEmpty(),
                 onClearReply = viewModel::clearReply,
                 isSending    = uiState.isSending,
@@ -924,10 +925,8 @@ fun ChatDetailScreen(
             title = { Text(stringResource(R.string.chat_message_actions)) },
             text = {
                 Column {
-                    // Раунд 203: превью без служебных строк пересылки.
-                    // Раунд 222 (владелец): служебные маркеры - по-человечески:
-                    // гифка - словом «Гифка» (а не «APUGIFREF1|хэш»), файл -
-                    // «📎 имя (размер)», как на карточке.
+                    // Раунд 203/222: превью без служебных строк пересылки, а
+                    // маркеры - по-человечески: «Гифка» или «📎 имя (размер)».
                     val previewText = remember(message.id) {
                         val stripped = com.vladimir.messenger.util.ForwardMarker.stripHeader(com.vladimir.messenger.util.QuietMessage.strip(message.content))
                         when {
@@ -943,9 +942,9 @@ fun ChatDetailScreen(
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Spacer(modifier = Modifier.height(12.dp))
-                    // Раунд 211: пункты - золотыми пузырями, как в «точках»
-                    // групп и каналов (владелец: единый стиль). Опасное -
-                    // красным. Состав действий прежний.
+                    // Раунд 211/253: пункты - золотыми пузырями, как в
+                    // группах; ответ на сообщение - первым пунктом меню.
+                    ChatReplyActionBubble { resetSelection(); viewModel.startReply(message) }
                     com.vladimir.messenger.ui.components.ApuActionBubble(
                         stringResource(R.string.chat_share_in_apu),
                         androidx.compose.material.icons.Icons.Filled.Send,
