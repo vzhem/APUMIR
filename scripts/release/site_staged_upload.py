@@ -14,13 +14,21 @@ import os
 import re
 import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path, PurePosixPath
 
 from site_release_files import MAX_METADATA_BYTES, SITE_NAMES, SiteFile, tracked_fingerprint, validate_inputs
 
-FTP_TIMEOUT_SECONDS = 180
+# Сокет ждёт данных не дольше этого: залипание на 180 секунд ничего не
+# выигрывало, только прятало обрыв (2026-11-17, два прогона подряд упали
+# `TimeoutError` на крупном файле). Короче сторож — быстрее повтор.
+FTP_TIMEOUT_SECONDS = 120
 FTP_BLOCK_BYTES = 256 * 1024
+# Повторы — на новой сессии и с уже выложенных файлов: повторная заливка
+# многомегабайтного APK только увеличивала шанс снова не успеть.
+FTP_MAX_ATTEMPTS = 4
+FTP_RETRY_BACKOFF_SECONDS = 10
 
 
 class CheckedReader:
@@ -129,6 +137,60 @@ def publish_all(ftp, directory: Path, files: list[SiteFile], still_current, log=
         publish_one(ftp, directory, spec, still_current, log)
 
 
+def publish_with_retry(
+    connect,
+    directory: Path,
+    files: list[SiteFile],
+    still_current,
+    log=print,
+    max_attempts: int = FTP_MAX_ATTEMPTS,
+    sleep=time.sleep,
+) -> None:
+    """Выложить файлы, переживая обрыв соединения.
+
+    `publish_one` безопасен для повтора: публичное имя меняется только после
+    совпадения размера, а неудачная попытка оставляет лишь уникальный временный
+    файл. Поэтому повтор начинается с РАЗРЫВА, а не с начала: уже выложенные
+    файлы не заливаются заново (это и было самой долгой частью).
+
+    `ValueError` (в том числе «Latest сменился») сюда не относится и наружу
+    выходит сразу: повторять публикацию устаревшего релиза нельзя.
+    """
+    # `validate_inputs` supplies packs, their manifest, APK, then latest.json.
+    if tuple(spec.name for spec in files) != SITE_NAMES:
+        raise ValueError("invalid publication order")
+    pending = list(files)
+    last_error = None
+    for attempt in range(1, max_attempts + 1):
+        ftp = None
+        try:
+            ftp = connect()
+            while pending:
+                publish_one(ftp, directory, pending[0], still_current, log)
+                done = pending.pop(0)
+                log(f"Published {done.name}; left to publish: {len(pending)}")
+            return
+        except ValueError:
+            raise
+        except (EOFError, OSError, ftplib.Error) as error:
+            last_error = error
+            log(
+                f"FTP attempt {attempt}/{max_attempts} interrupted "
+                f"({type(error).__name__}); left to publish: {len(pending)}"
+            )
+            if attempt == max_attempts:
+                break
+            sleep(FTP_RETRY_BACKOFF_SECONDS * attempt)
+        finally:
+            if ftp is not None:
+                try:
+                    ftp.quit()
+                except Exception:
+                    # Оборванная сессия уже ничего не публикует.
+                    pass
+    raise last_error if last_error is not None else OSError("upload interrupted")
+
+
 def repository_is_safe(repository: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+", repository)) and repository.rsplit("/", 1)[-1] not in {".", ".."}
 
@@ -172,18 +234,15 @@ def main() -> int:
         still_current = lambda: current_release_matches(repository, tag, expected)
         if not still_current():
             raise ValueError("release is no longer stable Latest")
-        ftp = ftplib.FTP()
-        try:
+        def connect():
+            ftp = ftplib.FTP()
             ftp.connect(host, timeout=FTP_TIMEOUT_SECONDS)
             ftp.login(user, password)
             ftp.cwd(remote)
-            publish_all(ftp, directory, files, still_current)
-        finally:
-            try:
-                ftp.quit()
-            except Exception as error:
-                # A failed QUIT does not change an already completed rename.
-                print(f"FTP disconnect failed: {type(error).__name__}")
+            return ftp
+
+        # A failed QUIT does not change an already completed rename.
+        publish_with_retry(connect, directory, files, still_current)
     except (OSError, EOFError, ValueError, TypeError, KeyError, ftplib.Error) as error:
         # Do not print the exception text: it can contain a host or credentials.
         print(f"::error::Staged site upload failed: {type(error).__name__}")

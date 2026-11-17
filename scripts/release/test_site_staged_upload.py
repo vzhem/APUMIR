@@ -389,6 +389,90 @@ class StagedUploadTest(unittest.TestCase):
             self.assertFalse(upload.current_release_matches("owner/repo", self.tag, expected))
 
 
+class FlakyFtp(FakeFtp):
+    """Соединение, которое рвётся на N-й заливке (или на первой команде)."""
+
+    def __init__(self, fail_on_store=None, fail_connect=False):
+        super().__init__()
+        self.fail_on_store = fail_on_store
+        self.fail_connect = fail_connect
+        self.stores = 0
+
+    def storbinary(self, command, reader, blocksize):
+        self.stores += 1
+        super().storbinary(command, reader, blocksize)
+        if self.stores == self.fail_on_store:
+            # Так же, как настоящий обрыв: ftplib отдаёт TimeoutError.
+            raise TimeoutError("ftp socket stalled")
+
+
+class PublishWithRetryTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.directory = Path(self.tmp.name)
+        self.tag, self.release = fixture(self.directory)
+        self.files = inputs.validate_inputs(self.directory, self.release, self.tag)
+        self.messages = []
+        self.sleeps = []
+
+    def run_publish(self, connections, guard=lambda: True, max_attempts=upload.FTP_MAX_ATTEMPTS):
+        queue = list(connections)
+
+        def connect():
+            ftp = queue.pop(0)
+            if getattr(ftp, "fail_connect", False):
+                raise ftplib.error_temp("421 too many connections")
+            return ftp
+
+        upload.publish_with_retry(
+            connect,
+            self.directory,
+            self.files,
+            guard,
+            self.messages.append,
+            max_attempts,
+            self.sleeps.append,
+        )
+        return queue
+
+    def renamed(self, ftp):
+        return [c[2] for c in ftp.commands if c[0] == "rename"]
+
+    def test_interrupted_upload_resumes_with_out_repeating_promoted_files(self):
+        first = FlakyFtp(fail_on_store=2)
+        second = FakeFtp()
+        self.run_publish([first, second])
+
+        # Первое соединение успело выложить только первый файл.
+        self.assertEqual(self.renamed(first), [self.files[0].name])
+        # Второе начинает с того, на чём оборвалось: первый файл не залит снова.
+        published_second = [c[1] for c in second.commands if c[0] == "store"]
+        self.assertFalse(
+            any(self.files[0].name in str(name) for name in published_second)
+        )
+        self.assertEqual(self.renamed(second), [spec.name for spec in self.files[1:]])
+        self.assertEqual(self.sleeps, [upload.FTP_RETRY_BACKOFF_SECONDS])
+
+    def test_retries_are_bounded_and_report_no_secret_text(self):
+        attempts = [FlakyFtp(fail_connect=True) for _ in range(2)]
+        with self.assertRaises(ftplib.error_temp):
+            self.run_publish(attempts, max_attempts=2)
+        self.assertEqual(self.sleeps, [upload.FTP_RETRY_BACKOFF_SECONDS])
+        self.assertTrue(all("421" not in message for message in self.messages))
+
+    def test_changed_latest_is_never_retried(self):
+        first = FakeFtp()
+        with self.assertRaises(ValueError):
+            self.run_publish([first], guard=lambda: False, max_attempts=4)
+        self.assertEqual(self.sleeps, [])
+        self.assertFalse(any(c[0] == "rename" for c in first.commands))
+
+    def test_successful_first_attempt_does_not_sleep(self):
+        self.run_publish([FakeFtp()])
+        self.assertEqual(self.sleeps, [])
+
+
 class HttpVerificationTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
