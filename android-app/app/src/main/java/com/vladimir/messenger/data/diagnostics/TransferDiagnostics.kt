@@ -119,6 +119,16 @@ object TransferDiagnostics {
         synchronized(lock) { counters[key] = (counters[key] ?: 0L) + delta }
     }
 
+    /**
+     * Поставить значение-«стрелку», а не счётчик: сколько соседей телефон
+     * считает в сети ПРЯМО СЕЙЧАС. Счётчик тут врёт (он только растёт), а
+     * владельцу 2026-11-17 нужно было видеть текущее состояние: «не
+     * показывает, что друзья на связи».
+     */
+    fun gauge(key: String, value: Long) {
+        synchronized(lock) { counters[key] = value }
+    }
+
     /** Read-only seam for JVM regression tests of event counters. */
     internal fun counterValueForTests(key: String): Long =
         synchronized(lock) { counters[key] ?: 0L }

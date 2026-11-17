@@ -1656,6 +1656,28 @@ class DiagnosticsReportTest {
         assertFalse(report.contains("presence_discarded_stale="))
     }
 
+    @Test fun presenceSectionShowsHowManyPeersAreOnlineRightNow() {
+        // Владелец 2026-11-17: «не показывает, что друзья на связи», хотя
+        // сообщение дошло. Накопленный счётчик наблюдений этого не объясняет —
+        // нужен текущий итог и возраст последней уборки.
+        val now = 1_700_000_000_000L
+        val report = DiagnosticsReport.render(
+            facts(
+                counters = mapOf(
+                    PresenceReportStrings.PRESENCE_ONLINE_NOW to 2L,
+                    PresenceReportStrings.PRESENCE_TRACKED_PEERS to 5L,
+                    PresenceReportStrings.PRESENCE_LAST_SWEEP_AT_MS to now - 12_000L,
+                ),
+            ).copy(createdAtMs = now),
+            emptyList(),
+            emptyList(),
+        )
+        assertTrue(report.contains("сейчас «в сети»: 2 из 5 отслеживаемых · уборка 12 с назад"))
+        assertTrue(report.contains("(каждые 60 с, порог 200 с)"))
+        // Стрелки тоже не печатаются в [сессия] сырым видом.
+        assertFalse(report.contains("presence_online_now="))
+    }
+
     @Test fun presenceSectionHidesDirectPeersWhenTheCoreNeverSignedThem() {
         val report = DiagnosticsReport.render(
             facts(liveDirectSwarmPeers = null, counters = emptyMap()).copy(connectedPeers = 120L),

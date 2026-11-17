@@ -143,6 +143,7 @@ internal class PresenceRecovery(
             }
             if (contactId != null && (heavy || becameOnline)) peer.contactDirty = true
             if (contactId != null && becameOnline) peer.chatsDirty = true
+            publishGauges(now)
             TransferDiagnostics.count(PresenceReportStrings.PRESENCE_OBSERVED)
             if (becameOnline) TransferDiagnostics.count(PresenceReportStrings.PRESENCE_BECAME_ONLINE)
             sync(peerId, peer)
@@ -170,6 +171,7 @@ internal class PresenceRecovery(
     suspend fun sweep() = mutex.withLock {
         ensureReset()
         val now = nowMs()
+        TransferDiagnostics.gauge(PresenceReportStrings.PRESENCE_LAST_SWEEP_AT_MS, now)
         val iterator = peers.iterator()
         while (iterator.hasNext()) {
             val (id, peer) = iterator.next()
@@ -184,6 +186,21 @@ internal class PresenceRecovery(
                 (now < peer.retiredAtMs || now - peer.retiredAtMs > TTL_MS)
             ) iterator.remove()
         }
+        publishGauges(now)
+    }
+
+    /**
+     * Сколько соседей телефон считает в сети ПРЯМО СЕЙЧАС. Считаем живых с
+     * непросроченным наблюдением, а не просто флаг: иначе после долгого сна
+     * процесса в отчёт попало бы число из прошлой жизни.
+     */
+    private fun publishGauges(now: Long) {
+        var online = 0
+        for (peer in peers.values) {
+            if (peer.online && now >= peer.seenAtMs && now - peer.seenAtMs <= TTL_MS) online += 1
+        }
+        TransferDiagnostics.gauge(PresenceReportStrings.PRESENCE_ONLINE_NOW, online.toLong())
+        TransferDiagnostics.gauge(PresenceReportStrings.PRESENCE_TRACKED_PEERS, peers.size.toLong())
     }
 
     private suspend fun retire(peerId: String, peer: Peer, expired: Boolean) {

@@ -33,6 +33,9 @@ object PresenceReportStrings {
     /** Молчание дольше этого срока снимает отметку «в сети» (PresenceRecovery.TTL_MS). */
     const val PRESENCE_TTL_SECONDS = 200L
 
+    /** Как часто уборка проверяет молчание (PresenceRecovery.SWEEP_MS). */
+    const val SWEEP_SECONDS = 60L
+
     // ── Ключи счётчиков присутствия ────────────────────────────────────
     // Живут в общем хранилище счётчиков сессии и попадают в отчёт через
     // facts.counters. В разделе [сессия] они не печатаются вторым разом:
@@ -77,6 +80,22 @@ object PresenceReportStrings {
      */
     const val PRESENCE_UNKNOWN_CONTACT = "presence_unknown_contact"
 
+    /**
+     * Сколько соседей телефон считает в сети ПРЯМО СЕЙЧАС (стрелка, не счётчик).
+     *
+     * Зачем. Владелец 2026-11-17: «не показывает, что друзья на связи», хотя
+     * сообщение дошло. По одним счётчикам наблюдений нельзя отличить «кадры
+     * приходят, а в интерфейсе пусто» от «кадров нет вовсе» — это разные
+     * причины. Здесь видно и число, и когда была последняя уборка.
+     */
+    const val PRESENCE_ONLINE_NOW = "presence_online_now"
+
+    /** Сколько соседей телефон вообще отслеживает (память PresenceRecovery). */
+    const val PRESENCE_TRACKED_PEERS = "presence_tracked_peers"
+
+    /** Когда проходила последняя уборка присутствия (мс эпохи, 0 — не было). */
+    const val PRESENCE_LAST_SWEEP_AT_MS = "presence_last_sweep_at_ms"
+
     /** Все ключи раздела: чтобы [сессия] не печатала их сырым видом второй раз. */
     val counterKeys: Set<String> = setOf(
         PRESENCE_OBSERVED,
@@ -89,6 +108,9 @@ object PresenceReportStrings {
         PRESENCE_RETIRED_EXPIRED,
         PRESENCE_LOST,
         PRESENCE_UNKNOWN_CONTACT,
+        PRESENCE_ONLINE_NOW,
+        PRESENCE_TRACKED_PEERS,
+        PRESENCE_LAST_SWEEP_AT_MS,
     )
 
     private fun Map<String, Long>.value(key: String): Long = this[key] ?: 0L
@@ -131,6 +153,18 @@ object PresenceReportStrings {
                     "(сосед виден ядром, но не совпал ни с одним контактом: " +
                     "отметка «в сети» такому не ставится)")
             }
+            // Текущее состояние, а не накопленное: сколько соседей телефон
+            // считает в сети прямо сейчас и когда последний раз убирал.
+            append("\n  сейчас «в сети»: ${counters.value(PRESENCE_ONLINE_NOW)} " +
+                "из ${counters.value(PRESENCE_TRACKED_PEERS)} отслеживаемых")
+            val sweptAt = counters.value(PRESENCE_LAST_SWEEP_AT_MS)
+            val createdAt = facts.createdAtMs
+            if (sweptAt > 0L && createdAt >= sweptAt) {
+                append(" · уборка ${(createdAt - sweptAt) / 1000} с назад")
+            } else if (sweptAt <= 0L) {
+                append(" · уборки ещё не было")
+            }
+            append(" (каждые ${SWEEP_SECONDS} с, порог $PRESENCE_TTL_SECONDS с)")
             append("\n  снято: молчанием свыше $PRESENCE_TTL_SECONDS с — ")
             append("${counters.value(PRESENCE_RETIRED_EXPIRED)}")
             append(", явным «пропал» — ${counters.value(PRESENCE_LOST)}")

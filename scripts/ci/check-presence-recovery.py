@@ -85,6 +85,50 @@ class PresenceWiring(unittest.TestCase):
         self.assertIn("if !live { return PresenceOutcome::Candidate; }", observe)
         self.assertIn("remember_locked(&mut map, book", observe)
 
+    def test_a_message_that_arrived_over_a_live_path_marks_the_sender_online(self):
+        """Владелец 2026-11-17: «не показывает, что друзья на связи», хотя
+        сообщение от них дошло.
+
+        Presence-кадр приходит раз в минуту и живёт 200 с: если он задержался
+        или ушёл раньше, интерфейс показывал «не в сети» при дошедшем
+        сообщении. Живой кадр (прямое соединение или публикация в нашу тему
+        прямо сейчас) — достаточное свидетельство.
+
+        Обратная сторона не менее важна: копия из чужой пересылки или из
+        кастодии может быть часами старой, и пометить по ней отправителя «в
+        сети» значило бы показать выключенный телефон онлайн.
+        """
+        observe = read(RUST, "network/presence_observation.rs")
+        self.assertIn("pub fn note_live_sender(", observe)
+        self.assertIn("network.observe_peer_at(peer_id, &name, now_ms)", observe)
+        core = read(RUST, "engine/core.rs")
+        # Прямой кадр: сообщение дошло по живому соединению.
+        direct = section(core, "fn handle_direct_frame", "async fn run_mdns_discovery")
+        self.assertIn("presence_observation::note_live_sender(", direct)
+        # Публикация в нашу тему в брокере — тоже живьём.
+        mqtt = section(core, 'evt.topic.starts_with("p2pm2/msg/")', "if cadence.take_presence(")
+        self.assertIn("presence_observation::note_live_sender(", mqtt)
+        # Отложенные пути присутствие не выдают: копия из меша могла пролежать
+        # часы, и «в сети» по ней показывал бы выключенный телефон онлайн.
+        relay_delivery = core.split("super::mesh_delivery::Admission::Dispatch => {", 1)[1] \
+            .split("super::mesh_delivery::Admission::Suppress", 1)[0]
+        self.assertNotIn("note_live_sender", relay_delivery)
+        custody = section(core, "if payload.starts_with(CUSTODY_DELIVER_PREFIX.as_bytes())",
+                          "if payload.starts_with(CUSTODY_DROP_PREFIX.as_bytes())")
+        self.assertNotIn("note_live_sender", custody)
+
+        # Текущее состояние видно в отчёте: сколько соседей телефон считает
+        # в сети прямо сейчас, а не только накопленные счётчики.
+        strings = read(APP, "data/diagnostics/PresenceReportStrings.kt")
+        for marker in ('PRESENCE_ONLINE_NOW = "presence_online_now"',
+                       'PRESENCE_TRACKED_PEERS = "presence_tracked_peers"',
+                       'PRESENCE_LAST_SWEEP_AT_MS = "presence_last_sweep_at_ms"'):
+            self.assertIn(marker, strings)
+        recovery = read(APP, "service/PresenceRecovery.kt")
+        self.assertIn("TransferDiagnostics.gauge(PresenceReportStrings.PRESENCE_ONLINE_NOW", recovery)
+        self.assertIn("TransferDiagnostics.gauge(PresenceReportStrings.PRESENCE_LAST_SWEEP_AT_MS, now)", recovery)
+        self.assertIn("presence_online_now", read(APP, "data/diagnostics/TransferDiagnostics.kt") + strings)
+
     def test_audience_tracks_fingerprints_and_failed_seed_retries(self):
         service = read(APP, "service/CoreServerService.kt")
         self.assertIn("PresenceAudienceObserver.start(", service)

@@ -1943,6 +1943,11 @@ impl P2PCore {
                 text,
                 timestamp: crate::storage::models::now_ms(),
             });
+            // Он только что написал по своему живому соединению: отметка
+            // «в сети» обязана появиться, даже если presence-кадр не дошёл.
+            presence_observation::note_live_sender(
+                &events, &network, &sender_id, "", crate::storage::models::now_ms(),
+            );
             Some(sender_id)
         } else {
             tracing::warn!("QUIC: invalid payload format ({} bytes)", payload.len());
@@ -2170,7 +2175,8 @@ impl P2PCore {
 
     async fn run_tcp_listener(
         events: Arc<EventBus>,
-        _network: Arc<NetworkManagerFfi>,
+        // Живой кадр по TCP — тоже свидетельство, что отправитель в сети.
+        network: Arc<NetworkManagerFfi>,
         port: u16,
     ) {
         // Dual-stack с откатом на IPv4: в сети только-v6 слушатель истории на
@@ -2198,7 +2204,9 @@ impl P2PCore {
                 Ok((mut stream, peer)) => {
                     tracing::info!("TCP incoming from {}", peer);
                     let ev = Arc::clone(&events);
+                    let net = Arc::clone(&network);
                     tokio::spawn(async move {
+                        let network = net;
                         let mut buf = vec![0u8; 65536];
                         loop {
                             match stream.read(&mut buf).await {
@@ -2218,6 +2226,8 @@ impl P2PCore {
                                             text: parts[3].to_string(),
                                             timestamp: ts,
                                         });
+                                        // Живой путь: отправитель здесь и сейчас.
+                                        presence_observation::note_live_sender(&ev, &network, parts[0], "", ts);
                                     }
                                     let _ = stream.write_all(b"ACK").await;
                                 }
@@ -4227,6 +4237,12 @@ impl P2PCore {
                                     text: text.to_string(),
                                     timestamp: ts,
                                 });
+                                // Публикация в нашу тему приходит прямо сейчас,
+                                // а не из чужой пересылки: отправитель жив.
+                                // Раньше here ставилась только «своим», и друг,
+                                // написавший через брокер, выглядел «не в сети»
+                                // (владелец 2026-11-17).
+                                presence_observation::note_live_sender(&events, &network, sender_id, "", ts);
                                 tracing::info!("MQTT: MessageReceived EMITTED to EventBus");
                             }
                         }
