@@ -205,14 +205,17 @@ internal fun StringBuilder.appendPush(facts: DiagnosticsFacts) {
             "(принятие заявки — не доставка)",
     )
     val serviceState = when (push.endpointReachable) {
-        true -> "доступна (/health ответил)"
-        false -> "недоступна (сеть или фильтрация)"
-        null -> "не проверялась"
+        true -> "отвечала"
+        // Недоступность отсюда больше не выводится: отдельная проба /health шла
+        // мимо транспорта приложения (и мимо прокси) и объявляла службу
+        // недоступной рядом с только что принятой регистрацией.
+        false -> "не отвечала"
+        null -> "ещё не отвечала в этом запуске"
     }
-    // Без отметки времени старая неудачная проба читается как текущее состояние
-    // службы и перечёркивает успешную регистрацию, которая прошла позже неё.
+    // Отметка времени обязательна: без неё прошлый ответ читается как текущее
+    // состояние службы.
     val probedAt = if (push.endpointCheckedAtMs > 0L) {
-        " · проверено ${agoOrNever(facts.createdAtMs, push.endpointCheckedAtMs)}"
+        " · последний ответ ${agoOrNever(facts.createdAtMs, push.endpointCheckedAtMs)}"
     } else {
         ""
     }

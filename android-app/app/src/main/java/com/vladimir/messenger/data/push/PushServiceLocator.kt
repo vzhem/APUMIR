@@ -116,26 +116,6 @@ internal object PushServiceLocator {
      * phone reaches the service and still receives nothing", which is the
      * difference between a network fault and a delivery fault on the phone.
      */
-    private fun healthReachable(endpoint: PushEndpoint): Boolean = try {
-        val url = java.net.URI("https://${endpoint.host()}/health").toURL()
-        val connection = (url.openConnection() as java.net.HttpURLConnection).apply {
-            connectTimeout = 5_000
-            readTimeout = 5_000
-            requestMethod = "GET"
-            // The service answers only a normal client user-agent; a default
-            // Java one is refused, which would look like an outage.
-            setRequestProperty("user-agent", "apu-android-diagnostics/1")
-            instanceFollowRedirects = false
-        }
-        try {
-            connection.responseCode == 200
-        } finally {
-            connection.disconnect()
-        }
-    } catch (_: Exception) {
-        false
-    }
-
     /**
      * One health probe for the report, refreshed at a moment when the network is
      * demonstrably working (a registration just went through).
@@ -145,17 +125,27 @@ internal object PushServiceLocator {
      * process lifetime as "the service is unreachable".
      */
     fun probeEndpoint(context: Context) {
+        // Kept as the single entry point for "record what the service looks like",
+        // but it no longer touches the network.
+        //
+        // A bare `GET /health` proved to be a *false* alarm, not evidence: the app
+        // reaches the service through its own transport (and through the system
+        // proxy tunnel when one is configured), while `HttpURLConnection` opens a
+        // direct socket the phone may not have. Reports showed "служба=недоступна"
+        // next to a registration accepted two minutes earlier, which sends the
+        // reader hunting an outage that does not exist.
+        //
+        // Reachability is now recorded only from real answers: a confirmed
+        // registration, an accepted mailbox write, an accepted wake. Silence
+        // means "no answer yet", which is exactly what the report should say.
         val app = context.applicationContext
         if (!enabled(app)) return
-        val approved = endpoint(app) ?: return
         try {
             PushDiagnostics.install(app)
-            PushDiagnostics.noteEndpoint(healthReachable(approved))
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            // A probe is evidence about the network, never a delivery failure.
-            diag("Health probe failed")
+            diag("Push diagnostics unavailable")
         }
     }
 
@@ -510,12 +500,6 @@ internal object PushServiceLocator {
                     // the test report showed exactly that silence.
                     if (on) {
                         com.vladimir.messenger.worker.PushTokenWorker.enqueue(app)
-                        // Local-only reachability probe: the endpoint is a fixed
-                        // build fact and /health needs no credential. A failed
-                        // probe is evidence about the network, never about push.
-                        endpoint(app)?.let { approved ->
-                            PushDiagnostics.noteEndpoint(healthReachable(approved))
-                        }
                     }
                 } catch (_: Exception) {
                     diag("Push receive enable failed")
