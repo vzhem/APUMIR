@@ -1690,4 +1690,40 @@ class DiagnosticsReportTest {
         assertFalse(report.contains("null"))
     }
 
+    @Test fun anAskedForEpochIsNotTheSameAsNeverWritten() {
+        // Владелец 2026-11-18: server67 не будился, и отчёт говорил только
+        // «эпох собеседников=0». Этого мало: «собеседник ещё не писал» чинится
+        // перепиской, а «эпоху просили, ответа нет» — обновлением того телефона.
+        // Третий случай — у пары нет строки чата, и обычный путь ядра (тот, что
+        // переживает заморозку) недоступен.
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = true,
+            endpointConfigured = true,
+            registeredRoutes = 8,
+            phase = PushPhase.REGISTERED,
+            lastRegisterAtMs = 1_699_998_800_000L,
+            signalsReceived = 2,
+            signalsRejected = 0,
+            lastSignalAtMs = 1_699_999_000_000L,
+            wakeAttempts = 3066,
+            lastWake = PushWakeOutcome.NO_PEER_EPOCH,
+            lastWakeAtMs = 1_699_998_900_000L,
+            lastWakeDetail = "epoch_missing_requested",
+            peerEpochs = 0,
+            endpointReachable = true,
+            endpointCheckedAtMs = 1_699_999_000_000L,
+            epochOfferNoChat = 4,
+            epochRequests = 2,
+            lastEpochRequestAtMs = 1_699_998_000_000L,
+            inboxPending = "?",
+            lastError = "-",
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        assertTrue(report.contains("собеседник не ответил"))
+        assertTrue(report.contains("просьб_об_эпохе=2"))
+        assertTrue(report.contains("не_ушла_без_чата=4"))
+    }
+
 }

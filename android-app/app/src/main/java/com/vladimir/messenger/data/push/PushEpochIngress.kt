@@ -45,7 +45,16 @@ internal object PushEpochIngress {
                     PushEpochImport.Outcome.UNAVAILABLE -> "unavailable"
                 },
             )
-            outcome == PushEpochImport.Outcome.APPLIED || outcome == PushEpochImport.Outcome.DUPLICATE
+            val accepted = outcome == PushEpochImport.Outcome.APPLIED ||
+                outcome == PushEpochImport.Outcome.DUPLICATE
+            // В ответ на его эпоху отправляем свою: без этого телефон, который
+            // только слушает, остаётся небудимым — у нас есть КУДА будить, а у
+            // него нашего адреса нет. Одного направления теперь достаточно,
+            // чтобы обмен состоялся (владелец 2026-11-18).
+            if (accepted) {
+                com.vladimir.messenger.service.announceOwnEpoch(app, senderId)
+            }
+            accepted
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {

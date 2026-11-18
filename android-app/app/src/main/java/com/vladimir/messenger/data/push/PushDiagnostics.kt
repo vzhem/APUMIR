@@ -130,6 +130,24 @@ object PushDiagnostics {
     )
 
     /**
+     * Объявление эпохи не ушло: у пары ещё нет строки чата, а обычный путь ядра
+     * (единственный, который переживает заморозку) без неё недоступен.
+     */
+    fun noteEpochNoChat() = write("epochOfferNoChat=+1")
+
+    /**
+     * Мы попросили собеседника прислать его эпоху.
+     *
+     * Отдельный счётчик, потому что «эпохи нет» и «эпоху просили, ответа нет» —
+     * разные диагнозы: первое лечится перепиской, второе — обычно тем, что на
+     * том телефоне старая сборка.
+     */
+    fun noteEpochRequest() = write(
+        "epochRequests=+1",
+        "epochRequestAt=${System.currentTimeMillis()}",
+    )
+
+    /**
      * Why a wake for this peer could not even be addressed.
      *
      * `not_registered` covered a peer without a pinned key, an unprepared local
@@ -195,6 +213,9 @@ object PushDiagnostics {
             epochImportApplied = number("epochImportApplied"),
             epochImportRejected = number("epochImportRejected"),
             epochImportReason = text("lastEpochImport") ?: "-",
+            epochOfferNoChat = number("epochOfferNoChat"),
+            epochRequests = number("epochRequests"),
+            lastEpochRequestAtMs = number("epochRequestAt"),
             lastWakeDetail = text("lastWakeDetail") ?: "-",
         )
     }
@@ -260,7 +281,7 @@ object PushDiagnostics {
     private val KEY_IS_NUMBER = setOf(
         "lastRegisterAt", "lastSignalAt", "lastWakeAt",
         "inProcessWakeAt", "workerWakeAt",
-        "endpointAt", "lastWakeAcceptedAt",
+        "endpointAt", "lastWakeAcceptedAt", "epochRequestAt",
     )
 
     /**

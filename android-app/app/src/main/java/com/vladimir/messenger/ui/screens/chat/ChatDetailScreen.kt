@@ -91,6 +91,7 @@ fun ChatDetailScreen(
     viewModel: ChatDetailViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    com.vladimir.messenger.ui.components.TrackOpenChat(chatId)  // этот чат читают: плашку не мигать
     var showWallpaper by remember { mutableStateOf(false) }
     if (showWallpaper) com.vladimir.messenger.ui.components.ConversationWallpaperDialog(
         scope = "direct:$chatId", onDismiss = { showWallpaper = false })

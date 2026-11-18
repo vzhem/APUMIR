@@ -124,6 +124,15 @@ data class PushSnapshot(
     val epochImportRejected: Long = 0L,
     /** Фиксированное имя последней причины отказа приёма; `-` — не было. */
     val epochImportReason: String = "-",
+    /**
+     * Сколько раз объявление эпохи не ушло из-за отсутствия строки чата: обычный
+     * путь ядра (единственный, который переживает заморозку) без неё недоступен.
+     */
+    val epochOfferNoChat: Long = 0L,
+    /** Сколько раз мы просили собеседника прислать его эпоху. */
+    val epochRequests: Long = 0L,
+    /** Когда просили последний раз; 0 — не просили. */
+    val lastEpochRequestAtMs: Long = 0L,
     /** Почему доверие к собеседнику не сложилось в последней попытке побудки. */
     val lastWakeDetail: String = "-",
 )
@@ -235,6 +244,17 @@ internal fun StringBuilder.appendPush(facts: DiagnosticsFacts) {
     if (push.epochImportApplied == 0L && push.epochImportRejected > 0L) appendLine(
         "  ↳ анонсы доходили, но не прошли проверку: доверие или формат",
     )
+    if (push.epochOfferNoChat > 0L) appendLine(
+        "эпоха_своя: не_ушла_без_чата=${push.epochOfferNoChat} " +
+            "(у пары нет строки чата — обычный путь ядра недоступен, остаётся прямой кадр)",
+    )
+    // Просьба об эпохе — отдельный факт: «эпохи нет» и «просили, ответа нет»
+    // чинятся по-разному, и второе почти всегда значит старую сборку на том
+    // телефоне (владелец 2026-11-18).
+    if (push.epochRequests > 0L) appendLine(
+        "просьб_об_эпохе=${push.epochRequests} " +
+            "(последняя ${agoOrNever(facts.createdAtMs, push.lastEpochRequestAtMs)})",
+    )
     appendLine("ящик_пробуждения=${push.inboxPending}")
     appendLine("последняя_ошибка=${push.lastError}")
     appendLine()
@@ -281,6 +301,12 @@ internal fun trustView(tag: String): String = when (tag) {
     "epoch_malformed" -> "эпоха собеседника неполная"
     "no_material" -> "из эпохи не выводится маршрут"
     "signal_not_registered" -> "маршрут не зарегистрирован в бюджете пробуждений"
+    // Эпохи нет, но мы уже просили: ждать от собеседника нечего, пока он не
+    // обновится или не запустится — это и есть ответ на «почему server67 не
+    // будится» (владелец 2026-11-18).
+    "epoch_missing_requested" ->
+        "эпоху просили — собеседник не ответил (вероятно, старая сборка или приложение не запускалось)"
+    "no_chat" -> "у пары нет открытой переписки: обычный путь недоступен"
     else -> "-"
 }
 

@@ -139,12 +139,12 @@ class CoreServerService : Service() {
                 if (id != peer) chatRepository.updateContactOnlineStatus(id, online)
             },
             onOnline = { peer, seen ->
-                // Start immediately under PresenceRecovery's lock: the router's
-                // in-memory mark happens before a competing offline transition.
+                // Start immediately under PresenceRecovery's lock: in-memory mark wins races.
                 serviceScope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
                     try { fileTransferRouter.markOnline(peer, seen) }
                     catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                     catch (error: Exception) { Log.w(TAG, "custody presence failed", error) }
+                    announceOwnEpoch(applicationContext, peer)
                 }
             },
             onOffline = { peer, expired ->

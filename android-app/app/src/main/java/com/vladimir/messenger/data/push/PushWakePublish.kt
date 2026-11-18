@@ -72,6 +72,11 @@ internal object PushWakePublish {
         PushDiagnostics.install(app)
         install(app)
         val now = System.currentTimeMillis()
+        // Собеседник ещё не прислал эпоху: пробовать снова бессмысленно, пока он
+        // не ответит на просьбу. Раньше это повторялось каждые 15 секунд и
+        // давало тысячи пустых попыток (владелец 2026-11-18).
+        val epochWaitUntil = noEpochUntilMs[peerId]
+        if (epochWaitUntil != null && epochWaitUntil > now) return Outcome.WithinBudget
         val previous = lastAttemptAtMs[peerId]
         if (previous != null && now >= previous && now - previous < MIN_ATTEMPT_INTERVAL_MS) {
             return Outcome.WithinBudget
@@ -92,6 +97,19 @@ internal object PushWakePublish {
                 Outcome.Skipped -> PushWakeOutcome.SKIPPED
             },
         )
+        if (outcome == Outcome.NoPeerEpoch && attempted.detail == "epoch_missing") {
+            // Нечего будить: адреса нет. Один раз просим эпоху и уходим в редкий
+            // фон — вместо пустого повтора каждые 15 секунд.
+            noEpochUntilMs[peerId] = now + NO_EPOCH_RETRY_MS
+            runCatching { PushEpochPublish.requestEpoch(app, peerId) }
+                .onFailure { diag("Epoch request failed") }
+            PushDiagnostics.noteEpochRequest()
+            // Подпись в отчёте: «просили и не дождались» — это не то же самое,
+            // что «собеседник ещё не писал».
+            PushDiagnostics.noteWakeDetail("epoch_missing_requested")
+        } else if (outcome != Outcome.NoPeerEpoch) {
+            noEpochUntilMs.remove(peerId)
+        }
         if (outcome == Outcome.Accepted) {
             PushDiagnostics.noteWakeAccepted()
             // A 202 proves the endpoint answers; the startup /health probe can be
@@ -255,6 +273,18 @@ internal object PushWakePublish {
 
     /** In-memory throttle; never persisted, so a restart retries immediately. */
     private val lastAttemptAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /**
+     * До какого времени пробовать бессмысленно: у собеседника нет эпохи.
+     *
+     * Десять минут — компромисс: эпоха появляется только после того, как на том
+     * телефоне запустится сборка, умеющая их присылать, а это событие не
+     * секундное. Просьба уходит отдельно, один раз, поэтому пауза ничего не
+     * теряет: как только эпоха придёт, следующая попытка (в том числе из
+     * отправки сообщения) пойдёт сразу.
+     */
+    private val noEpochUntilMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private const val NO_EPOCH_RETRY_MS = 10 * 60_000L
     /**
      * Между попытками — 15 секунд.
      *

@@ -21,3 +21,24 @@ internal fun announceUnroutedIncoming(context: Context, senderId: String): Boole
         .noteCorrespondentIfEnabled(context, senderId)
     return false
 }
+
+/**
+ * Сосед показался в сети — сообщаем ему свою эпоху, не дожидаясь письма.
+ *
+ * Владелец 2026-11-18: «server67 сложно достучаться». Причина была замкнутой:
+ * эпоха уходила только по факту переписки, значит телефон, который замёрз ДО
+ * получения нашего письма, никогда не узнавал нашу эпоху — и разбудить его было
+ * нечем. Теперь достаточно любого свидетельства, что он в сети (presence-кадр,
+ * сообщение, квитанция), и того же — когда мы приняли ЕГО эпоху: в ответ уходит
+ * наша, так что одного направления хватает, чтобы круг разорвался.
+ *
+ * Ограничитель внутри `PushEpochPublish`: не чаще раза в пять минут на
+ * собеседника, поэтому «показался в сети» не превращается в поток кадров.
+ */
+internal fun announceOwnEpoch(context: Context, peerId: String) {
+    // Хранитель (`CUSTD…`) и транзитные метки (`relay|…`) — не собеседники:
+    // эпоха адресована конкретному узлу, а таким «показался в сети» значит
+    // только то, что через них прошёл чужой кадр.
+    if (peerId.length < 16 || peerId.startsWith("CUSTD") || peerId.startsWith("relay")) return
+    com.vladimir.messenger.data.push.PushEpochPublish.noteCorrespondentIfEnabled(context, peerId)
+}

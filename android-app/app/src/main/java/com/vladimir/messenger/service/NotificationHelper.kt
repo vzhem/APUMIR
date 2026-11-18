@@ -97,6 +97,17 @@ class NotificationHelper @Inject constructor(
             }
         }
 
+        // Человек читает именно этот чат и приложение на экране: плашка только
+        // гасила бы и подсвечивала экран уже прочитанным сообщением.
+        // В фоне правило не действует — там уведомление обязательно.
+        if (com.vladimir.messenger.data.notification.OpenChatGate.isReading(
+                chatId, DeliveryCadence.isForeground(),
+            )
+        ) {
+            android.util.Log.i("NotificationHelper", "Message notification suppressed: chat is open")
+            return IncomingNotificationPost.SUPPRESSED
+        }
+
         val nowMs = System.currentTimeMillis()
         val group = groupDao.getGroupById(chatId)
         if (isMuted(chatId, topicId, group, nowMs)) {

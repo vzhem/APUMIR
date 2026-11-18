@@ -158,6 +158,10 @@ internal object PushEpochPublish {
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: Exception) {
+        // Никакой строки чата — значит обычный путь недоступен, и останется
+        // только прямой кадр. Считаем это отдельно: иначе «эпоха не дошла»
+        // выглядит одинаково и при отсутствии чата, и при мёртвом канале.
+        PushDiagnostics.noteEpochNoChat()
         diag("Epoch announce chat lookup failed")
         null
     }
@@ -243,6 +247,21 @@ internal object PushEpochPublish {
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             noteCorrespondent(app, peerId)
         }
+    }
+
+    /**
+     * Просим собеседника прислать эпоху — тем же кадром, что и обычное
+     * объявление, но вне пятиминутного расписания.
+     *
+     * Зачем отдельный вход. Пока эпохи нет, пробуждение некуда отправить, и
+     * каждые 15 секунд повторялась одна и та же пустая попытка. Вместо этого
+     * телефон один раз просит (наша эпоха + новая сборка собеседника отвечает
+     * своей), а повторные попытки уходят в редкий фон.
+     */
+    suspend fun requestEpoch(context: Context, peerId: String) {
+        if (peerId.isBlank()) return
+        lastOfferAtMs.remove(peerId)
+        noteCorrespondent(context, peerId)
     }
 
     private fun diag(message: String) {
