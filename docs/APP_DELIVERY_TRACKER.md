@@ -4938,3 +4938,10 @@ Gradle-прогоне (`Unit tests (JVM)` — success) он собирается
 функции того же пакета (объявленные в другом файле и не в списке компиляции);
 вызовы функций, объявленных в том же файле (`private fun diag()` рядом), не
 считаются. `KeyMismatchReport.kt` добавлен в список.
+
+Итог по CI на коммите `3df9342`: зелёные все — `Core compile check` 44346101065
+(впервые: до этой работы шаг «local-first chat history» краснел на любой ветке),
+`Build Release APK` 44346083529, `Unit tests (JVM)` 44346083493 и 44346100770,
+`Android storage and navigation tests` 44346083239, `Android lint` 44346100728,
+`Remote push prototype tests` 44346100701, `Firebase` preflight 44346083493-серия.
+Релиз по-прежнему не публиковался (тег не ставился).
