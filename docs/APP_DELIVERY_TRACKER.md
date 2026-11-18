@@ -4923,3 +4923,10 @@ JDK): `check-chat-history.sh` компилирует `DiagnosticsReport.kt` и �
 (`PushSnapshot`/`PushPhase`). Тест падал на `unresolved reference`, хотя в
 Gradle-прогоне (`Unit tests (JVM)` — success) он собирается. Оба файла
 добавлены в список компиляции; они чистые (ни Android, ни R).
+
+Четвёртая (прогон `44342260027`): харнесс `check-chat-history-harness.py` искал
+ссылки на классы проекта и в комментариях, поэтому требовал компилировать
+`service/PresenceRecovery.kt` и `UpdateDiagnosticsStore.kt` — они упомянуты
+только в пояснениях `PresenceReportStrings.kt` и тянут за собой пол-приложения.
+Теперь комментарии из сканирования исключены (Kotlin их не компилирует);
+список компиляции остался ручным и минимальным.

@@ -80,7 +80,13 @@ class HistoryHarnessIsComplete(unittest.TestCase):
         resolvable = declarations()
         missing = set()
         for path in sorted(files):
-            text = path.read_text(errors="replace")
+            # Комментарии не компилируются: полное имя класса в пояснении
+            # («пишутся через com.vladimir.messenger.X.count») не создаёт
+            # ссылки и не может дать unresolved reference. Без этой чистки
+            # проверка требовала компилировать файлы, упомянутые только в
+            # пояснениях, и падала на собственных комментариях.
+            text = re.sub(r"/\*.*?\*/", "", path.read_text(errors="replace"), flags=re.S)
+            text = re.sub(r"//[^\n]*", "", text)
             for match in re.finditer(r"\bcom\.vladimir\.messenger(?:\.[a-z_]\w*)*\.[A-Z]\w*", text):
                 fqn = match.group(0)
                 target = resolvable.get(fqn)
