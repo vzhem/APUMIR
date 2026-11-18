@@ -35,8 +35,8 @@ internal object PushEpochIngress {
             // "the peer offered and we refused" look identical in a report that
             // only counts stored epochs.
             PushDiagnostics.noteEpochImport(
-                applied = outcome == PushEpochImport.Outcome.APPLIED ||
-                    outcome == PushEpochImport.Outcome.DUPLICATE,
+                applied = outcome == PushEpochImport.Outcome.APPLIED,
+                duplicate = outcome == PushEpochImport.Outcome.DUPLICATE,
                 reason = when (outcome) {
                     PushEpochImport.Outcome.APPLIED -> "applied"
                     PushEpochImport.Outcome.DUPLICATE -> "duplicate"
@@ -51,7 +51,12 @@ internal object PushEpochIngress {
             // только слушает, остаётся небудимым — у нас есть КУДА будить, а у
             // него нашего адреса нет. Одного направления теперь достаточно,
             // чтобы обмен состоялся (владелец 2026-11-18).
-            if (accepted) {
+            //
+            // Отвечаем только на НОВУЮ эпоху. На повтор отвечать нельзя: два
+            // телефона начинают отвечать друг другу на каждый кадр, и в отчёте
+            // 536 это видно как «принято=105» при пяти собеседниках — вместе с
+            // очередью из своих кадров, которую никто не подтверждал.
+            if (outcome == PushEpochImport.Outcome.APPLIED) {
                 com.vladimir.messenger.service.announceOwnEpoch(app, senderId)
             }
             accepted

@@ -1726,4 +1726,37 @@ class DiagnosticsReportTest {
         assertTrue(report.contains("не_ушла_без_чата=4"))
     }
 
+    @Test fun aRepeatedEpochIsNotANewExchange() {
+        // Отчёт 536: «эпоха_чужая: принято=105» при пяти собеседниках. Считать
+        // повтор принятием значит показывать сотню обменов, которых не было, и
+        // прятать настоящий диагноз — собеседник жив, но нового адреса у него нет.
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = true,
+            endpointConfigured = true,
+            registeredRoutes = 8,
+            phase = PushPhase.REGISTERED,
+            lastRegisterAtMs = 1_699_998_800_000L,
+            signalsReceived = 10,
+            signalsRejected = 0,
+            lastSignalAtMs = 1_699_999_000_000L,
+            wakeAttempts = 3443,
+            lastWake = PushWakeOutcome.NO_PEER_EPOCH,
+            lastWakeAtMs = 1_699_998_900_000L,
+            peerEpochs = 5,
+            endpointReachable = true,
+            endpointCheckedAtMs = 1_699_999_000_000L,
+            epochImportApplied = 5,
+            epochImportDuplicate = 100,
+            epochImportRejected = 0,
+            inboxPending = "?",
+            lastError = "-",
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        assertTrue(report.contains("принято=5"))
+        assertTrue(report.contains("повтор=100"))
+        assertTrue(report.contains("та же эпоха, что уже сохранена"))
+    }
+
 }

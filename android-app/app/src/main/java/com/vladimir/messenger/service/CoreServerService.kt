@@ -2249,7 +2249,7 @@ class CoreServerService : Service() {
                 val chatId = event.chatId ?: return
                 val messageId = event.messageId ?: return
                 val rawText = event.text ?: return
-                if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, rawText, senderId, rawText)) return
+                if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, rawText, senderId, rawText)) return acknowledgeEpochPacket(serviceScope, messageId, senderId)
                 val timestamp = ts
 
                 // Отправитель обязан быть узлом (pk_…): ядро не проверяет первое поле, и

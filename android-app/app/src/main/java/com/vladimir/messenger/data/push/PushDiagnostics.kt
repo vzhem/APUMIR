@@ -123,8 +123,15 @@ object PushDiagnostics {
     )
 
     /** What happened to a correspondent's announcement on this phone. */
-    fun noteEpochImport(applied: Boolean, reason: String) = write(
-        if (applied) "epochImportApplied=+1" else "epochImportRejected=+1",
+    fun noteEpochImport(applied: Boolean, reason: String, duplicate: Boolean = false) = write(
+        when {
+            // Повтор уже принятой эпохи — не новое принятие. В отчёте 536 стояло
+            // «принято=105» при пяти собеседниках: считать их одним числом значит
+            // показывать обмен, которого не было (владелец 2026-11-18).
+            duplicate -> "epochImportDuplicate=+1"
+            applied -> "epochImportApplied=+1"
+            else -> "epochImportRejected=+1"
+        },
         "lastEpochImport=${reason.take(24)}",
         "epochImportAt=${System.currentTimeMillis()}",
     )
@@ -213,6 +220,7 @@ object PushDiagnostics {
             epochImportApplied = number("epochImportApplied"),
             epochImportRejected = number("epochImportRejected"),
             epochImportReason = text("lastEpochImport") ?: "-",
+            epochImportDuplicate = number("epochImportDuplicate"),
             epochOfferNoChat = number("epochOfferNoChat"),
             epochRequests = number("epochRequests"),
             lastEpochRequestAtMs = number("epochRequestAt"),

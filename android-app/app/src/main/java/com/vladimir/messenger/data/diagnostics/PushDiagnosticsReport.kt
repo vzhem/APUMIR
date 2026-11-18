@@ -121,6 +121,8 @@ data class PushSnapshot(
     val epochOfferBlockReason: String = "-",
     /** Что стало с анонсами собеседников при приёме. */
     val epochImportApplied: Long = 0L,
+    /** Повтор уже принятой эпохи: обмен был, нового адреса не было. */
+    val epochImportDuplicate: Long = 0L,
     val epochImportRejected: Long = 0L,
     /** Фиксированное имя последней причины отказа приёма; `-` — не было. */
     val epochImportReason: String = "-",
@@ -197,7 +199,9 @@ internal fun StringBuilder.appendPush(facts: DiagnosticsFacts) {
         },
     )
     if (push.workerWakeAtMs > 0L) {
-        appendLine("фоновая_задача_пробуждения=${agoOrNever(facts.createdAtMs, push.workerWakeAtMs)} назад")
+        // agoOrNever уже говорит «назад»: второй «назад» давал
+        // «9 ч 58 мин назад назад» в отчёте 536.
+        appendLine("фоновая_задача_пробуждения=${agoOrNever(facts.createdAtMs, push.workerWakeAtMs)}")
     }
     // Причина рядом с исходом: not_registered у собеседника без закреплённого
     // ключа и not_registered при неготовом своём ключе обмена — разные поломки.
@@ -240,6 +244,12 @@ internal fun StringBuilder.appendPush(facts: DiagnosticsFacts) {
     appendLine(
         "эпоха_чужая: принято=${push.epochImportApplied} отклонено=${push.epochImportRejected} " +
             "(${epochImportView(push.epochImportReason)})",
+    )
+    // «Принято=105» при пяти собеседниках читалось как сотня обменов. Повтор
+    // печатается отдельно: он доказывает, что собеседник жив и шлёт, но нового
+    // адреса у него нет (владелец 2026-11-18).
+    if (push.epochImportDuplicate > 0L) appendLine(
+        "эпоха_чужая: повтор=${push.epochImportDuplicate} (та же эпоха, что уже сохранена)",
     )
     if (push.epochImportApplied == 0L && push.epochImportRejected > 0L) appendLine(
         "  ↳ анонсы доходили, но не прошли проверку: доверие или формат",
