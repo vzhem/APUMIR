@@ -65,10 +65,6 @@ import com.vladimir.messenger.ui.components.ApuVipBadge
 import com.vladimir.messenger.ui.components.apuVipNameStyle
 import com.vladimir.messenger.ui.components.RankMedal
 import com.vladimir.messenger.data.group.GroupRole
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Date
-import java.util.Locale
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -93,6 +89,7 @@ import com.vladimir.messenger.ui.components.BubbleKind
 import com.vladimir.messenger.ui.components.BubbleMenuAction
 import com.vladimir.messenger.ui.components.BubbleOverflowMenu
 import com.vladimir.messenger.ui.components.ContactCard
+import com.vladimir.messenger.ui.components.formatGroupRowTime
 import com.vladimir.messenger.ui.components.HintBubble
 import com.vladimir.messenger.ui.components.HintBubbleMutedColor
 import com.vladimir.messenger.ui.components.HintBubbleTextColor
@@ -1638,6 +1635,8 @@ private fun GroupCard(
     val draftText = drafts[
         com.vladimir.messenger.data.draft.DraftStore.groupKey(group.id)
     ].orEmpty()
+    // Владелец 2026-11-18: удержание на группе или канале открывает меню.
+    var showMenu by remember { mutableStateOf(false) }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -1648,7 +1647,11 @@ private fun GroupCard(
             .apuBubbleSurface()
             .apuPremiumThread(inset = 16.dp)
             .apuPremiumGloss(intensity = 0.45f, topFraction = 0.55f)
-            .clickable(onClick = onClick)
+            .apuRowPress(
+                onClick = onClick,
+                menuActions = menuActions,
+                onMenuRequest = { showMenu = true },
+            )
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1728,7 +1731,7 @@ private fun GroupCard(
                         // Раунд 184 (аудит-5): кэш вместо нового SimpleDateFormat
                         // на каждую перерисовку строки группы.
                         text = remember(group.timeMs, System.currentTimeMillis() / 3_600_000L) {
-                            formatGroupTime(group.timeMs)
+                            formatGroupRowTime(group.timeMs)
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFF5A6472),
@@ -1747,22 +1750,11 @@ private fun GroupCard(
             ApuNotificationBadge(group.unreadCount)
         }
 
-        BubbleOverflowMenu(actions = menuActions)
-    }
-}
-
-/** Время строки группы: сегодня - часы и минуты, раньше - дата. */
-private fun formatGroupTime(timestamp: Long): String {
-    val today = Calendar.getInstance().apply {
-        set(Calendar.HOUR_OF_DAY, 0)
-        set(Calendar.MINUTE, 0)
-        set(Calendar.SECOND, 0)
-        set(Calendar.MILLISECOND, 0)
-    }
-    return if (timestamp > today.timeInMillis) {
-        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timestamp))
-    } else {
-        SimpleDateFormat("dd.MM", Locale.getDefault()).format(Date(timestamp))
+        BubbleOverflowMenu(
+            actions = menuActions,
+            expanded = showMenu,
+            onExpandedChange = { showMenu = it },
+        )
     }
 }
 

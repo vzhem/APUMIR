@@ -547,9 +547,14 @@ private fun SavedItemBubble(
             item.fileName.startsWith(com.vladimir.messenger.data.file.STICKER_FILE_PREFIX)
         )
 
+    // Владелец 2026-11-18 (скрин «Избранного»): «В избранном есть текст без
+    // пузырей». Прозрачным пузырь был только у сохранённых стикеров, и их
+    // подпись (откуда, имя файла, размер, время, действия) лежала прямо на
+    // обоях — без подложки и рамки. Теперь пузырь у всех записей: сама
+    // картинка по-прежнему парит внутри (раунд 169), а текст читается на
+    // светлой поверхности. Заодно и «⋯» у стикера получает свою карточку.
     ApuBubble(
         modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
-        transparent = isStickerItem,
     ) {
         if (item.sourceTitle.isNotBlank()) {
             Text(
