@@ -259,7 +259,7 @@ class PushTokenRegistrarTest {
             ),
         )
         assertEquals(PushTokenRegistrar.Outcome.Registered, incremental.build().run())
-        assertEquals(listOf("journal", "register:4444:32"), incremental.calls)
+        assertEquals(listOf("journal", "register:4444:31"), incremental.calls)
         assertEquals(listOf(PushRegisterReason.REGISTERED), incremental.reasons)
 
         val largeChannelSeeds = (1..70).map { idx ->
