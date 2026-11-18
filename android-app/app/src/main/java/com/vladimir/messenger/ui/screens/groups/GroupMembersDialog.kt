@@ -34,6 +34,7 @@ import com.vladimir.messenger.R
 import com.vladimir.messenger.data.group.GroupRole
 import com.vladimir.messenger.data.group.MemberSummary
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuPremiumContentButton
 import com.vladimir.messenger.ui.components.ApuSearchField
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
@@ -101,7 +102,9 @@ internal fun GroupMembersDialog(
                                 )
                                 Spacer(Modifier.width(10.dp))
                                 Column {
-                                    val defaultMemberNameColor = MaterialTheme.colorScheme.onSurface
+                                    // Светлая подложка пузыря в любой теме: чернила
+                                    // берём у неё, а не у ночной палитры (2026-11-18).
+                                    val defaultMemberNameColor = ApuBubbleTextColor
                                     val memberNameColor = remember(member.nodeId, colorRevision, defaultMemberNameColor) {
                                         TextColorPalette.colorOr(
                                             TextColorSettingsStore.peerNameColor(colorContext, member.nodeId),

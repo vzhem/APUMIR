@@ -35,6 +35,7 @@ import com.vladimir.messenger.data.textcolor.TextColorPalette
 import com.vladimir.messenger.data.textcolor.TextColorSettingsStore
 import com.vladimir.messenger.ui.components.ApuBubble
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuPremiumButton
 import com.vladimir.messenger.ui.components.ApuPremiumSwitch
 import com.vladimir.messenger.ui.components.ApuSearchField
@@ -126,7 +127,13 @@ internal fun MemberRow(
     val textColorRevision by TextColorSettingsStore.revision.collectAsState()
     val textColorContext = LocalContext.current
     LaunchedEffect(Unit) { TextColorSettingsStore.initialize(textColorContext) }
-    val defaultMemberNameColor = if (vip) Color(0xFF8A5F00) else MaterialTheme.colorScheme.onSurface
+    // Владелец 2026-11-18 (тёмная тема, «Участники»): имена VIP читались, а у
+    // обычных участников имени не было вовсе. Строка лежит в `ApuBubble`, а он
+    // светло-слоновый в любой теме, тогда как `colorScheme.onSurface` ночью
+    // почти белый - белое на белом. Поэтому по умолчанию берём чернила самого
+    // пузыря (`ApuBubbleTextColor`, он же `LocalContentColor`) - они одинаковы
+    // днём и ночью. Цвет, выбранный пользователем, по-прежнему главнее.
+    val defaultMemberNameColor = if (vip) Color(0xFF8A5F00) else ApuBubbleTextColor
     val memberNameColor = remember(member.nodeId, textColorRevision, defaultMemberNameColor) {
         TextColorPalette.colorOr(
             TextColorSettingsStore.peerNameColor(textColorContext, member.nodeId),

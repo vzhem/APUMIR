@@ -230,6 +230,7 @@ if python3 scripts/ci/check-chat-startup.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-online-helper.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-saved-input.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-chat-longpress.py >>"$LOG" 2>&1 && \
+   python3 scripts/ci/check-bubble-ink.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-peer-rank.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-rank-entitlements.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-feature-packs.py >>"$LOG" 2>&1 && \
