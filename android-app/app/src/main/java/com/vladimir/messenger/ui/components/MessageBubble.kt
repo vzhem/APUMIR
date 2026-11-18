@@ -80,7 +80,16 @@ fun MessageBubble(
     onMenu: (() -> Unit)? = null,
     /** Явно повторить недоставленное исходящее сообщение. */
     onRetry: (() -> Unit)? = null,
+    /**
+     * Не рисовать пузырь вовсе.
+     *
+     * Нужно опросу личного чата: вопрос и варианты живут в одной карточке, и
+     * отдельное сообщение над ней читалось как два разных опроса. Владелец:
+     * «нужно чтобы вопрос был вместе в табличке без отдельного сообщения».
+     */
+    hideBubble: Boolean = false,
 ) {
+    if (hideBubble) return
     val isOwn = message.isFromMe
     val context = LocalContext.current
     val messenger = LocalMessengerColors.current

@@ -857,8 +857,7 @@ fun ChatDetailScreen(
                                     linkColor = ApuBubbleLinkColor,
                                     onContactInvite = onAddContactInvite,
                                     onGroupInvite = { viewModel.joinByInviteLink(it) },
-                                    // Одно нажатие - сразу пузырь с реакциями:
-                                    // владелец просил ставить их в один тап.
+                                    // Один тап - сразу пузырь с реакциями (просьба владельца).
                                     // Остальные действия - долгое нажатие.
                                     onTap = { reactionFor = message.id },
                                     onReply = { viewModel.startReply(message) },
@@ -877,6 +876,7 @@ fun ChatDetailScreen(
                                         showCopyDialog = message
                                     },
                                     onRetry = { viewModel.retryMessage(message) },
+                                    hideBubble = uiState.polls.containsKey(message.id), // вопрос уже в карточке
                                 )
                                 }
                                 uiState.polls[message.id]?.let { poll ->
