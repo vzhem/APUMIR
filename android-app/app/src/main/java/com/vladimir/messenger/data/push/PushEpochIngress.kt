@@ -57,6 +57,7 @@ internal object PushEpochIngress {
             // 536 это видно как «принято=105» при пяти собеседниках — вместе с
             // очередью из своих кадров, которую никто не подтверждал.
             if (outcome == PushEpochImport.Outcome.APPLIED) {
+                PushWakePublish.notePeerEpochLearned(senderId)
                 com.vladimir.messenger.service.announceOwnEpoch(app, senderId)
             }
             accepted

@@ -252,6 +252,7 @@ EXPECTED = {
         "anUnreadableIndexIsNeverAnEmptyList",
         "aVanishedRouteIsSkippedButAnUnreadableOneRetriesTheEnumeration",
         "thePageBudgetIsABoundAndNotAFinishedList",
+        "largeGroupAndChannelRostersFitDefaultEnumerationBudget",
     },
     PREFIX + "PushTrustResolverTest": {
         "aLivePairYieldsAPassBoundToTheCurrentValues",
@@ -284,6 +285,7 @@ EXPECTED = {
         "aRegisteredPassRecordsSuccessNotAFailure",
         "aRefusedOperationKeepsTheStepThatStopped",
         "anUnavailableTokenJournalNamesItself",
+        "anUnchangedTokenRegistersOnlyNewlyPinnedGroupOrChannelSeeds",
     },
     PREFIX + "PushRegistrationFlowTest": {
         "aStoredRegistrationIndexesTheRouteOnlyForTheReservedSequence",
@@ -466,6 +468,26 @@ DELETION_OUTBOX_EXPECTED = {
     "missingAttemptAndAcknowledgementDoNotCreateAnOutbox",
 }
 EXPECTED[DELETION_OUTBOX_CLASS] = DELETION_OUTBOX_EXPECTED
+
+GROUP_PUSH_EXPECTED = {
+    "com.vladimir.messenger.data.group.GroupPushWakePolicyTest": {
+        "wakesOnlyForNonBlankHeadGroupAndChannelMessages",
+        "correspondentClassificationAllowsSharedCommunityPacketsAndRejectsGossip",
+        "fanoutPlanPrioritizesAndCapsWakesEpochRequestsHellosAndAnnouncements",
+        "membershipFanoutBootstrapsKeysAndEpochsWithoutSendingAnyWake",
+        "perMemberFanoutReportsFailedPeersAndWakeFlagToHook",
+    },
+    "com.vladimir.messenger.data.file.FileHandshakeCandidatesTest": {
+        "includesAllUnpinnedDirectContactsAndPrioritizesGroupAdminsBeforeMembers",
+        "boundsGroupAndChannelHandshakesPerSweepAndFiltersInvalidIds",
+    },
+    PREFIX + "PushControlIngressTest": {
+        "canonicalControlsAndMalformedFamilyAreReserved",
+        "unrelatedTextTypingRankAndHeartPacketsKeepTheirExistingRoutes",
+        "reservationIsNotAnAuthenticityOrProtocolValidityDecision",
+    },
+}
+EXPECTED.update(GROUP_PUSH_EXPECTED)
 
 # Local notification recovery has its own report gate; these are not push delivery tests.
 LOCAL_NOTIFICATION_EXPECTED = {

@@ -28,13 +28,13 @@ class PushIngressContracts(unittest.TestCase):
     def test_core_quarantines_raw_and_opened_before_effects(self):
         core = section(self.source, '"message_received" -> {', '"peer_discovered" -> {')
         self.assert_order(core, "val rawText = event.text",
-                          "if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, rawText, senderId, rawText))",
+                          "if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, rawText, senderId, null)) return",
                           "if (!NodeIds.isNodeId(senderId))", "DevicePairingWire.isPairingText(rawText)")
         # Pairing and raw ACK branches cannot consume an encrypted envelope.
         self.assertIn("if (!SealedWire.isSealed(rawText) &&\n                    com.vladimir.messenger.data.pairing.DevicePairingWire.isPairingText(rawText)", core)
         self.assertIn("if (!SealedWire.isSealed(rawText) && DeliveryAckWire.isPacket(rawText))", core)
         self.assert_order(core, "val preopened = if (sealed) MessageSealer.open",
-                          "if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, preopened, senderId, rawText)) return",
+                          "if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, preopened, senderId, rawText.takeIf { sealed }) { acknowledgeEpochPacket(serviceScope, messageId, senderId) }) return",
                           "MirrorHub.nodeIdCached()", "MirrorHub.noteSelfPacket()",
                           ".opened(applicationContext, senderId)",
                           "rememberOpenedMessageBinding(fileTransferRouter, senderId, rawText)",
@@ -45,7 +45,7 @@ class PushIngressContracts(unittest.TestCase):
         cf = section(self.source, "cloudflareRelay?.onMessageReceived =", "// Раунд 214")
         message = section(cf, "is RelayEnvelope.Parsed.Message -> {", "is RelayEnvelope.Parsed.Other -> {")
         self.assert_order(message, "val cfContent = if (SealedWire.isSealed(parsed.content)) MessageSealer.open",
-                          "if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, cfContent, senderId, parsed.content)) return@launch",
+                          "if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, cfContent, senderId, parsed.content.takeIf { SealedWire.isSealed(it) }) { acknowledgeEpochViaCf(serviceScope, cloudflareRelay, messageId, senderId) }) return@launch",
                           "chatRepository.getMessageById(messageId)",
                           "DirectReplyWire.isPacket(cfContent)")
         # A reply is classified before ordinary ID-based deduplication and can
@@ -64,18 +64,20 @@ class PushIngressContracts(unittest.TestCase):
     def test_cf_legacy_raw_or_sealed_controls_precede_chat_creation(self):
         cf = section(self.source, "is RelayEnvelope.Parsed.Other -> {", "// Раунд 214")
         self.assert_order(cf, "PushControlIngress.reservedUnlessEpochAvailable(applicationContext, if (SealedWire.isSealed(parsed.raw))",
-                          "MessageSealer.open(applicationContext, parsed.raw) else parsed.raw, senderId, parsed.raw)) return@launch",
+                          "MessageSealer.open(applicationContext, parsed.raw) else parsed.raw, senderId, parsed.raw.takeIf { SealedWire.isSealed(it) })) return@launch",
                           "chatRepository.getChatByContactId(senderId)", "chatRepository.getOrCreateChat(senderId, contactName)")
         self.assertNotIn("parsed.raw.take(", cf)
 
     def test_the_only_quarantine_exception_is_a_disabled_by_default_epoch_import(self):
-        """The exception must not widen: closed gate first, sealed wire only."""
+        """Reserved controls never leak into chat; only authenticated sealed epochs ACK."""
         ingress = (ROOT / "android-app/app/src/main/java/com/vladimir/messenger/data/push/PushControlIngress.kt")\
             .read_text(encoding="utf-8")
-        body = section(ingress, "suspend fun reservedUnlessEpochAvailable(", "}")
+        body = section(ingress, "suspend fun reservedUnlessEpochAvailable(", "\n    }")
         self.assert_order(body, "if (!isReserved(text)) return false",
                           "if (wire == null || !PushServiceLocator.enabled(context)) return true",
-                          "return !PushEpochIngress.accept(context, senderId, wire)")
+                          "if (PushEpochIngress.accept(context, senderId, wire)) onEpochAccepted()",
+                          "\n        return true")
+        self.assertNotIn("!PushEpochIngress.accept(", body)
         # No other file may call the importer directly: the exception has one door.
         callers = [
             path for path in (ROOT / "android-app/app/src/main").rglob("*.kt")

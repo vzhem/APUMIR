@@ -26,19 +26,24 @@ internal object PushControlIngress {
      * exception: [PushEpochIngress] may consume a sealed epoch packet from the
      * pinned peer.
      *
-     * `true` means the caller must drop the content. A null [wire] means the text
-     * never arrived as a sealed envelope, so nothing can be imported and a
-     * reserved text stays reserved. With the feature disabled this is exactly the
-     * old behaviour: one boolean check and no I/O at all.
+     * Always returns `true` for every reserved `APUPUSH…` text so neither an
+     * invalid frame nor an accepted epoch announcement can ever fall through to
+     * create a phantom 1:1 contact/chat, learn a TOFU pin, mirror, or bump
+     * message counters. [onEpochAccepted] runs only when [wire] was a sealed
+     * envelope whose epoch packet [PushEpochIngress.accept] authenticated and
+     * accepted (`APPLIED` or `DUPLICATE`), allowing the caller to clean up the
+     * sender's durable relay copy without ever ACKing unsealed or rejected text.
      */
     suspend fun reservedUnlessEpochAvailable(
         context: android.content.Context,
         text: String?,
         senderId: String,
         wire: String?,
+        onEpochAccepted: () -> Unit = {},
     ): Boolean {
         if (!isReserved(text)) return false
         if (wire == null || !PushServiceLocator.enabled(context)) return true
-        return !PushEpochIngress.accept(context, senderId, wire)
+        if (PushEpochIngress.accept(context, senderId, wire)) onEpochAccepted()
+        return true
     }
 }

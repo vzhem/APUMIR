@@ -101,6 +101,13 @@ object PushDiagnostics {
      */
     fun noteWakeAccepted() = write("lastWakeAcceptedAt=${System.currentTimeMillis()}")
 
+    /** Counts outbound push wake attempts initiated for groups and channels (no ids stored). */
+    fun noteGroupWake(accepted: Boolean) = if (accepted) {
+        write("groupWakeAttempts=+1", "groupWakeAccepted=+1")
+    } else {
+        write("groupWakeAttempts=+1")
+    }
+
     /** Fixed vocabulary only: never an exception message, never a path. */
     fun noteError(kind: String) = write("lastError=${kind.take(40)}")
 
@@ -225,6 +232,8 @@ object PushDiagnostics {
             epochRequests = number("epochRequests"),
             lastEpochRequestAtMs = number("epochRequestAt"),
             lastWakeDetail = text("lastWakeDetail") ?: "-",
+            groupWakeAttempts = number("groupWakeAttempts"),
+            groupWakeAccepted = number("groupWakeAccepted"),
         )
     }
 

@@ -133,7 +133,8 @@ internal class PushTargets(
 
         /** Must match the journal's own page size limit. */
         internal const val PAGE_SIZE = 16
-        internal const val DEFAULT_PAGES = 8
-        internal const val MAX_PAGES = 16
+        internal const val DEFAULT_PAGES = 128
+        /** Covers [PushRegistrationStore.MAX_ENTRIES] routes, including mid-rotation pairs. */
+        internal const val MAX_PAGES = 256
     }
 }

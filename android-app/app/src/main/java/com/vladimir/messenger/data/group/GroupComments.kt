@@ -43,6 +43,12 @@ internal class GroupComments(
     private val commentNeighbours: Int,
     private val backfillGapMs: Long,
     private val maxTrackedTopics: Int,
+    private val deliverWakeable: suspend (
+        groupId: String,
+        envelope: String,
+        recipients: List<String>,
+        wakeOnUnreachable: Boolean,
+    ) -> Unit = { groupId, envelope, targets, _ -> deliver(groupId, envelope, targets) },
 ) {
 
     // ── Комментарии большого канала (этап 4) ──────────────────────────────────
@@ -356,7 +362,7 @@ internal class GroupComments(
             .filter { it != authorId && it != from && it != me && it !in hubs }
         if (readers.isEmpty()) return
         val authorName = packet.senderName.ifBlank { groupDao.getMember(group.id, authorId)?.displayName.orEmpty() }
-        deliver(
+        deliverWakeable(
             group.id,
             GroupWire.buildMessage(
                 groupId = group.id,
@@ -370,6 +376,7 @@ internal class GroupComments(
                 senderNameColor = packet.senderNameColor,
             ),
             readers,
+            GroupPushWakePolicy.shouldWakeForMessageText(packet.text),
         )
         Log.i(TAG, "comment relayed group=${group.id} topic=${packet.topicId} to=${readers.size}")
     }

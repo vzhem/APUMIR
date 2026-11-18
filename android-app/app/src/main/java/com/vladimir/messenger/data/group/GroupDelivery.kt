@@ -32,6 +32,7 @@ interface GroupDelivery {
         groupId: String,
         envelope: String,
         recipients: List<String>,
+        wakeOnUnreachable: Boolean = false,
     ): DeliveryReport
 }
 
@@ -61,12 +62,21 @@ class PerMemberFanoutDelivery(
     private val concurrency: () -> Int = { maxConcurrent },
     /** Ожидание жетона перед каждой отправкой; по умолчанию - без ожидания. */
     private val gate: suspend () -> Unit = {},
+    /** Неблокирующий пост-хук (push-пробуждение недоступных и обмен эпохами). */
+    private val afterDelivery: (
+        groupId: String,
+        envelope: String,
+        orderedRecipients: List<String>,
+        report: DeliveryReport,
+        wakeOnUnreachable: Boolean,
+    ) -> Unit = { _, _, _, _, _ -> },
 ) : GroupDelivery {
 
     override suspend fun deliver(
         groupId: String,
         envelope: String,
         recipients: List<String>,
+        wakeOnUnreachable: Boolean,
     ): DeliveryReport =
         coroutineScope {
             // Сначала свои и надёжные: при обрыве связи на середине веера
@@ -92,6 +102,8 @@ class PerMemberFanoutDelivery(
                 }
             }
 
-            DeliveryReport(targets.size, delivered, failed)
+            DeliveryReport(targets.size, delivered, failed).also { report ->
+                runCatching { afterDelivery(groupId, envelope, targets, report, wakeOnUnreachable) }
+            }
         }
 }

@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -76,5 +77,22 @@ class ConversationHeaderInstrumentedTest {
         compose.onNodeWithText("Search").performClick()
         compose.onNodeWithText("Search").assertDoesNotExist()
         compose.runOnIdle { assertEquals(1, selected) }
+    }
+
+    @Test fun vipBadgeSitsImmediatelyBesideShortName() {
+        compose.setContent {
+            MaterialTheme {
+                ConversationHeader("Server3", "в сети", true, {}, {}, emptyList(),
+                    modifier = Modifier.width(360.dp), avatar = { Box(Modifier.size(30.dp)) }, vip = true)
+            }
+        }
+        val nameBounds = compose.onNodeWithTag("conversation-header-name", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val badgeBounds = compose.onNodeWithText("VIP", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val maxGapPx = with(compose.density) { 16.dp.toPx() }
+        assertTrue(badgeBounds.left >= nameBounds.right)
+        assertTrue(badgeBounds.left - nameBounds.right <= maxGapPx)
+        assertTrue(badgeBounds.top < nameBounds.bottom)
     }
 }

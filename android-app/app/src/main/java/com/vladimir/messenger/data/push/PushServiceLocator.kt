@@ -46,6 +46,8 @@ internal object PushServiceLocator {
     interface Deps {
         fun database(): AppDatabase
         fun pins(): FileExchangePeerStore
+        fun swarmDirectory(): com.vladimir.messenger.data.swarm.SwarmPeerDirectory
+        fun fileTransferRouter(): com.vladimir.messenger.data.file.FileTransferRouter
     }
 
     private val LOCK = Any()
@@ -76,6 +78,12 @@ internal object PushServiceLocator {
 
     private fun deps(context: Context): Deps =
         EntryPointAccessors.fromApplication(context.applicationContext, Deps::class.java)
+
+    internal fun swarmDirectoryOrNull(context: Context): com.vladimir.messenger.data.swarm.SwarmPeerDirectory? =
+        runCatching { deps(context).swarmDirectory() }.getOrNull()
+
+    internal fun fileRouterOrNull(context: Context): com.vladimir.messenger.data.file.FileTransferRouter? =
+        runCatching { deps(context).fileTransferRouter() }.getOrNull()
 
     /** A closed gate is not an outage: it is the state of every shipped build. */
     fun enabled(context: Context): Boolean = PushFirebaseSignals.enabled(context)
@@ -275,6 +283,7 @@ internal object PushServiceLocator {
         val enumerator = PushTargets(
             page = { after, limit -> registrations.recoveryPage(after, limit) },
             find = { hint -> registrations.findRoute(hint) },
+            maxPages = PushTargets.MAX_PAGES,
             // Without seeds the index can never leave zero: it only stores routes
             // the server already confirmed, and confirmation needs a registration.
             seededPeers = { pinnedSeeds(context, registrations) },
@@ -487,9 +496,10 @@ internal object PushServiceLocator {
             // never be reached. Not awaited here - startup must not block on
             // Google - and the result is only a local fact for diagnostics.
             PushDiagnostics.install(app)
-            // Retry pumps wake the correspondent through this installed context;
-            // without it a queued message can only sit and wait.
+            // Retry pumps and new TOFU pins (including group and channel members)
+            // register and wake correspondents through these installed contexts.
             com.vladimir.messenger.data.push.PushWakePublish.install(app)
+            com.vladimir.messenger.data.push.PushPeerBootstrap.install(app)
             startupScope.launch {
                 try {
                     val on = preparingReceive(app)

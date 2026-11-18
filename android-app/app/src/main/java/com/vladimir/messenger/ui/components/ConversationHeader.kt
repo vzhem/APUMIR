@@ -61,14 +61,15 @@ internal fun ConversationHeader(
                 if (avatar != null) { avatar(); Spacer(Modifier.width(8.dp)) }
                 Column(Modifier.weight(1f)) {
                     // No ellipsis or line limit: long names wrap, including at large system font sizes.
-                    Text(name, modifier = Modifier.fillMaxWidth().testTag("conversation-header-name"),
-                        style = apuVipNameStyle(MaterialTheme.typography.titleMedium, vip), fontWeight = FontWeight.SemiBold,
-                        color = if (vip) Color(0xFF8A5F00) else ApuBubbleTextColor, softWrap = true)
+                    // The VIP badge sits immediately next to the name, never isolated on the status row.
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(status, modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall,
-                            color = if (active) ApuBubbleAccentColor else ApuBubbleMutedColor)
-                        if (vip) { Spacer(Modifier.width(4.dp)); ApuVipBadge(compact = true) }
+                        Text(name, modifier = Modifier.weight(1f, fill = false).testTag("conversation-header-name"),
+                            style = apuVipNameStyle(MaterialTheme.typography.titleMedium, vip), fontWeight = FontWeight.SemiBold,
+                            color = if (vip) Color(0xFF8A5F00) else ApuBubbleTextColor, softWrap = true)
+                        if (vip) { Spacer(Modifier.width(6.dp)); ApuVipBadge(compact = true) }
                     }
+                    Text(status, style = MaterialTheme.typography.labelSmall,
+                        color = if (active) ApuBubbleAccentColor else ApuBubbleMutedColor)
                 }
             }
         }

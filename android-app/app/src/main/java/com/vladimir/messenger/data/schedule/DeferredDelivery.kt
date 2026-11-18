@@ -175,7 +175,15 @@ class DeferredDelivery @Inject constructor(
                 for ((index, packet) in packets.withIndex()) {
                     if (!active(id)) return@withLock false
                     val transportId = if (item.isGroup) DeferredWire.transportId(letter.id, peer, "normal$index") else letter.id
-                    if (!send(transportId, item.targetId, peer, packet)) allSent = false
+                    val sent = send(transportId, item.targetId, peer, packet)
+                    if (!sent) {
+                        allSent = false
+                        if (index == 0) {
+                            com.vladimir.messenger.data.group.GroupPushWake.wakeScheduledFallback(
+                                context, peer, isGroup = item.isGroup,
+                            )
+                        }
+                    }
                 }
                 if (allSent) ScheduledSendStore.update(context, id) { it.copy(handedOff = (it.handedOff + peer).distinct()) }
             }

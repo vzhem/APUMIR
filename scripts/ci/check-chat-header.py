@@ -9,7 +9,12 @@ class HeaderContracts(unittest.TestCase):
     def test_name_wraps_and_header_is_not_fixed_height(self):
         text = (MAIN / 'ui/components/ConversationHeader.kt').read_text()
         self.assertIn('Modifier.weight(1f)', text)
+        self.assertIn('Modifier.weight(1f, fill = false).testTag("conversation-header-name")', text)
         self.assertIn('softWrap = true', text)
+        # Значок VIP обязан стоять в строке имени сразу после имени, а не в углу
+        # строки статуса («VIP значок должен быть рядом с именем», 2026-11-18).
+        self.assertLess(text.index('testTag("conversation-header-name")'), text.index('ApuVipBadge(compact = true)'))
+        self.assertLess(text.index('ApuVipBadge(compact = true)'), text.index('Text(status,'))
         self.assertNotIn('TextOverflow.Ellipsis', text)
         self.assertNotIn('maxLines =', text)
         self.assertNotIn('TopAppBar(', text)

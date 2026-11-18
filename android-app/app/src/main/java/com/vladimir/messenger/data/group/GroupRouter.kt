@@ -54,6 +54,7 @@ class GroupRouter(
 
         return try {
             repository.handleIncoming(senderId, packet, messageId)
+            repository.noteIncomingCorrespondent(senderId, packet)
             true
         } catch (e: Exception) {
             Log.w(TAG, "group packet handling failed from $senderId: ${e.message}")
