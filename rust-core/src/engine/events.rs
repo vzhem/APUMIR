@@ -777,43 +777,59 @@ mod tests {
     /// контакт молча показывается «не в сети».
     #[test]
     fn eviction_prefers_service_events_over_presence_chunks_and_messages() {
-        let bus = EventBus::new(4);
+        let bus = EventBus::new(5);
         bus.emit(file_chunk(1));
         for n in 0..3 {
             bus.emit(presence(n));
         }
-        // Переполнение вызывает службой, а не присутствием: под нож идёт она.
+        // В очереди уже лежит служебный статус сети - именно он и должен
+        // уйти под нож, а не наблюдение присутствия.
+        bus.emit(CoreEvent::NetworkStatusChanged { status: "connecting".into() });
+        assert_eq!(bus.len(), 5);
         bus.emit(CoreEvent::NetworkStatusChanged { status: "relayed".into() });
         let drained = bus.drain();
-        assert!(matches!(drained.first(), Some(CoreEvent::FileChunkReceived { chunk_index: 1, .. })));
+        assert_eq!(drained.len(), 5);
+        assert!(
+            matches!(drained.first(), Some(CoreEvent::FileChunkReceived { chunk_index: 1, .. })),
+            "кусок файла потерян при переполнении"
+        );
         for n in 0..3 {
             assert!(
                 drained.iter().any(|e| matches!(e, CoreEvent::PeerDiscovered { peer_id, .. } if peer_id == &format!("pk_peer{n:04}"))),
                 "наблюдение присутствия {n} выброшено при переполнении"
             );
         }
-        assert!(
-            !drained.iter().any(|e| matches!(e, CoreEvent::NetworkStatusChanged { .. })),
-            "вытеснено присутствие вместо служебного статуса сети"
-        );
-        assert_eq!(drained.len(), 4);
+        // Ушёл самый свежий служебный, старый остался на своём месте.
+        let statuses: Vec<&str> = drained
+            .iter()
+            .filter_map(|e| match e {
+                CoreEvent::NetworkStatusChanged { status } => Some(status.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(statuses, vec!["connecting"], "вытеснено присутствие вместо служебного статуса сети");
+        let (_, service, presence_evicted, _) = bus.eviction_stats();
+        assert_eq!(service, 1, "вытеснение служебного не посчитано");
+        assert_eq!(presence_evicted, 0, "вытеснено присутствие");
     }
 
     /// Счётчик вытеснений отвечает на вопрос из отчёта владельца: «очередь
     /// 873» само по себе не говорит, терялись ли наблюдения присутствия.
     #[test]
     fn eviction_stats_count_what_was_dropped() {
-        let bus = EventBus::new(3);
+        let bus = EventBus::new(4);
+        // В очереди и присутствие, и служебное событие. Вытесняется только
+        // служебное - присутствие трогать нельзя, поэтому за 4 лишних
+        // служебных вставки вытеснений будет ровно 4.
         for n in 0..3 {
             bus.emit(presence(n));
         }
-        // Переполнение вызывают служебные события: они и вытесняются.
-        for _ in 0..4 {
+        for _ in 0..5 {
             bus.emit(CoreEvent::NetworkStatusChanged { status: "relayed".into() });
         }
         let (total, service, presence_evicted, retryable) = bus.eviction_stats();
-        assert!(total >= 4, "вытеснения не посчитаны: {total}");
-        assert!(service >= 4, "служебные вытеснения не посчитаны: {service}");
+        assert_eq!(total, 4, "вытеснения не посчитаны: {total}");
+        assert_eq!(service, 4, "служебные вытеснения не посчитаны: {service}");
         assert_eq!(presence_evicted, 0, "присутствие вытеснено при служебной лавине");
         assert_eq!(retryable, 0);
     }
@@ -839,27 +855,53 @@ mod tests {
     }
 
     /// Владелец 2026-11-18: «статусы кто онлайн пропадают». Служебная лавина
-    /// переподключения брокера не должна задерживать наблюдение присутствия:
-    /// иначе оно приходит к Kotlin позже TTL (200 с), и наблюдение отбрасывается
-    /// как «устаревшее» — контакт мигает «не в сети», хотя он рядом.
+    /// переподключения брокера не должна надолго задерживать наблюдение
+    /// присутствия: оно несёт исходный момент времени, и если доедет до Kotlin
+    /// позже 200 с, `PresenceRecovery` вправе отбросить его как «устаревшее».
+    ///
+    /// Вместе с присутствием в очереди лежит и служебный статус сети — так и
+    /// бывает на телефоне. Служебное вытесняется первым, присутствие остаётся,
+    /// а приоритетный бёрст забирает его раньше оставшейся службы.
     #[test]
     fn presence_is_not_starved_by_service_flood() {
         let bus = EventBus::with_defaults();
-        // Переподключение брокера: пачка служебных событий впереди наблюдения.
         for n in 0..40 {
             bus.emit(CoreEvent::NetworkStatusChanged {
                 status: if n % 2 == 0 { "connecting".into() } else { "relayed".into() },
             });
         }
         bus.emit(presence(1));
-        for n in 40..80 {
+        for _ in 40..80 {
             bus.emit(CoreEvent::NetworkStatusChanged { status: "relayed".into() });
         }
-        // Первым снимается именно присутствие, а не служебное событие.
+        // Присутствие обязано дожить до потребителя, а не быть вытесненным.
+        let drained = bus.drain();
+        assert!(
+            drained
+                .iter()
+                .any(|e| matches!(e, CoreEvent::PeerDiscovered { peer_id, .. } if peer_id == "pk_peer0001")),
+            "наблюдение присутствия вытеснено служебной лавиной - статус «в сети» потеряется"
+        );
+    }
+
+    /// Наблюдение уходит к потребителю в приоритетном бёрсте, не дожидаясь
+    /// разбора всей накопившейся службы переподключения.
+    #[test]
+    fn interactive_burst_takes_presence_before_service_backlog() {
+        let bus = EventBus::new(64);
+        for _ in 0..20 {
+            bus.emit(CoreEvent::NetworkStatusChanged { status: "connecting".into() });
+        }
+        bus.emit(presence(1));
         assert!(
             matches!(bus.poll_lane(EventLane::Main, true), Some(CoreEvent::PeerDiscovered { peer_id, .. }) if peer_id == "pk_peer0001"),
-            "наблюдение присутствия застряло за служебной лавиной - статус «в сети» потеряется"
+            "присутствие ждёт в хвосте за 20 служебными событиями"
         );
+        // Служба не теряется: без приоритета она идёт первой.
+        assert!(matches!(
+            bus.poll_lane(EventLane::Main, false),
+            Some(CoreEvent::NetworkStatusChanged { .. })
+        ));
     }
 
     /// The legacy MQTT event has no peer field; Kotlin must receive null, not an empty sender.
@@ -876,8 +918,8 @@ mod tests {
     fn delivery_ack_survives_flood() {
         let bus = EventBus::new(4);
         for n in 0..10 {
-            // Лавина именно служебная: присутствие теперь тоже приоритетное,
-            // и вытеснять его при переполнении больше нельзя (2026-11-18).
+            // Лавина смешанная: служба и присутствие. Оба класса ниже ранга 0,
+            // поэтому подтверждение не должно пострадать ни от одного из них.
             bus.emit(CoreEvent::NetworkStatusChanged { status: "relayed".into() });
             bus.emit(presence(n));
         }
