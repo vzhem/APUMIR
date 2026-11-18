@@ -58,32 +58,66 @@ done
 # Версия JDK — первой строкой: внутренние ошибки компилятора (exit 2) почти
 # всегда про несовпадение JDK и компилятора, и без версии это гадание.
 "$JAVA" -version 2>&1 | head -3
-MAVEN=https://repo.maven.apache.org/maven2
+# Сеть до Maven Central иногда отдаёт 404 на существующий файл (18.11.2026:
+# `curl: (22) The requested URL returned error: 404` на первом же jar, шаг
+# падал без единой строки о том, ЧТО качали). Поэтому пробуем три зеркала и
+# печатаем координаты артефакта: без них отчёт CI не подсказывает причину.
+MAVEN_MIRRORS=(
+    "https://repo.maven.apache.org/maven2"
+    "https://repo1.maven.org/maven2"
+    "https://maven-central.storage-download.googleapis.com/maven2"
+)
 fetch() {
     local group="$1" name="$2" version="$3" directory="$4"
     local path="${group//.//}/$name/$version/$name-$version.jar"
     local dest="$OUT/$directory/$name-$version.jar"
-    if [ ! -s "$dest" ]; then
-        curl --fail --location --retry 2 --connect-timeout 15 --max-time 120 \
-            --silent --show-error "$MAVEN/$path" -o "$dest.tmp"
-        mv "$dest.tmp" "$dest"
-    fi
+    local mirror attempt
+    [ -s "$dest" ] && return 0
+    attempt=0
+    for mirror in "${MAVEN_MIRRORS[@]}"; do
+        attempt=$((attempt + 1))
+        if curl --fail --location --retry 3 --retry-all-errors --retry-delay 2 \
+                --connect-timeout 15 --max-time 180 \
+                --silent --show-error "$mirror/$path" -o "$dest.tmp" 2>/dev/null; then
+            mv "$dest.tmp" "$dest"
+            return 0
+        fi
+        echo "fetch: $group:$name:$version не скачался с зеркала #$attempt" >&2
+    done
+    echo "fetch: НЕ УДАЛОСЬ скачать $group:$name:$version ($path)" >&2
+    return 1
 }
-fetch org.jetbrains.kotlin kotlin-compiler-embeddable "$KOTLIN" compiler
-fetch org.jetbrains.kotlin kotlin-daemon-embeddable "$KOTLIN" compiler
-fetch org.jetbrains.kotlin kotlin-script-runtime "$KOTLIN" compiler
-fetch org.jetbrains.kotlin kotlin-reflect 1.6.10 compiler
-fetch org.jetbrains.intellij.deps trove4j 1.0.20200330 compiler
-fetch org.jetbrains.kotlinx kotlinx-coroutines-core-jvm 1.6.4 compiler
-fetch org.jetbrains annotations 13.0 compiler
-fetch org.jetbrains.kotlin kotlin-stdlib "$KOTLIN" runtime
-fetch org.jetbrains.kotlinx kotlinx-coroutines-core-jvm "$COROUTINES" runtime
-fetch org.jetbrains.kotlinx kotlinx-coroutines-test-jvm "$COROUTINES" runtime
-fetch junit junit "$JUNIT" runtime
-fetch org.hamcrest hamcrest-core 1.3 runtime
-# Ed25519 постов (net.i2p.crypto:eddsa) нужен мосту манифестов, на который
-# ссылается групповой конверт GroupWire. Версия - та же, что в libs.versions.toml.
-fetch net.i2p.crypto eddsa 0.3.0 runtime
+# Координаты артефактов собраны заранее: если загрузка всё же не удалась,
+# отчёт CI обязан назвать виновника, а не только "шаг упал".
+ARTIFACTS=(
+    "org.jetbrains.kotlin kotlin-compiler-embeddable $KOTLIN compiler"
+    "org.jetbrains.kotlin kotlin-daemon-embeddable $KOTLIN compiler"
+    "org.jetbrains.kotlin kotlin-script-runtime $KOTLIN compiler"
+    "org.jetbrains.kotlin kotlin-reflect 1.6.10 compiler"
+    "org.jetbrains.intellij.deps trove4j 1.0.20200330 compiler"
+    "org.jetbrains.kotlinx kotlinx-coroutines-core-jvm 1.6.4 compiler"
+    "org.jetbrains annotations 13.0 compiler"
+    "org.jetbrains.kotlin kotlin-stdlib $KOTLIN runtime"
+    "org.jetbrains.kotlinx kotlinx-coroutines-core-jvm $COROUTINES runtime"
+    "org.jetbrains.kotlinx kotlinx-coroutines-test-jvm $COROUTINES runtime"
+    "junit junit $JUNIT runtime"
+    "org.hamcrest hamcrest-core 1.3 runtime"
+    # Ed25519 постов (net.i2p.crypto:eddsa) нужен мосту манифестов, на который
+    # ссылается групповой конверт GroupWire. Версия - та же, что в libs.versions.toml.
+    "net.i2p.crypto eddsa 0.3.0 runtime"
+)
+FETCH_FAILURES=()
+# shellcheck disable=SC2086
+for artifact in "${ARTIFACTS[@]}"; do
+    # shellcheck disable=SC2086
+    set -- $artifact
+    fetch "$1" "$2" "$3" "$4" || FETCH_FAILURES+=("$1:$2:$3")
+done
+if [ "${#FETCH_FAILURES[@]}" -gt 0 ]; then
+    echo "chat-history: NETWORK FAILURE - не скачались артефакты: ${FETCH_FAILURES[*]}" >&2
+    echo "chat-history: это не ошибка кода; перезапуск шага обычно помогает" >&2
+    exit 75
+fi
 CP="$(printf '%s:' "$OUT"/runtime/*.jar)${OUT}/compiler/annotations-13.0.jar"
 BASE="$ROOT/android-app/app/src"
 MODEL="$BASE/main/java/com/vladimir/messenger/domain/model"
