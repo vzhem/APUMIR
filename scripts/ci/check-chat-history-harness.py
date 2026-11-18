@@ -99,6 +99,54 @@ class HistoryHarnessIsComplete(unittest.TestCase):
             "'unresolved reference': " + "; ".join(sorted(missing)),
         )
 
+    def test_every_referenced_package_function_is_compiled(self):
+        """Не только классы: свободные функции того же пакета тоже должны быть в списке.
+
+        Так падал прогон 44344166842: `DiagnosticsReport` зовёт
+        `appendKeyMismatch` из `KeyMismatchReport.kt` (раздел вынесен отдельным
+        файлом, когда `DiagnosticsReport.kt` упёрся в потолок god-файла), а
+        харнесс искал только классы/объекты — ошибку видел лишь kotlinc.
+        """
+        files = compiled_files()
+        projects = [ROOT / "android-app/app/src/main/java",
+                    ROOT / "android-app/app/src/test/java"]
+        declarations = {}
+        for base in projects:
+            for path in base.rglob("*.kt"):
+                text = path.read_text(errors="replace")
+                package = re.search(r"^package\s+([\w.]+)", text, re.M)
+                if not package:
+                    continue
+                for match in re.finditer(
+                    r"^(?:@\w+\s+)?(?:internal |public |private )?(?:suspend )?fun\s+"
+                    r"(?:<[^>]+>\s*)?(?:[\w.]+\.)?([A-Za-z_]\w*)\s*\(",
+                    text,
+                    re.M,
+                ):
+                    declarations.setdefault((package.group(1), match.group(1)), set()).add(path)
+        missing = set()
+        for path in sorted(files):
+            text = re.sub(r"/\*.*?\*/", "", path.read_text(errors="replace"), flags=re.S)
+            text = re.sub(r"//[^\n]*", "", text)
+            package = re.search(r"^package\s+([\w.]+)", text, re.M)
+            if not package:
+                continue
+            # Функцию с тем же именем могла объявить и сама вызывающая сторона
+            # (private fun diag() в классе): такой вызов к чужому файлу не идёт,
+            # и требовать его в списке компиляции нельзя.
+            own = set(re.findall(r"\bfun\s+(?:[\w.]+\.)?([A-Za-z_]\w*)\s*\(", text))
+            for (pkg, name), owners in declarations.items():
+                if pkg != package.group(1) or owners & files or name in own:
+                    continue
+                if re.search(r"\b" + re.escape(name) + r"\s*\(", text):
+                    missing.add(f"{pkg}.{name} ({', '.join(sorted(o.name for o in owners))})")
+        self.assertEqual(
+            set(),
+            missing,
+            "в check-chat-history.sh не хватает файлов с функциями того же пакета: "
+            + "; ".join(sorted(missing)),
+        )
+
     def test_generated_stub_is_not_a_silent_substitute(self):
         """Заглушка палитры генерируется из прод-файла, а не пишется руками."""
         text = SCRIPT.read_text()
