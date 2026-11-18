@@ -44,12 +44,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -132,6 +132,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -175,7 +176,6 @@ import com.vladimir.messenger.ui.components.ApuHeaderButton
 import com.vladimir.messenger.ui.components.firstLinkIn
 import com.vladimir.messenger.ui.components.ApuFormTextField
 import com.vladimir.messenger.ui.components.ApuSkeletonChatFeed
-import com.vladimir.messenger.ui.components.apuGoldBrush
 import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -737,6 +737,12 @@ fun GroupChatScreen(
                 feedScope.launch { feedListState.animateScrollToItem(offset + index) }
             }
 
+    // Владелец 2026-11-18: низ экрана выглядел срезанным - поле ввода и
+    // золотая «Отправить» уходили под системную панель, а лента держала
+    // мёртвые 200dp запаса «на глаз». Теперь оверлей ввода сам сообщает свою
+    // высоту, и лента отступает ровно на неё.
+    val composerDensity = androidx.compose.ui.platform.LocalDensity.current
+    var composerHeight by remember { mutableStateOf(0.dp) }
     Box(modifier = Modifier.fillMaxSize()) {
         ChatWallpaper(scope = "group:${uiState.groupId}", shared = uiState.group?.wallpaper)
         // Раунд 266: клавиатура не закрывает переписку - сообщения и лента
@@ -1182,13 +1188,17 @@ fun GroupChatScreen(
             }
             LazyColumn(
                 state = feedListState,
-                // Раунд 151: лента сжимается над клавиатурой (edge-to-edge:
-                // окно само не сжимается - переписка пряталась за пузырями
-                // ввода; запас 200dp снизу отводит место под пузыри).
+                // Раунд 151: лента сжимается над клавиатурой. Подъём делает
+                // imePadding САМОГО Scaffold (он стоит на своём modifier выше),
+                // и этот отступ уже уменьшил доступную высоту ленты. Второй
+                // imePadding здесь вычитал клавиатуру ещё раз: при открытой
+                // клавиатуре лента сжималась вдвое сильнее нужного и
+                // превращалась в узкую полоску (владелец 2026-11-18: «чат
+                // залазит не красиво»). Пузыри ввода больше не перекрывают
+                // переписку - запас под них задаёт contentPadding ниже.
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .imePadding()
                     .padding(horizontal = 4.dp)
                     // Лёгкая подложка под пузырями: рисунок обоев мягко проступает
                     // сквозь полупрозрачную основу, текст читается ровнее.
@@ -1196,8 +1206,13 @@ fun GroupChatScreen(
                         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.22f),
                         shape = RoundedCornerShape(22.dp),
                     ),
-                // Раунд 147: снизу запас под оверлей поля ввода.
-                contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 200.dp),
+                // Раунд 147: снизу запас под оверлей поля ввода. Владелец
+                // 2026-11-18: 200dp были догадкой «на глаз» и отнимали треть
+                // ленты даже на высоком экране, а на низком оставляли
+                // последнее сообщение под кнопкой. Теперь считаем по
+                // фактической высоте оверлея (замер ниже): запас ровно под
+                // поле, «Отправить» и ряд действий.
+                contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 8.dp, bottom = if (composerHeight > 0.dp) composerHeight + 8.dp else 172.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 // Пока группа грузится: вместо пустого экрана — очертания сообщений.
@@ -1338,13 +1353,30 @@ fun GroupChatScreen(
     // тем поля ввода и «Отправить» нет (владелец, раунд 148).
     if (!showTopicsList) {
     // Раунд 147: поле ввода - оверлей НА ВЕСЬ экран, включая область
-    // пузырей тем слева (просьба владельца); imePadding поднимает всё
-    // над клавиатурой, «Отправить» всегда видна.
+    // пузырей тем слева (просьба владельца).
+    //
+    // Владелец 2026-11-18 (скрин): панель ввода уезжала под системную
+    // навигацию — поле и золотая «Отправить» наполовину срезаны краем
+    // экрана, «Ещё» под ними. Причина: этот оверлей лежит ВНЕ Scaffold
+    // (Scaffold уже закрыт выше), поэтому padding из Scaffold до него не
+    // доходит, а системную панель он не учитывал вовсе.
+    //
+    // imePadding ЗДЕСЬ НУЖЕН И НЕ ДУБЛИРУЕТСЯ: Scaffold — сосед в Box, а не
+    // родитель, его imePadding поднимает только содержимое Scaffold.
+    // Поэтому клавиатуру компенсируем здесь, а системную панель добавляем
+    // сверху: imePadding() при открытой клавиатуре сам по себе её не
+    // покрывает. Если убрать navigationBarsPadding, при закрытой клавиатуре
+    // поле снова уедет под жестовую панель — ровно то, что на скрине.
     Column(
         modifier = Modifier
             .align(Alignment.BottomCenter)
             .fillMaxWidth()
-            .imePadding(),
+            // Замер — ДО отступов, иначе он видит только содержимое без
+            // системной панели, и лента недополучает высоту этой панели:
+            // последнее сообщение наполовину уходит под пузырь ввода.
+            .onSizeChanged { composerHeight = with(composerDensity) { it.height.toDp() } }
+            .imePadding()
+            .navigationBarsPadding(),
     ) {
             // Раунд 144: сколько сообщений осталось ниже - тап прокручивает вниз.
             if (feedRemaining > 0) {
@@ -1617,7 +1649,18 @@ fun GroupChatScreen(
                         onCancel = { id -> com.vladimir.messenger.worker.ScheduledSendWorker.cancel(storeContext, id) },
                     )
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // Владелец 2026-11-18 (скрин): «Ещё» стояла вплотную к
+                // золотой «Отправить» и последним пикселем уходила за край, а
+                // на узком/альбомном экране её срезало вместе с панелью
+                // навигации. Ряд получает тот же горизонтальный отступ, что и
+                // пузырь поля ввода, а «Ещё» больше не прижимается к кромке.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     ApuPremiumButton(
                         label = if (slowWaitSeconds > 0L) stringResource(R.string.slow_wait_seconds, slowWaitSeconds) else stringResource(R.string.action_send),
                         onClick = { viewModel.send(uiState.draft) },
@@ -1629,6 +1672,7 @@ fun GroupChatScreen(
                         label = stringResource(R.string.send_more),
                         onClick = { showSendOptions = true },
                         enabled = canSend,
+                        modifier = Modifier.padding(end = 2.dp),
                     )
                 }
                 // р250: включённый режим объясняем словами - иначе кажется,
@@ -1827,100 +1871,6 @@ fun GroupChatScreen(
     }
 }
 
-// =============================================================================
-// Левая колонка: значки групп и каналов с непрочитанными
-// =============================================================================
-
-@Composable
-private fun GroupRail(
-    groups: List<GroupSummary>,
-    currentGroupId: String,
-    onGroupClick: (String) -> Unit,
-    onChannelClick: (String) -> Unit,
-) {
-    val storeAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
-        .collectAsState()
-    LazyColumn(
-        // Владелец 2026-10-07: колонка значков — тоже часть общего набора:
-        // та же подложка, что у строк и панелей, с золотой нитью по кромке.
-        modifier = Modifier
-            .width(76.dp)
-            .fillMaxHeight()
-            .apuBubbleSurface(color = Color(0xFFF5F7FA).copy(alpha = 0.72f))
-            .apuPremiumThread(inset = 10.dp),
-        contentPadding = PaddingValues(vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        items(groups, key = { it.id }) { group ->
-            val selected = group.id == currentGroupId
-            Box(
-                modifier = Modifier.clickable {
-                    if (!selected) {
-                        if (group.isChannel) onChannelClick(group.id) else onGroupClick(group.id)
-                    }
-                },
-            ) {
-                GroupRailAvatar(
-                    groupId = group.id,
-                    title = group.title,
-                    avatarB64 = storeAvatars["g:" + group.id],
-                    selected = selected,
-                )
-                if (group.unreadCount > 0) {
-                    Box(modifier = Modifier.align(Alignment.TopEnd)) {
-                        ApuNotificationBadge(group.unreadCount)
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** Круглый аватар группы: картинка из хранилища либо первая буква названия. */
-@Composable
-private fun GroupRailAvatar(
-    groupId: String,
-    title: String,
-    avatarB64: String?,
-    selected: Boolean,
-) {
-    // Колонка показывает ВСЕ группы разом, поэтому раскодировать картинки в
-    // отрисовке нельзя: десяток аватаров подряд подвешивал главный поток на
-    // входе в группу и на возврате назад.
-    val bmp = com.vladimir.messenger.ui.components.AvatarBitmaps.rememberAvatar(avatarB64)
-    // Выбранная группа: золотое кольцо и подъём, как у выбранной темы.
-    Box(
-        modifier = Modifier
-            .size(52.dp)
-            .apuPremiumLift(if (selected) 5.dp else 2.dp, CircleShape)
-            .apuBubbleSurface(color = Color.White.copy(alpha = 0.92f), shape = CircleShape)
-            .then(
-                if (selected) {
-                    Modifier.border(2.dp, apuGoldBrush(), CircleShape)
-                } else {
-                    Modifier
-                }
-            )
-            .padding(2.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (bmp != null) {
-            Image(
-                bitmap = bmp.asImageBitmap(),
-                contentDescription = title,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-            )
-        } else {
-            Text(
-                title.take(1).uppercase(),
-                color = Color(0xFF1E2430),
-                fontWeight = FontWeight.Bold,
-            )
-        }
-    }
-}
 
 /** Полоса тем не отнимает ширину у сообщений и поля ввода. */
 @Composable

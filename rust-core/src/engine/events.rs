@@ -134,11 +134,22 @@ impl CoreEvent {
     ///
     /// 0 - не выбрасывать никогда (текст переписки, подтверждение доставки).
     /// 1 - потеря чинится протоколом (галочки пересинхронизируются, куски
-    ///     файлов пере-запрашиваются приёмником).
-    /// 2 - служебная погода сети (presence, gossip) - дёшево потерять.
+    ///     файлов пере-запрашиваются приёмником), а присутствие видно
+    ///     пользователю прямо: выкинутое наблюдение = «друг не в сети».
+    /// 2 - служебная погода сети (статус канала, движение, жизнь движка) -
+    ///     дёшево потерять: она пересоздаётся следующим событием.
     pub fn eviction_rank(&self) -> u8 {
         match self {
             CoreEvent::MessageReceived { .. } | CoreEvent::MessageDelivered { .. } => 0,
+            // Владелец 2026-11-18: «статусы кто онлайн пропадают». Присутствие
+            // раньше стояло в ранге 2, а очередь в тот момент держала 873
+            // события из 1000 - то есть шина уже была на грани, и вытеснялось
+            // именно присутствие как «дешёвое». Наблюдение, выброшенное здесь,
+            // до Kotlin не доходит вовсе: контакт молча считается «не в сети»,
+            // хотя телефон рядом и присылает heartbeat. Ставим присутствие в
+            // ранг 1: под нож идут статус канала и движение, которые следующее
+            // событие пересоздаст.
+            CoreEvent::PeerDiscovered { .. } | CoreEvent::PeerLost { .. } => 1,
             CoreEvent::MessageStatusChanged { .. } | CoreEvent::FileChunkReceived { .. } => 1,
             _ => 2,
         }
@@ -172,8 +183,26 @@ impl EventLane {
 
 /// Encrypted chat and encrypted service packets are indistinguishable here.
 /// Both are prioritised, without inspecting or altering the sealed payload.
+///
+/// Владелец 2026-11-18 (скрин «Болталки»): «статусы кто онлайн пропадают,
+/// хотя должны быть в сети». Присутствие — тоже срочное событие, и вот
+/// почему. `PeerDiscovered` несёт МОМЕНТ наблюдения (`observed_at_ms`), а
+/// Kotlin отбрасывает наблюдение старше 200 с как «устаревшее». Главная
+/// полоса снимает по одному событию за итерацию, а служебные
+/// (`network_status_changed`, `message_status_changed`) валятся пачками во
+/// время переподключения брокера. Пока они разгребаются, свежий
+/// `PeerDiscovered` стоит в очереди, стареет и приходит уже просроченным —
+/// и контакт мигает «не в сети», хотя телефон рядом. Присутствие ставим в
+/// приоритетную группу: она снимается в первую очередь, поэтому
+/// наблюдение уходит к Kotlin свежим.
 fn is_interactive(event: &CoreEvent) -> bool {
-    matches!(event, CoreEvent::MessageReceived { .. } | CoreEvent::MessageDelivered { .. })
+    matches!(
+        event,
+        CoreEvent::MessageReceived { .. }
+            | CoreEvent::MessageDelivered { .. }
+            | CoreEvent::PeerDiscovered { .. }
+            | CoreEvent::PeerLost { .. }
+    )
 }
 
 /// Шина событий — очередь событий для Kotlin
@@ -182,6 +211,17 @@ pub struct EventBus {
     ready: Condvar,
     wake_generation: AtomicU64,
     max_size: usize,
+    /// Сколько событий вытеснено переполнением (всего и по каждому рангу).
+    ///
+    /// Зачем: в отчёте владельца 2026-11-18 было «очередь событий 873» из
+    /// 1000, и по одному числу нельзя было понять, теряются ли наблюдения
+    /// присутствия по дороге. Именно потеря наблюдения выглядит на экране как
+    /// «друг вышел из сети», хотя телефон рядом. Счётчик отвечает на этот
+    /// вопрос числом, а не догадкой.
+    evicted_total: AtomicU64,
+    evicted_service: AtomicU64,
+    evicted_presence: AtomicU64,
+    evicted_retryable: AtomicU64,
 }
 
 impl EventBus {
@@ -191,6 +231,49 @@ impl EventBus {
             ready: Condvar::new(),
             wake_generation: AtomicU64::new(0),
             max_size,
+            evicted_total: AtomicU64::new(0),
+            evicted_service: AtomicU64::new(0),
+            evicted_presence: AtomicU64::new(0),
+            evicted_retryable: AtomicU64::new(0),
+        }
+    }
+
+    /// (всего, служебных, присутствия, пере-запрашиваемых) — для диагностики.
+    pub fn eviction_stats(&self) -> (u64, u64, u64, u64) {
+        (
+            self.evicted_total.load(Ordering::Relaxed),
+            self.evicted_service.load(Ordering::Relaxed),
+            self.evicted_presence.load(Ordering::Relaxed),
+            self.evicted_retryable.load(Ordering::Relaxed),
+        )
+    }
+
+    fn note_eviction(&self, event: &CoreEvent) {
+        let total = self.evicted_total.fetch_add(1, Ordering::Relaxed) + 1;
+        let presence = match event {
+            CoreEvent::PeerDiscovered { .. } | CoreEvent::PeerLost { .. } => {
+                self.evicted_presence.fetch_add(1, Ordering::Relaxed) + 1
+            }
+            CoreEvent::MessageStatusChanged { .. } | CoreEvent::FileChunkReceived { .. } => {
+                self.evicted_retryable.fetch_add(1, Ordering::Relaxed);
+                // Не присутствие: молчим, чтобы не заливать logcat.
+                0
+            }
+            _ => {
+                self.evicted_service.fetch_add(1, Ordering::Relaxed);
+                0
+            }
+        };
+        // Терять наблюдение присутствия дорого: на экране это «друг вышел из
+        // сети». Поэтому каждый такой случай виден в logcat, с накопленным
+        // числом — по отчёту владельца можно отличить «наблюдений не было» от
+        // «были и потерялись в переполненной шине».
+        if presence > 0 {
+            tracing::warn!(
+                "EventBus overflow: evicted presence observation (presence_evicted={} of total={})",
+                presence,
+                total
+            );
         }
     }
 
@@ -201,8 +284,9 @@ impl EventBus {
     /// Отправить событие в шину
     ///
     /// Раунд 119: при переполнении выкидываем сначала САМОЕ СВЕЖЕЕ
-    /// служебное событие (rank 2: presence/gossip), затем пере-запрашиваемые
-    /// (rank 1: куски файлов, статусы). События ранга 0 (входящее сообщение,
+    /// служебное событие (rank 2: статус канала, движение, жизнь движка),
+    /// затем пере-запрашиваемые (rank 1: куски файлов, статусы сообщений и
+    /// присутствие — 2026-11-18). События ранга 0 (входящее сообщение,
     /// подтверждение доставки) не выбрасываются никогда; если очередь состоит
     /// только из них - позволяем ей мягко вырасти: drain Kotlin'а мгновенно
     /// разгрузит её, а потерять переписку хуже, чем ненадолго занять память.
@@ -214,7 +298,9 @@ impl EventBus {
             });
             match victim {
                 Some(i) => {
-                    queue.remove(i);
+                    if let Some(dropped) = queue.remove(i) {
+                        self.note_eviction(&dropped);
+                    }
                 }
                 None => {
                     tracing::warn!(
@@ -580,7 +666,7 @@ mod tests {
     }
 
     #[test]
-    fn main_lane_prioritizes_messages_and_preserves_fifo_in_each_class() {
+    fn main_lane_prioritizes_messages_and_presence_with_fifo_in_each_class() {
         let bus = EventBus::with_defaults();
         bus.emit(presence(1));
         bus.emit(file_chunk(1));
@@ -589,14 +675,17 @@ mod tests {
         bus.emit(CoreEvent::MessageDelivered { message_id: "ack1".into() });
         bus.emit(file_chunk(2));
         bus.emit(message("m2"));
+        bus.emit(CoreEvent::NetworkStatusChanged { status: "relayed".into() });
 
+        assert!(matches!(bus.poll_lane(EventLane::Main, true), Some(CoreEvent::PeerDiscovered { peer_id, .. }) if peer_id == "pk_peer0001"));
         assert!(matches!(bus.poll_lane(EventLane::Main, true), Some(CoreEvent::MessageReceived { message_id, .. }) if message_id == "m1"));
+        assert!(matches!(bus.poll_lane(EventLane::Main, true), Some(CoreEvent::PeerDiscovered { peer_id, .. }) if peer_id == "pk_peer0002"));
         assert!(matches!(bus.poll_lane(EventLane::Main, true), Some(CoreEvent::MessageDelivered { message_id }) if message_id == "ack1"));
-        // A fairness turn processes the oldest non-message without taking a file range.
-        assert!(matches!(bus.poll_lane(EventLane::Main, false), Some(CoreEvent::PeerDiscovered { peer_id, .. }) if peer_id == "pk_peer0001"));
         assert!(matches!(bus.poll_lane(EventLane::Main, true), Some(CoreEvent::MessageReceived { message_id, .. }) if message_id == "m2"));
-        assert!(matches!(bus.poll_lane(EventLane::Main, false), Some(CoreEvent::PeerDiscovered { peer_id, .. }) if peer_id == "pk_peer0002"));
+        // A fairness turn processes the oldest service event without taking a file range.
+        assert!(matches!(bus.poll_lane(EventLane::Main, false), Some(CoreEvent::NetworkStatusChanged { status }) if status == "relayed"));
         assert!(bus.poll_lane(EventLane::Main, true).is_none());
+        assert!(bus.poll_lane(EventLane::Main, false).is_none());
         assert!(matches!(bus.poll_lane(EventLane::File, false), Some(CoreEvent::FileChunkReceived { chunk_index: 1, .. })));
         assert!(matches!(bus.poll_lane(EventLane::File, false), Some(CoreEvent::FileChunkReceived { chunk_index: 2, .. })));
         assert!(bus.is_empty());
@@ -682,24 +771,51 @@ mod tests {
         );
     }
 
-    /// Куски файлов (ранг 1) тоже переживут presence-лаву, но уступают
-    /// сообщениям: при переполнении выкидывается служебное (самое свежее).
+    /// Присутствие (ранг 1) переживает лаву служебных событий: вытесняется
+    /// погода сети, а не наблюдение. Владелец 2026-11-18: «статусы кто онлайн
+    /// пропадают» — выброшенное отсюда наблюдение не доходит до Kotlin, и
+    /// контакт молча показывается «не в сети».
     #[test]
-    fn eviction_prefers_presence_over_chunks_and_messages() {
+    fn eviction_prefers_service_events_over_presence_chunks_and_messages() {
         let bus = EventBus::new(4);
         bus.emit(file_chunk(1));
         for n in 0..3 {
             bus.emit(presence(n));
         }
-        bus.emit(message("m1"));
-        // The newest presence, not the older file range, is evicted.
+        // Переполнение вызывает службой, а не присутствием: под нож идёт она.
+        bus.emit(CoreEvent::NetworkStatusChanged { status: "relayed".into() });
         let drained = bus.drain();
         assert!(matches!(drained.first(), Some(CoreEvent::FileChunkReceived { chunk_index: 1, .. })));
-        assert!(!drained.iter().any(|e| matches!(e, CoreEvent::PeerDiscovered { peer_id, .. } if peer_id == "pk_peer0002")));
+        for n in 0..3 {
+            assert!(
+                drained.iter().any(|e| matches!(e, CoreEvent::PeerDiscovered { peer_id, .. } if peer_id == &format!("pk_peer{n:04}"))),
+                "наблюдение присутствия {n} выброшено при переполнении"
+            );
+        }
+        assert!(
+            !drained.iter().any(|e| matches!(e, CoreEvent::NetworkStatusChanged { .. })),
+            "вытеснено присутствие вместо служебного статуса сети"
+        );
         assert_eq!(drained.len(), 4);
-        assert!(drained
-            .iter()
-            .any(|e| matches!(e, CoreEvent::MessageReceived { message_id, .. } if message_id == "m1")));
+    }
+
+    /// Счётчик вытеснений отвечает на вопрос из отчёта владельца: «очередь
+    /// 873» само по себе не говорит, терялись ли наблюдения присутствия.
+    #[test]
+    fn eviction_stats_count_what_was_dropped() {
+        let bus = EventBus::new(3);
+        for n in 0..3 {
+            bus.emit(presence(n));
+        }
+        // Переполнение вызывают служебные события: они и вытесняются.
+        for _ in 0..4 {
+            bus.emit(CoreEvent::NetworkStatusChanged { status: "relayed".into() });
+        }
+        let (total, service, presence_evicted, retryable) = bus.eviction_stats();
+        assert!(total >= 4, "вытеснения не посчитаны: {total}");
+        assert!(service >= 4, "служебные вытеснения не посчитаны: {service}");
+        assert_eq!(presence_evicted, 0, "присутствие вытеснено при служебной лавине");
+        assert_eq!(retryable, 0);
     }
 
     /// Очередь из одних критичных событий переписки не роняет их:
@@ -722,6 +838,30 @@ mod tests {
         }
     }
 
+    /// Владелец 2026-11-18: «статусы кто онлайн пропадают». Служебная лавина
+    /// переподключения брокера не должна задерживать наблюдение присутствия:
+    /// иначе оно приходит к Kotlin позже TTL (200 с), и наблюдение отбрасывается
+    /// как «устаревшее» — контакт мигает «не в сети», хотя он рядом.
+    #[test]
+    fn presence_is_not_starved_by_service_flood() {
+        let bus = EventBus::with_defaults();
+        // Переподключение брокера: пачка служебных событий впереди наблюдения.
+        for n in 0..40 {
+            bus.emit(CoreEvent::NetworkStatusChanged {
+                status: if n % 2 == 0 { "connecting".into() } else { "relayed".into() },
+            });
+        }
+        bus.emit(presence(1));
+        for n in 40..80 {
+            bus.emit(CoreEvent::NetworkStatusChanged { status: "relayed".into() });
+        }
+        // Первым снимается именно присутствие, а не служебное событие.
+        assert!(
+            matches!(bus.poll_lane(EventLane::Main, true), Some(CoreEvent::PeerDiscovered { peer_id, .. }) if peer_id == "pk_peer0001"),
+            "наблюдение присутствия застряло за служебной лавиной - статус «в сети» потеряется"
+        );
+    }
+
     /// The legacy MQTT event has no peer field; Kotlin must receive null, not an empty sender.
     #[test]
     fn delivery_ack_ffi_preserves_absent_sender() {
@@ -736,6 +876,9 @@ mod tests {
     fn delivery_ack_survives_flood() {
         let bus = EventBus::new(4);
         for n in 0..10 {
+            // Лавина именно служебная: присутствие теперь тоже приоритетное,
+            // и вытеснять его при переполнении больше нельзя (2026-11-18).
+            bus.emit(CoreEvent::NetworkStatusChanged { status: "relayed".into() });
             bus.emit(presence(n));
         }
         bus.emit(CoreEvent::MessageDelivered {
