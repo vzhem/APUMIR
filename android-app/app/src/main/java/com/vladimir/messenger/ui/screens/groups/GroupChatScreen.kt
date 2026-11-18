@@ -2575,14 +2575,13 @@ private fun MessageBubble(
                         },
                     )
                 }
-                // р250: опрос показывается под текстом сообщения (поста) - тем
-                // же пузырём, что и сама карточка файла.
+                // р250: опрос под текстом сообщения; вопрос уже стоит в тексте.
                 if (poll != null) {
                     ApuPollCard(
                         poll = poll,
                         onToggle = onTogglePollChoice,
                         onClose = onClosePoll,
-                        canClose = canModerate || poll.isMine,
+                        canClose = canModerate || poll.isMine, showQuestion = false,
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {

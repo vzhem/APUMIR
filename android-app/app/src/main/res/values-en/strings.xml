@@ -240,6 +240,9 @@
     <string name="settings_logs_hint">Copy a safe report about the network and file transfers</string>
     <string name="settings_support_dev">Support the developer</string>
     <string name="settings_support_dev_hint">Direct transfer, no store fees</string>
+    <string name="settings_official_site">Official site</string>
+    <string name="settings_official_site_hint">Versions, files and project news</string>
+    <string name="settings_official_site_failed">Could not open a browser</string>
     <string name="settings_version">Version</string>
     <string name="settings_core">Core</string>
     <string name="settings_logout_title">Log out of APU?</string>
@@ -869,6 +872,7 @@
     <string name="poll_label">Poll</string>
     <string name="poll_closed">Poll closed</string>
     <string name="poll_close">Close poll</string>
+    <string name="poll_results_done">Got it</string>
     <string name="poll_your_choice">Your choice</string>
     <string name="poll_member">Member</string>
     <string name="poll_and_others">and others</string>
@@ -1335,6 +1339,17 @@
     <string name="notification_scope_groups_hint">All notifications from groups</string>
     <string name="notification_scope_channels">Channels</string>
     <string name="notification_scope_channels_hint">All notifications from channels</string>
+    <string name="notification_alert_title">Sound and vibration</string>
+    <string name="notification_alert_hint">Personal chats, groups and channels are configured separately. On loud the phone sounds, in vibrate mode it vibrates.</string>
+    <string name="notification_alert_app">Whole app</string>
+    <string name="notification_alert_app_hint">Master switch: silences sound and vibration for every section at once</string>
+    <string name="notification_alert_sound">Sound</string>
+    <string name="notification_alert_vibrate">Vibration</string>
+    <string name="notification_channel_both">sound and vibration</string>
+    <string name="notification_channel_sound">sound only</string>
+    <string name="notification_channel_vibrate">vibration only</string>
+    <string name="notification_channel_silent">silent</string>
+    <string name="notification_channel_description">Incoming APU messages</string>
     <string name="notification_scope_topics">Topics and comments</string>
     <string name="notification_scope_topics_hint">Group topics and channel post discussions</string>
     <string name="notification_mute_one_hour">For 1 hour</string>

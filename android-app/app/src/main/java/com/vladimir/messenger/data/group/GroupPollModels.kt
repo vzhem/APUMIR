@@ -43,9 +43,16 @@ data class PollSummary(
     val myChoices: List<Int> = emptyList(),
     /** Кто как проголосовал: пуст у анонимного опроса - имена не показываем. */
     val voters: List<PollVoter> = emptyList(),
+    /**
+     * Сколько человек проголосовало там, где имён не отдают (анонимный опрос).
+     *
+     * Без этого числа анонимный опрос с голосами писал «пока никто не
+     * голосовал»: имена скрыты, и счётчик оставался нулевым.
+     */
+    val anonymousVoters: Int = 0,
 ) {
     /** Сколько всего участников проголосовало (не сумма голосов: в опросе с несколькими вариантами они различаются). */
-    val totalVoters: Int get() = voters.size
+    val totalVoters: Int get() = if (anonymous) anonymousVoters else voters.size
 
     /** Сколько всего голосов отдано (в опросе с несколькими вариантами больше числа проголосовавших). */
     val totalVotes: Int get() = options.sumOf { it.votes }

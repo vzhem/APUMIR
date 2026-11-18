@@ -26,15 +26,41 @@ class DeliveryReceiptCoordinatorTest {
         assertFalse(storedIncomingText("m1", "pk_sender", "chat", false) { row(chat = "other") })
     }
 
+    @Test fun aServiceFrameIsAcknowledgedWithoutAChatRow() = runBlocking {
+        var lookups = 0
+        fun matched(result: Boolean): () -> Boolean = { result }
+        // Пакет истории: строки в переписке не будет никогда, зато без
+        // подтверждения его копия жила бы неделю в резерве переписки.
+        assertTrue(storedIncomingText("eph1-abc", "pk_sender", "chat", false, serviceFrame = true) { lookups++; null })
+        assertEquals(0, lookups)
+        val flags = mutableListOf<Boolean>()
+        assertTrue(acknowledgeStoredIncomingText("eph1-abc", "pk_sender", "chat", false, serviceFrame = true, load = { null }, openedByExpectedSender = matched(true), sendAck = flags::add))
+        assertEquals(listOf(true), flags)
+        // Обычный кадр без строки по-прежнему молчит: правило ужесточено только
+        // для служебных.
+        assertFalse(acknowledgeStoredIncomingText("eph1-abc", "pk_sender", "chat", false, load = { null }, openedByExpectedSender = matched(true), sendAck = flags::add))
+    }
+
+    @Test fun onlyATransportIdOfAServicePacketCountsAsAFrameWithoutRow() {
+        val story = "APUSTORY1:{\"id\":\"s1\",\"kind\":\"publish\",\"text\":\"hi\"}"
+        assertTrue(serviceFrameWithoutRow("eph1-00000000-0000-0000-0000-000000000000", story))
+        assertTrue(serviceFrameWithoutRow("eph1-00000000-0000-0000-0000-000000000000", "APUTYP1|1"))
+        // Обычный UUID истории (старый клиент) - как прежде, без подтверждения.
+        assertFalse(serviceFrameWithoutRow("39513698-1234-4abc-8def-000000000000", story))
+        // Отметку транспорта может надеть кто угодно: служебность подтверждает тело.
+        assertFalse(serviceFrameWithoutRow("eph1-00000000-0000-0000-0000-000000000000", "привет, как дела"))
+        assertFalse(serviceFrameWithoutRow("eph1-not-a-uuid", story))
+    }
+
     @Test fun meshReceiptNeedsStoredTextAndOpenedSenderMatchButLegacyAckRemains() = runBlocking {
         val flags = mutableListOf<Boolean>()
         var checks = 0
         fun matched(result: Boolean): () -> Boolean = { checks++; result }
-        assertFalse(acknowledgeStoredIncomingText("m1", "pk_sender", "chat", false, { null }, matched(true), flags::add))
-        assertFalse(acknowledgeStoredIncomingText("m1", "pk_sender", "chat", false, { row(sender = "pk_other") }, matched(true), flags::add))
+        assertFalse(acknowledgeStoredIncomingText("m1", "pk_sender", "chat", false, load = { null }, openedByExpectedSender = matched(true), sendAck = flags::add))
+        assertFalse(acknowledgeStoredIncomingText("m1", "pk_sender", "chat", false, load = { row(sender = "pk_other") }, openedByExpectedSender = matched(true), sendAck = flags::add))
         assertEquals(0, checks)
-        assertTrue(acknowledgeStoredIncomingText("m1", "pk_sender", "chat", true, { null }, matched(false), flags::add))
-        assertTrue(acknowledgeStoredIncomingText("m1", "pk_sender", "chat", false, { row() }, matched(true), flags::add))
+        assertTrue(acknowledgeStoredIncomingText("m1", "pk_sender", "chat", true, load = { null }, openedByExpectedSender = matched(false), sendAck = flags::add))
+        assertTrue(acknowledgeStoredIncomingText("m1", "pk_sender", "chat", false, load = { row() }, openedByExpectedSender = matched(true), sendAck = flags::add))
         assertEquals(listOf(false, true), flags)
         assertEquals(2, checks)
     }

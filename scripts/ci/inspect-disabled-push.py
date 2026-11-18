@@ -35,10 +35,18 @@ MAX_API_BYTES = 1280 * 1024
 MAX_MODULE_BYTES = 128 * 1024
 MAX_HEALTH_BYTES = 1024
 
-# SHA-256 of the six source modules at CREATION_SHA. These are not secrets.
+# SHA-256 of the six source modules of the deployed version. These are not
+# secrets; they are the bytes `wrangler.push.toml` uploads today, so this
+# inspection can be re-run against the live service (§5 of PUSH_INFRA_SETUP.md).
+#
+# They no longer describe the prototype created at CREATION_SHA: the working
+# service is a different Worker with storage and both switches on, and it is
+# inspected by its own health answer, not by this readback. `worker.mjs` changed
+# when a refused request stopped arming the shard alarm; everything else is byte
+# for byte the creation code.
 # Readback compares decoded bytes, not provider-supplied hashes.
 MODULE_HASHES = {
-    "worker.mjs": "b821d78875fd8ee04414cc1e5b0ef3b38e277a528c291fa16fc25c4fb8248cf1",
+    "worker.mjs": "a3583b6eba5d013bb3a05eb5b8d8e63d188147f00e1b1cff521887d55f957a9d",
     "fcm.mjs": "3fbe9b7ec2379ec6885adfb45a77f13b3f40fd5a052749aa2d7acef6252fd9aa",
     "protocol.mjs": "404ab784fdc9e86d1df74bd2e182dc5a79ba31ea132a5089bd6c8b4f8592f0e1",
     "mailbox-protocol.mjs": "58f08d52403c76a23d9ea330718d32d25ad2870bfab9946371952489e4162ace",

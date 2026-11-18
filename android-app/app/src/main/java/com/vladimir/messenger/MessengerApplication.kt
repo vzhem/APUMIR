@@ -196,6 +196,15 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
             android.util.Log.i("MessengerApp", "early core start deferred: local identity is not ready")
         }
 
+        // Remote push: a no-op in every released build. Only a build that is
+        // Firebase-configured, explicitly marked as a push test build *and* has
+        // a reviewed endpoint host installs the periodic repair job and asks for
+        // a registration attempt here. Nothing below runs while it is disabled,
+        // and the call never starts a network request by itself.
+        if (localIdentityReady) {
+            com.vladimir.messenger.data.push.PushServiceLocator.onStartup(applicationContext)
+        }
+
         // Automatic collection is an Organizer (20 qualified referrals) entitlement.
         try {
             val qualified = ReferralRankStore.qualifiedDirectCount(applicationContext)
@@ -372,6 +381,50 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
                 setShowBadge(true)
             }
             manager.createNotificationChannel(channel)
+            // Владелец 2026-11-17: «если приходит всплывающее сообщение, телефон
+            // должен вибрировать на вибрации и подавать звук на громкой, и то и
+            // то, если так выбрано». На Android 8+ звук и вибрация принадлежат
+            // КАНАЛУ, а настройки уже созданного канала код изменить не может:
+            // общий канал появился раньше и мог остаться без звука. Поэтому у
+            // сообщений свой канал с явными звуком и вибрацией — дальше режим
+            // звонка решает система: «громкая» даёт звук, «вибрация» — вибрацию.
+            val messages = NotificationChannel(
+                CHANNEL_MESSAGES_ID,
+                "Сообщения",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Новые сообщения: всплывают, звучат и вибрируют"
+                setShowBadge(true)
+                setSound(
+                    android.provider.Settings.System.DEFAULT_NOTIFICATION_URI,
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build(),
+                )
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 250, 200, 250)
+                enableLights(true)
+            }
+            manager.createNotificationChannel(messages)
+            // Тихие сообщения (префикс в тексте) — отдельный канал: «тихое»
+            // значит без звука и вибрации, а на современном Android это решает
+            // именно канал, а не флаг уведомления.
+            val quiet = NotificationChannel(
+                CHANNEL_MESSAGES_QUIET_ID,
+                "Сообщения без звука",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Тихие сообщения: без звука и вибрации"
+                setShowBadge(true)
+                setSound(null, null)
+                enableVibration(false)
+            }
+            manager.createNotificationChannel(quiet)
+            // Звук и вибрация по разделам (владелец 2026-11-17): на каждый
+            // раздел — четыре канала, потому что менять сигнал существующего
+            // канала код не может. Выбор человека живёт в NotificationAlertStore.
+            com.vladimir.messenger.data.notification.NotificationAlertChannels.ensure(this, manager)
             // Раунд 142: служебная плашка «на связи» - МИНИМАЛЬНАЯ важность:
             // без иконки в статус-баре, без звука, в самом низу шторки
             // (владелец: «это уведомление нужно спрятать от абонента, нужны
@@ -424,6 +477,18 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
 
         /** Тревожные сообщения SOS из групп: отдельный громкий канал. */
         const val CHANNEL_SOS_ID = "apu_sos_alerts"
+
+        /**
+         * Сообщения: собственный канал со звуком и вибрацией.
+         *
+         * Идентификатор новый намеренно. Настройки канала после создания код
+         * изменить не может, а прежний общий канал (`CHANNEL_ID`) успел
+         * появиться без звука — и остался таким на телефонах владельца.
+         */
+        const val CHANNEL_MESSAGES_ID = "apu_messages_v2"
+
+        /** Тихие сообщения: без звука и вибрации (важность LOW, без сигнала). */
+        const val CHANNEL_MESSAGES_QUIET_ID = "apu_messages_quiet_v1"
     }
 
 

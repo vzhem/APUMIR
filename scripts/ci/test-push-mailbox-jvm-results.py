@@ -75,7 +75,14 @@ class MailboxResultsTest(unittest.TestCase):
                                *((name, checker.EXPECTED[checker.PREFIX + name]) for name in (
                                    "PushHttpClientTest", "PushWakeCryptoTest", "PushMailboxHttpClientTest",
                                    "PushMailboxHttpsTransportTest", "PushHttpLoopbackTlsTest", "PushMailboxDrainTest",
+                                   "PushSignalPolicyTest", "PushRuntimeConfigTest", "PushRuntimeCoordinatorTest", "FcmTokenCipherTest",
+                                   "PushDrainTrustGateTest", "PushRegistrationFlowTest",
+                                   "PushSignalInboxTest", "PushReceiveWindowTest", "PushWakeSyncTest",
+                                   "PushFullScanTest", "PushSignalSinkTest", "PushTargetsTest",
+                                   "PushTrustResolverTest", "PushTokenRegistrarTest",
+                                   "PushTokenErrorCodeTest",
                                    "PushMailboxTextPolicyTest", "PushMailboxMessageSealerTest", "PushMailboxMessageOpenerTest",
+                                   "PushEpochImportTest", "PushWakeSignalTest",
                                ))):
             source = (tests / (name + ".kt")).read_text(encoding="utf-8")
             methods = re.findall(r"@Test\s+fun\s+([A-Za-z_]\w*)\s*\(", source)

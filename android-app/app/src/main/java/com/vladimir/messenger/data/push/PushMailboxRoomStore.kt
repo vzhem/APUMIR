@@ -17,11 +17,13 @@ import kotlinx.coroutines.ensureActive
  * It inserts the row, unread count, preview and pending-alert flag atomically.
  *
  * The suppression store lives outside Room. Its writers must persist a
- * tombstone before idempotent Room cleanup. Ordinary single-message deletion
- * does not yet satisfy that contract, so this class must NOT be connected to a
- * live push runtime. The caller must also hold a reviewed identity/restore gate
- * across this transaction and revalidate trust before any later network ACK.
- * [current] is only a non-blocking snapshot check and cannot prevent ABA.
+ * tombstone before idempotent Room cleanup; ordinary single-message deletion
+ * does that since `MessageDeletionRepository.deleteLocal` records the ids it is
+ * about to erase, but that store is a guard against resurrection, not a barrier:
+ * it is read once per envelope, not held across the transaction. The caller must
+ * also hold a reviewed identity/restore gate across this transaction and
+ * revalidate trust before any later network ACK. [current] is only a
+ * non-blocking snapshot check and cannot prevent ABA.
  *
  * A conflicting, unsupported, suppressed, stale, or ambiguous item is RETRY,
  * not proof of delivery. Even a durable tombstone is not ACKed here. Existing

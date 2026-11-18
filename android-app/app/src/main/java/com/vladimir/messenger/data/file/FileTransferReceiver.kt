@@ -234,8 +234,7 @@ class FileTransferReceiver(
                 if (changed) {
                     // Диагностика: в журнале «Логи» появится строка словами, а не
                     // только в системном журнале — иначе причину не видно.
-                    com.vladimir.messenger.data.diagnostics.TransferDiagnostics
-                        .notePeerKeyChanged()
+                    TransferDiagnostics.notePeerKeyChanged(TransferDiagnostics.KeyChangedPath.HELLO)
                     Log.w(
                         TAG,
                         "File HELLO from $senderId REJECTED: signed exchange binding differs " +

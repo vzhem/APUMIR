@@ -95,7 +95,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
 
     def test_report_keeps_the_privacy_promise(self):
         report = source(DIAG / "DiagnosticsReport.kt")
-        self.assertIn('const val SCHEMA = "apu-diag/5"', report)
+        self.assertIn('const val SCHEMA = "apu-diag/6"', report)
         for part in (
             "Приватность", "текст переписки", "имена файлов", "ключи", "contact ID", "UUID сообщений",
         ):
@@ -111,11 +111,232 @@ class DiagnosticsContractsTest(unittest.TestCase):
         collector = source(DIAG / "TransferDiagnostics.kt")
         self.assertIn("DiagnosticsPrivacy.redact", collector)
 
+    def test_wake_path_is_visible_in_the_report_and_wired(self):
+        """Сигнал обязан быть видно: разбудили на месте или ушли в задачу.
+
+        Ровно этот класс ошибки стоил трёх выпусков: путь существовал в коде, но
+        в отчёте его не было, поэтому «ничего не пришло» одинаково выглядело и
+        при отсутствии сигнала, и при сигнале без пробуждения.
+        """
+        report = source(DIAG / "PushDiagnosticsReport.kt")
+        for marker in ("разбудили_на_месте=", "inProcessWakeAtMs", "workerWakeAtMs"):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, report)
+        service = source(MAIN / "push/ApuFirebaseMessagingService.kt")
+        # Живой процесс подталкивается на месте, и только без ядра ставится задача.
+        nudge = service.find("PushCoreWake.nudge(")
+        worker = service.find("RelayWakeWorker.enqueueOnce(")
+        self.assertTrue(nudge >= 0, "сигнал больше не будит живой процесс")
+        self.assertTrue(worker > nudge, "фоновая задача обязана быть запасным путём, а не первым")
+        self.assertIn("noteInProcessWake()", service)
+        self.assertIn("noteWorkerWake()", service)
+        wake = source(MAIN / "data/push/PushCoreWake.kt")
+        for marker in ("RustBridge.isRunning()", "triggerGossipDiscovery()", "onForegroundRecovery()"):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, wake)
+        self.assertNotIn("startForegroundService", wake, "пробуждение не поднимает службу само")
+
+    def test_a_failed_registration_names_the_step_that_stopped(self):
+        """«фаза=failed» обязана сопровождаться причиной, иначе отчёт бесполезен.
+
+        Отчёт 2026-11-16 с телефона: гейт открыт, служба отвечает, а
+        `маршрутов=0` и `фаза=failed`. Подсказка под фазой перечисляла сеть,
+        отказ службы и неготовый ключ обмена одновременно — то есть не
+        отвечала ни на один вопрос, и разбор каждым новым отчётом начинался
+        заново. Причина должна быть отдельной строкой с фиксированным именем.
+        """
+        reasons = source(DIAG / "PushRegisterReason.kt")
+        report = source(DIAG / "PushDiagnosticsReport.kt")
+        store = source(MAIN / "data/push/PushDiagnostics.kt")
+        runner = source(MAIN / "data/push/PushRegistrationRunner.kt")
+        registrar = source(MAIN / "data/push/PushTokenRegistrar.kt")
+        for name in (
+            "PEER_NOT_READY", "TARGETS_UNREADABLE", "NO_PINNED_PEERS",
+            "REQUEST_INVALID", "SERVER_STALE",
+            "SERVER_THROTTLED", "SERVER_UNAVAILABLE", "STORAGE_UNAVAILABLE",
+            "TOKEN_UNAVAILABLE", "JOURNAL_UNAVAILABLE", "REGISTERED",
+        ):
+            with self.subTest(reason=name):
+                self.assertIn(name, reasons)
+        # Строка в отчёте и хранение причины: без записи вPreferences причина
+        # не доживёт до следующего открытия «Логов».
+        self.assertIn("причина=${push.registrationReason.name.lowercase()}", report)
+        self.assertIn("val registrationReason: PushRegisterReason", report)
+        self.assertIn("fun noteRegistrationReason", store)
+        self.assertIn("regReason", store)
+        # И её действительно пишут на каждом шаге регистрации, а не только на
+        # удаче: причина отказа важнее причины успеха.
+        self.assertIn("private val recordReason: (PushRegisterReason) -> Unit", runner)
+        self.assertIn("private val recordReason: (PushRegisterReason) -> Unit", registrar)
+        self.assertIn("reason(PushRegisterReason.PEER_NOT_READY)", runner)
+        self.assertIn("reason(PushRegisterReason.TARGETS_UNREADABLE)", registrar)
+        self.assertIn("reasonSink", registrar)
+        # Отчёт читает ПОСЛЕДНЮЮ записанную причину: значение в Preferences
+        # перезаписывается. Поэтому на отказе нельзя писать грубую догадку
+        # поверх уже названного шага — иначе отчёт снова показывает три
+        # болезни сразу. Ровно это и случилось на телефоне: токен получен,
+        # журнал записан, операция для пары не прошла, раннер назвал шаг, а
+        # регистратор вернулся досрочно и затёр причину «причина не записана».
+        self.assertIn("lastReason != PushRegisterReason.NONE", registrar)
+        self.assertNotIn("reason(if (noTargets) PushRegisterReason.NO_PINNED_PEERS else lastReason)", registrar)
+        # Отказ журнала токена некому назвать, кроме координатора: до перебора
+        # пар дело не доходит, и без этой строки причина остаётся от прошлого
+        # прохода — то есть от другой ошибки.
+        self.assertIn("JOURNAL_UNAVAILABLE", source(MAIN / "data/push/PushRuntimeCoordinator.kt"))
+        # Причина не заменяет фазу: фаза говорит «что вышло», причина — «где встали».
+        self.assertIn('appendLine("фаза=${push.phase.name.lowercase()}")', report)
+
+    def test_every_presence_constant_the_code_names_is_declared(self):
+        """Ссылка на необъявленную константу должна падать здесь, а не на компиляции.
+
+        Ровно эта ошибка уже была: `PRESENCE_UNKNOWN_CONTACT` упоминался в
+        `PresenceContactResolver.kt` и в разделе `[присутствие]`, а объявления
+        `const val` не получилось — и `:app:compileReleaseKotlin` упал на двух
+        файлах сразу. Регулярка учитывает и перенос имени на следующую строку:
+        `PresenceReportStrings\n    .PRESENCE_…` — именно так он и написан.
+        """
+        strings = DIAG / "PresenceReportStrings.kt"
+        body = strings.read_text(encoding="utf-8")
+        declared = set()
+        for line in body.splitlines():
+            m = re.match(
+                r"\s*(?:@\w+\s+)*(?:(?:internal|private|public|const)\s+)*"
+                r"(?:val|var|fun)\s+([A-Za-z_]\w*)",
+                line,
+            )
+            if m:
+                declared.add(m.group(1))
+        # Константы presence и общий список ключей обязаны существовать.
+        self.assertIn("PRESENCE_UNKNOWN_CONTACT", declared)
+        self.assertIn("counterKeys", declared)
+        self.assertIn("appendPresenceLine", declared)
+        missing = []
+        for path in sorted(MAIN.rglob("*.kt")):
+            if path == strings:
+                continue
+            text = strip_comments(path.read_text(encoding="utf-8"))
+            for m in re.finditer(r"PresenceReportStrings(?:\s*\.\s*|\.)([A-Z][A-Z0-9_]*)", text):
+                name = m.group(1)
+                if name not in declared:
+                    missing.append("%s: PresenceReportStrings.%s" % (path.relative_to(ROOT), name))
+        self.assertEqual(missing, [], "references to constants PresenceReportStrings does not declare")
+
+    def test_a_direct_delivery_ends_the_relay_obligation(self):
+        """Доставленное прямо не должно предлагаться соседям «на всякий случай».
+
+        Владелец 2026-11-15: «если сообщение сразу доходит, оно не должно
+        больше никому слаться для резервных копий — задача выполнена». Оба
+        конца этой цепочки закреплены здесь: ядро снимает удержание в момент
+        успешной прямой отправки, и приложение подтверждает доставку, когда
+        ряд ушёл в SENT.
+        """
+        core = ROOT / "rust-core/src/engine/core.rs"
+        body = core.read_text(encoding="utf-8")
+        start = body.index("let direct_send_ok = {")
+        end = body.index("// M3(d): no direct address", start)
+        success = body[start:end]
+        # Успех прямой отправки завершает обязательство, а не начинает его.
+        self.assertIn("self.release_delivered(&message_id);", success)
+        # Никакого «пользовательский повтор при успешной отправке всё равно
+        # оставляет резерв»: именно так доставленная строка уезжала соседям.
+        # Комментарии снимаем — в них это имя упомянуто как история ошибки.
+        code = strip_comments(success)
+        self.assertNotIn("direct_send_ok && !refresh_retention", code)
+        self.assertNotIn("refresh_retention", code)
+        # Один и тот же выход для прямого успеха и для квитанции приложения:
+        # два разных вызова — это два разных поведения.
+        self.assertIn("pub fn confirm_message_delivered(&self, message_id: &str) -> bool {", body)
+        self.assertIn("self.release_delivered(message_id)", body)
+        self.assertEqual(body.count("fn release_delivered("), 1)
+        chat = (MAIN / "data/repository/ChatRepository.kt").read_text(encoding="utf-8")
+        self.assertIn("confirmDirectDelivery(messageId)", chat)
+        helper = MAIN / "data/repository/DirectDeliveryConfirmation.kt"
+        self.assertTrue(helper.exists(), "the confirmation call must live beside its reasoning")
+        self.assertIn("RustBridge.confirmMessageDelivered(messageId)", helper.read_text(encoding="utf-8"))
+
+    def test_a_service_receipt_releases_the_hold_it_proves(self):
+        """Квитанция служебного кадра обязана снимать удержание резервной копии.
+
+        Владелец 2026-11-15, отчёт с телефона на 517: «ACK без локальной строки
+        =1004» при живых «MQTT: delivery ACK received for eph1-[id]». Причина:
+        снятие удержания звалось только тогда, когда находилась и обновлялась
+        своя строка в базе, а у служебного кадра (`eph1-…`, см.
+        `EphemeralControl.transportId`) строки в переписке не бывает. Доставленный
+        кадр продолжал жить резервной копией и пере-предлагаться соседям и
+        брокеру до истечения срока.
+
+        Признак транспортного ID и снятие удержания по нему закреплены здесь:
+        без них отчёт с телефона снова покажет копящийся резерв «своих».
+        """
+        control = source(MAIN / "data/security/EphemeralControl.kt")
+        self.assertIn("fun isTransportId(id: String): Boolean", control)
+        # Один источник правды для префикса: сборка ID и его распознавание не
+        # имеют права разойтись.
+        self.assertIn('private const val TRANSPORT_PREFIX = "eph1-"', control)
+        self.assertIn("TRANSPORT_PREFIX + UUID.nameUUIDFromBytes(", strip_comments(control))
+        routing = source(MAIN / "service/ScopedDeliveryRouting.kt")
+        body = routing.split("internal suspend fun routeOutgoingDeliveryAck(", 1)[1]
+        self.assertIn(
+            "com.vladimir.messenger.data.security.EphemeralControl.isTransportId(messageId)",
+            body,
+        )
+        # Снятие есть на ОБОИХ путях: у старого MQTT-события отправителя нет
+        # вовсе, а именно им приходит «delivery ACK received for eph1-[id]».
+        legacy = body[body.index("if (senderId == null) {"):body.index("val result = applyPeerScopedDeliveryAck(")]
+        self.assertIn("if (serviceFrame) release(messageId)", legacy)
+        scoped = body[body.index("val result = applyPeerScopedDeliveryAck("):]
+        self.assertIn("} else if (serviceFrame) {", scoped)
+        # И между ветками снятия быть не может: чужой узел, назвавшийся
+        # получателем, не имеет права снять нашу резервную копию до сверки.
+        between = body[body.index("return changed"):body.index("val result = applyPeerScopedDeliveryAck(")]
+        self.assertNotIn("release(", between)
+        # Служебный кадр не становится поводом слать зеркальную пересылку.
+        self.assertIn("if (result != ScopedDeliveryAck.REJECTED)", scoped)
+
+    def test_every_diagnostics_helper_the_code_calls_actually_exists(self):
+        """Вызов несуществующей функции должен падать здесь, а не на компиляции.
+
+        Ровно эта ошибка сломала 516: `PresenceReportStrings.appendPresenceLine`
+        позвали с лишним аргументом, а `PeerRankBroadcaster` — с несуществующей
+        `noteRankRefusal`, и красным стал каждый прогон тестов, хотя сами тесты
+        были целы. Регулярка учитывает и перенос вызова на следующую строку:
+        `TransferDiagnostics\n    .noteRankRefusal(...)` — именно так он и
+        написан в PeerRankBroadcaster, и именно поэтому прежние проверки его не
+        видели.
+        """
+        diag = DIAG / "TransferDiagnostics.kt"
+        declared = set()
+        for line in source(diag).splitlines():
+            m = re.match(
+                r"\s*(?:@\w+\s+)*(?:(?:internal|private|public|suspend|inline|override|operator|external)\s+)*"
+                r"(?:fun|val|var|const val|object|class|data class|enum class)\s+([A-Za-z_]\w*)",
+                line,
+            )
+            if m:
+                declared.add(m.group(1))
+        self.assertIn("noteRankRefusal", declared)
+        self.assertIn("count", declared)
+        missing = []
+        for path in sorted(MAIN.rglob("*.kt")):
+            if path == diag:
+                continue
+            text = path.read_text(encoding="utf-8")
+            for m in re.finditer(r"TransferDiagnostics(\s*\.\s*[A-Za-z_]\w*)", text):
+                name = re.search(r"\.\s*([A-Za-z_]\w*)$", m.group(1)).group(1)
+                # Имя файла в комментариях и строках — не вызов.
+                if name == "kt":
+                    continue
+                if name not in declared:
+                    missing.append("%s: TransferDiagnostics.%s" % (path.relative_to(ROOT), name))
+        self.assertEqual(missing, [], "calls to helpers TransferDiagnostics does not declare")
+
     def test_report_has_every_section_the_owner_reads(self):
         report = (source(DIAG / "DiagnosticsReport.kt") + source(DIAG / "UpdateDiagnosticsReport.kt")
-                  + source(DIAG / "CoreDiagnosticStage.kt"))
+                  + source(DIAG / "CoreDiagnosticStage.kt") + source(DIAG / "PushDiagnosticsReport.kt")
+                  + source(DIAG / "PresenceReportStrings.kt"))
         for section in (
             "[сводка]",
+            "[push]",
             "[окружение]",
             "[сеть]",
             "[обновления]",
@@ -125,12 +346,42 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "[сообщения]",
             "[передачи]",
             "[сессия]",
+            "[присутствие]",
             "[журнал]",
             "[лог процесса]",
         ):
             with self.subTest(section=section):
                 self.assertIn(section, report)
         # Сводка отвечает на вопросы, за которыми открывают «Логи».
+        # Присутствие — часть отчёта: раздел счётчиков наблюдателя живёт в
+        # PresenceReportStrings.kt и строится только из полей, которые ядро
+        # передаёт; пустых значений в нём не появляется.
+        presence = source(DIAG / "PresenceReportStrings.kt")
+        for marker in (
+            "\"[присутствие]\"",
+            "fun appendPresenceLine(facts: DiagnosticsFacts)",
+            "val counterKeys",
+            "PRESENCE_OBSERVED = \"presence_observed\"",
+            "PRESENCE_DISCARDED_STALE = \"presence_discarded_stale\"",
+            "PRESENCE_LOST = \"presence_lost\"",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, presence)
+        # Вызов и объявление сходятся по арности: в 516 сюда передали лишний
+        # второй аргумент (context) и сборка упала на несуществующей перегрузке.
+        core = source(DIAG / "DiagnosticsReport.kt")
+        self.assertIn("fun appendPresenceLine(facts: DiagnosticsFacts): String", presence)
+        self.assertIn("PresenceReportStrings.appendPresenceLine(facts)", core)
+        self.assertNotIn("appendPresenceLine(facts,", core)
+        self.assertNotIn("appendPresenceLine(facts, null", core)
+        # Раздел счётчиков присутствия действительно встроен в отчёт.
+        self.assertIn("appendPresence(facts)", core)
+        # Ни одного поля, которого нет в DiagnosticsFacts: иначе раздел снова
+        # сломает сборку (ровно так она и ломалась в 516).
+        for phantom in ("lastPeerDiscoveredAtMs", "presenceDiscardedCount", "beaconLeftCount"):
+            with self.subTest(phantom=phantom):
+                self.assertNotIn(phantom, presence)
+
         for title in ("Сеть", "Брокер", "Ядро", "Сообщения", "Передачи", "Прямой канал", "Батарея"):
             with self.subTest(title=title):
                 self.assertIn('"%s"' % title, report)
@@ -141,7 +392,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
         core = (ROOT / "rust-core/src/engine/core.rs").read_text()
         assistance = (ROOT / "rust-core/src/network/peer_assistance.rs").read_text()
         race = (ROOT / "rust-core/src/network/helper_delivery.rs").read_text()
-        self.assertIn('const val SCHEMA = "apu-diag/5"', report)
+        self.assertIn('const val SCHEMA = "apu-diag/6"', report)
         self.assertIn("HelperRouteDiagnosticsParser.parse(all)", collector)
         self.assertIn('"ONLINE_HELPER"', collector)
         for marker in (
@@ -673,7 +924,9 @@ class DiagnosticsContractsTest(unittest.TestCase):
 
     def test_messages_report_both_directions_and_reasons(self):
         """Жалоба «от него не приходит» должна разбираться по отчёту, а не на слух."""
-        report = source(DIAG / "DiagnosticsReport.kt")
+        # Строка про несовпавший ключ переехала в отдельный файл рядом
+        # (правило god-файлов), поэтому контракт смотрит на оба файла.
+        report = source(DIAG / "DiagnosticsReport.kt") + source(DIAG / "KeyMismatchReport.kt")
         for marker in (
             "const val MSG_IN = ",
             "const val MSG_OUT = ",
@@ -765,7 +1018,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
         for marker in (
             "HelloResult.REJECTED_KEY_CHANGED",
             "TransferDiagnostics",
-            "notePeerKeyChanged()",
+            "notePeerKeyChanged(",
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, receiver)
@@ -848,8 +1101,16 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertIn("routeOutgoingDeliveryAck(messageId", service)
         routing = source(MAIN / "service/ScopedDeliveryRouting.kt")
         self.assertIn("applyOutgoingDeliveryAck(messageId", routing)  # legacy MQTT has no sender
-        self.assertLess(routing.index("applyPeerScopedDeliveryAck("), routing.index("release(messageId)"))
-        self.assertLess(routing.index("release(messageId)"), routing.index("forward?.invoke()"))
+        # Старый MQTT-путь: сначала запись, потом снятие (в том числе для
+        # служебного кадра, у которого строки в переписке не бывает).
+        legacy = routing[routing.index("if (senderId == null) {"):routing.index("val result = applyPeerScopedDeliveryAck(")]
+        self.assertLess(legacy.index("applyOutgoingDeliveryAck("), legacy.index("release(messageId)"))
+        # Ветка с заявленным отправителем: сверка строки с получателем идёт
+        # РАНЬШЕ снятия удержания — иначе чужой узел снимал бы нашу резервную
+        # копию, назвавшись получателем.
+        scoped = routing[routing.index("val result = applyPeerScopedDeliveryAck("):]
+        self.assertLess(scoped.index("applyPeerScopedDeliveryAck("), scoped.index("release(messageId)"))
+        self.assertLess(scoped.index("release(messageId)"), scoped.index("forward?.invoke()"))
         self.assertIn("result == ScopedDeliveryAck.UPDATED || result == ScopedDeliveryAck.ALREADY_COMMITTED", routing)
         self.assertIn("if (result != ScopedDeliveryAck.REJECTED)", routing)  # MISSING may exist on the partner
         scoped = source(MAIN / "data/receipt/ScopedDeliveryAck.kt")
@@ -902,7 +1163,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
         cf_duplicate = service.index("if (existingMsg != null && cfContent != null) {", cf_start)
         cf_new = service.index("if (cfContent == null) {", cf_duplicate)
         cf = service[cf_duplicate:cf_new]
-        self.assertLess(service.index("PushControlIngress.isReserved(cfContent)", cf_start), cf_duplicate)
+        self.assertLess(service.index("PushControlIngress.reservedUnlessEpochAvailable(applicationContext, cfContent", cf_start), cf_duplicate)
         self.assertIn("classifyCfDuplicate(existingMsg.isFromMe, existingMsg.senderId, existingMsg.content, senderId", cf)
         self.assertIn("MessageSealer.openedByExpectedSender(parsed.content, senderId)", cf)
         self.assertIn("if (DeliveryAckWire.isPacket(incomingText)) incomingText else storedText", coordinator)

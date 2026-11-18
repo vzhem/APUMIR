@@ -1,0 +1,176 @@
+package com.vladimir.messenger.data.push
+
+import java.util.concurrent.CancellationException
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class PushTrustResolverTest {
+    private val nodeId = "pk_" + "1".repeat(32)
+    private val peerId = "pk_" + "2".repeat(32)
+    private val localBinding = ByteArray(4) { 1 }
+    private val peerBinding = ByteArray(4) { 2 }
+    private val secret = ByteArray(32) { 3 }
+
+    private fun state(phase: String = "a", registeredAt: String = "1", epoch: String = "ab".repeat(16)): PushRegistrationState.State =
+        PushRegistrationState.decode(
+            listOf(
+                "APUPREG1", phase, "1", "1", "-", "09".repeat(32), "0a".repeat(32), epoch,
+                "56".repeat(16), registeredAt, if (registeredAt == "0") "-" else "0b".repeat(32), "0",
+            ).joinToString("|"),
+        ) ?: error("invalid test state")
+
+    private fun resolver(
+        state: PushRegistrationState.State? = state(),
+        pinned: ByteArray? = peerBinding,
+        secretValue: ByteArray? = secret,
+        local: ByteArray? = localBinding,
+        crypto: PushWakeCrypto = testCrypto(),
+    ) = PushTrustResolver(
+        localNodeId = { nodeId },
+        localBinding = { local?.copyOf() },
+        localSecret = { secretValue?.copyOf() },
+        pinnedPeer = { pinned?.copyOf() },
+        registration = {
+            if (state == null) PushRegistrationStore.Result.Missing else PushRegistrationStore.Result.Ready(state)
+        },
+        crypto = crypto,
+    )
+
+    /** Tests only need the seam to exist here; derivation is covered separately. */
+    private fun testCrypto(): PushWakeCrypto = PushWakeCrypto(
+        derive = { _, _, _, _, _ -> ByteArray(64) },
+        sign = { _, _, _, _, _, _, _ -> error("not used") },
+        recordFailure = {},
+    )
+
+    @Test fun aLivePairYieldsAPassBoundToTheCurrentValues() = runBlocking {
+        val pass = resolver().resolve(peerId)
+        assertNotNull(pass)
+        pass!!.use {
+            assertEquals(nodeId, it.localId)
+            assertEquals(peerId, it.peerId)
+            // State has no equality: compare the fields the pass is bound to.
+            assertEquals(state().phase, it.registration?.phase)
+            assertEquals(state().epochHex, it.registration?.epochHex)
+            assertEquals(state().registeredAtMs, it.registration?.registeredAtMs)
+            assertTrue(it.localBinding.contentEquals(localBinding))
+            assertTrue(it.pinnedPeerBinding.contentEquals(peerBinding))
+        }
+    }
+
+    @Test fun missingValuesAreNeverTurnedIntoTrust() = runBlocking {
+        assertNull(resolver(pinned = null).resolve(peerId))
+        assertNull(resolver(secretValue = null).resolve(peerId))
+        assertNull(resolver(local = null).resolve(peerId))
+        assertNull(resolver(state = null).resolve(peerId))
+        // A self-pin cannot be a peer.
+        assertNull(resolver(pinned = localBinding).resolve(peerId))
+    }
+
+    @Test fun aReceivingPassRequiresAServerConfirmedRegistration() = runBlocking {
+        val unregistered = state(registeredAt = "0")
+        // Registration may proceed before the first acceptance, receiving may not.
+        assertNotNull(resolver(state = unregistered).resolveForRegistration(peerId))
+        assertNull(resolver(state = unregistered).resolve(peerId))
+
+        val revoking = state(phase = "r", registeredAt = "0")
+        assertNull(resolver(state = revoking).resolve(peerId))
+        assertNull(resolver(state = revoking).resolveForRegistration(peerId))
+    }
+
+    @Test fun aFirstRegistrationNeedsNoRecordYet() = runBlocking {
+        // Замкнутый круг из отчёта 518: запись заводит только register через
+        // journal.ensure, а ensure звался ПОСЛЕ resolveForRegistration. Пока
+        // отсутствие записи давало null, первая регистрация была невозможна,
+        // и «маршрутов=0» не двигался ни одним повтором.
+        assertNotNull(resolver(state = null).resolveForRegistration(peerId))
+        // Приём такой записи не принимает: маршрута ещё не существует.
+        assertNull(resolver(state = null).resolve(peerId))
+        // И Pass с отсутствующей записью ничего не выдумывает: эпохи нет.
+        resolver(state = null).resolveForRegistration(peerId)!!.use {
+            assertNull(it.registration)
+        }
+    }
+
+    @Test fun anUnreadableJournalIsNotAnEmptyJournal() = runBlocking {
+        val unavailable = PushTrustResolver(
+            localNodeId = { nodeId },
+            localBinding = { localBinding.copyOf() },
+            localSecret = { secret.copyOf() },
+            pinnedPeer = { peerBinding.copyOf() },
+            registration = { PushRegistrationStore.Result.Unavailable },
+            crypto = testCrypto(),
+        )
+        assertNull(unavailable.resolve(peerId))
+    }
+
+    @Test fun aPassNeverInventsMaterialFromAFailingOrMalformedDerivation() = runBlocking {
+        // A failing FFI must not become a capability.
+        val failing = PushTrustResolver(
+            localNodeId = { nodeId },
+            localBinding = { localBinding.copyOf() },
+            localSecret = { secret.copyOf() },
+            pinnedPeer = { peerBinding.copyOf() },
+            registration = { PushRegistrationStore.Result.Ready(state()) },
+            crypto = PushWakeCrypto(
+                derive = { _, _, _, _, _ -> throw IllegalStateException("ffi") },
+                sign = { _, _, _, _, _, _, _ -> error("not used") },
+                recordFailure = {},
+            ),
+        ).resolve(peerId)!!
+        failing.use { pass ->
+            assertNull(pass.derive("ab".repeat(16)))
+        }
+
+        // A malformed or empty epoch never reaches the FFI at all.
+        val withMaterial = PushTrustResolver(
+            localNodeId = { nodeId },
+            localBinding = { localBinding.copyOf() },
+            localSecret = { secret.copyOf() },
+            pinnedPeer = { peerBinding.copyOf() },
+            registration = { PushRegistrationStore.Result.Ready(state()) },
+            crypto = PushWakeCrypto(
+                derive = { _, _, _, _, _ -> error("must not be called") },
+                sign = { _, _, _, _, _, _, _ -> error("not used") },
+                recordFailure = {},
+            ),
+        ).resolve(peerId)!!
+        withMaterial.use { pass ->
+            assertNull(pass.derive(""))
+            assertNull(pass.derive("00"))
+            assertNull(pass.derive("0A".repeat(16)))
+        }
+    }
+
+    @Test fun aSnapshotIsTheSameLiveReadsWithoutDerivation() = runBlocking {
+        val snapshot = resolver().snapshot(nodeId, peerId)
+        assertNotNull(snapshot)
+        snapshot!!.apply {
+            assertEquals(nodeId, senderId)
+            assertEquals(peerId, recipientId)
+            assertTrue(localBinding.contentEquals(this@PushTrustResolverTest.localBinding))
+        }
+        assertNull(resolver(pinned = null).snapshot(nodeId, peerId))
+    }
+
+    @Test fun cancellationPropagatesFromEveryReader() = runBlocking {
+        var cancelled = false
+        try {
+            PushTrustResolver(
+                localNodeId = { throw CancellationException("cancelled") },
+                localBinding = { null },
+                localSecret = { null },
+                pinnedPeer = { null },
+                registration = { PushRegistrationStore.Result.Missing },
+                crypto = testCrypto(),
+            ).resolve(peerId)
+        } catch (_: CancellationException) {
+            cancelled = true
+        }
+        assertTrue(cancelled)
+    }
+}

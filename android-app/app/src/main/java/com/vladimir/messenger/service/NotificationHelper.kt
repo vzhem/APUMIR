@@ -14,6 +14,8 @@ import androidx.core.content.ContextCompat
 import com.vladimir.messenger.MainActivity
 import com.vladimir.messenger.MessengerApplication
 import com.vladimir.messenger.R
+import com.vladimir.messenger.data.notification.NotificationAlertChannels
+import com.vladimir.messenger.data.notification.NotificationAlertStore
 import com.vladimir.messenger.data.local.dao.ChatDao
 import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.notification.FlashlightMessageKind
@@ -95,6 +97,17 @@ class NotificationHelper @Inject constructor(
             }
         }
 
+        // Человек читает именно этот чат и приложение на экране: плашка только
+        // гасила бы и подсвечивала экран уже прочитанным сообщением.
+        // В фоне правило не действует — там уведомление обязательно.
+        if (com.vladimir.messenger.data.notification.OpenChatGate.isReading(
+                chatId, DeliveryCadence.isForeground(),
+            )
+        ) {
+            android.util.Log.i("NotificationHelper", "Message notification suppressed: chat is open")
+            return IncomingNotificationPost.SUPPRESSED
+        }
+
         val nowMs = System.currentTimeMillis()
         val group = groupDao.getGroupById(chatId)
         if (isMuted(chatId, topicId, group, nowMs)) {
@@ -103,7 +116,19 @@ class NotificationHelper @Inject constructor(
         }
 
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (!canPost(notificationManager, MessengerApplication.CHANNEL_ID)) return IncomingNotificationPost.BLOCKED
+        // Звук и вибрация решаются каналом (Android 8+): выбираем раздел
+        // (личные/группы/каналы) и профиль из настроек приложения. Тихие
+        // сообщения всегда идут в тихий канал, что бы ни было выбрано.
+        val alertSection = when {
+            group == null -> NotificationAlertChannels.Section.PERSONAL
+            group.isChannel -> NotificationAlertChannels.Section.CHANNELS
+            else -> NotificationAlertChannels.Section.GROUPS
+        }
+        val alertProfile = NotificationAlertChannels.profileFor(
+            NotificationAlertStore.profileFor(context, alertSection.scope, silent),
+        )
+        val channelId = NotificationAlertChannels.channelId(alertSection, alertProfile)
+        if (!canPost(notificationManager, channelId)) return IncomingNotificationPost.BLOCKED
 
         // Получить имя и аватар отправителя
         val contact = contactRepository.getContactById(senderId)
@@ -139,7 +164,7 @@ class NotificationHelper @Inject constructor(
         )
         
         // Создать notification
-        val notification = NotificationCompat.Builder(context, MessengerApplication.CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_notification)  // Нужна иконка
             .setContentTitle(title)
             .setContentText(body)
@@ -154,7 +179,11 @@ class NotificationHelper @Inject constructor(
                 putString(LocalMessageNotifications.EXTRA_SNAPSHOT, snapshot)
             })
             .setContentIntent(pendingIntent)
-            .build()
+        // До Android 8 канала нет: звук и вибрация задаются самим уведомлением.
+        if (!silent && Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            builder.setDefaults(NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_VIBRATE)
+        }
+        val notification = builder.build()
 
         // Tags group by the entire chat, not 1,000 colliding integer buckets.
         try {
@@ -163,7 +192,7 @@ class NotificationHelper @Inject constructor(
             return IncomingNotificationPost.BLOCKED
         }
         // Permission may have changed while the notification was being built.
-        if (!canPost(notificationManager, MessengerApplication.CHANNEL_ID)) return IncomingNotificationPost.BLOCKED
+        if (!canPost(notificationManager, channelId)) return IncomingNotificationPost.BLOCKED
         flashlightBlinker.blinkForMessage(
             kind = FlashlightMessageKind.classify(
                 hasGroup = group != null,

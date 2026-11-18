@@ -28,6 +28,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::network::traffic_priority::{self, TrafficClass};
+
 // ═══════════════════════════════════════════════════════════════════
 // КОНСТАНТЫ
 // ═══════════════════════════════════════════════════════════════════
@@ -59,6 +61,32 @@ pub const MAX_OWN_PER_RECIPIENT: usize = 500;
 
 /// Максимум СВОИХ сообщений в очереди всего — неделимый резерв этого узла.
 pub const MAX_OWN_TOTAL: usize = 1_000;
+
+/// Возраст, старше которого СВОЯ запись не возвращается из склада в RAM.
+///
+/// Владелец (2026-11-15): «нужно сделать так чтобы эти очереди не пладились и не
+/// копились». Его отчёт показывает `своё ждёт получателя=1000` при
+/// `старейшее-своё=2 дн 5 ч`, хотя в телефоне ожидает отправки шесть сообщений.
+/// Расхождение объясняется восстановлением: `restore_relay_custody` грузил со
+/// склада всё непросроченное, а склад держит записи неделю. Записи, чья строка
+/// в телефоне уже закрыта (доставлена, прочитана, чат удалён), не снимаются
+/// ничем, кроме абсолютного TTL, поэтому каждый старт возвращал в RAM тысячу
+/// таких записей — и расшифровывал их все.
+///
+/// Пропущенная при восстановлении запись не теряется: досылка телефона идёт по
+/// своим строкам (`getRetryableOutgoingMessages`), и любое сообщение, которое
+/// телефон всё ещё хочет отправить, заново попадает в RAM через `enqueue_own`
+/// при своей попытке. Возвращать ему нечего — значит оно и не нужно.
+pub const MAX_OWN_RESTORE_AGE: Duration = Duration::from_secs(24 * 3600);
+
+/// Возвращать ли СВОЮ запись этого возраста из склада в RAM при старте.
+///
+/// Чистое правило, чтобы его можно было проверить без базы: возраст больше
+/// [`MAX_OWN_RESTORE_AGE`] — не возвращаем. Часы, ушедшие назад, дают возраст 0
+/// и потому не могут случайно отбросить свежую запись.
+pub fn own_restore_admitted(created_at_ms: i64, now_ms: i64) -> bool {
+    now_ms.saturating_sub(created_at_ms) <= ttl_to_ms(MAX_OWN_RESTORE_AGE)
+}
 
 /// Срок жизни СИГНАЛОВ транспорта: NAT-пробивание (`APUUDP1`), локальная сеть
 /// (`APULAN1`/`APULANHS1`), «печатает…» (`APUTYP1`).
@@ -564,6 +592,32 @@ pub fn message_kind(message_id: &str, chat_scope: &str, payload: &[u8]) -> Relay
     payload_kind(payload)
 }
 
+/// Ключ склейки своего служебного кадра: у повторов одного смысла важна
+/// только последняя копия.
+///
+/// Зачем. Владелец 2026-11-18: «у нас точно не копятся ненужные строчки
+/// отправок? может есть ненужные повторы, которые должны удаляться, если
+/// появился такой же сигнал?» — да, копились. Адрес побудки (эпоха) уходит
+/// отдельным сообщением с НОВЫМ ID при каждом объявлении, поэтому дедупликация
+/// по `msg_id` их не видит: телефон, который ни разу не подтвердил приём,
+/// получает в очередь новую копию каждые пять минут — до 300 записей в сутки на
+/// одного собеседника (`своё ждёт получателя=317` в отчёте 536 при трёх
+/// отправленных сообщениях).
+///
+/// Склеиваются только кадры, у которых старая копия объективно бесполезна:
+/// эпоха — это один адрес на собеседника, а не история адресов. Переписка,
+/// файлы, истории и отзывы не склеиваются никогда: `None`.
+///
+/// Границы: ключ включает получателя и смысл, но не тело. Два разных кадра с
+/// одинаковым ID-префиксом (`push1-…`) для одного получателя — это одна и та же
+/// услуга, и заменять старую копию новой правильно.
+pub fn coalesce_key(message: &RelayMessage) -> Option<String> {
+    if message.msg_id.starts_with("push1-") {
+        return Some(format!("sleep|{}", message.recipient));
+    }
+    None
+}
+
 /// Запись очереди: само сообщение, признак «своё» и категория тела.
 ///
 /// Признаки живут ТОЛЬКО в RAM: durable-формат (`SensitiveRelayRecordV1`) и wire
@@ -578,6 +632,18 @@ struct QueueEntry {
     own: bool,
     /// Категория тела: переписка, сигнал транспорта или пакет передачи.
     kind: RelayPayloadKind,
+    /// Класс важности: пробуждение и адрес → личное → тревога → прочее → чужое.
+    ///
+    /// Живёт в RAM рядом с `kind` и вычисляется заново при восстановлении: ни
+    /// durable-формат, ни wire от этого не меняются.
+    class: TrafficClass,
+}
+
+impl QueueEntry {
+    /// Класс записи по её признакам (см. `traffic_priority`).
+    fn class_of(message: &RelayMessage, own: bool, kind: RelayPayloadKind) -> TrafficClass {
+        traffic_priority::class_of(own, &message.msg_id, &message.chat_scope, &message.e2e_payload, kind)
+    }
 }
 
 /// Mesh store-and-forward очередь.
@@ -602,6 +668,11 @@ pub struct RelayQueue {
     /// Число своих записей переписки, вытесненных из ограниченного RAM-кэша.
     /// Зашифрованная durable/outbox-копия остаётся источником восстановления.
     own_capacity_evictions: AtomicUsize,
+    /// Сколько старых копий своих служебных кадров снято склейкой: на один адрес
+    /// побудки или один служебный кадр нужна одна запись, а не все подряд
+    /// (владелец 2026-11-18). Число в журнале — доказательство, что склейка
+    /// работает, а не что очередь просто «сама рассосалась».
+    own_coalesced: AtomicUsize,
     max_per_recipient: usize,
     max_total: usize,
     max_own_per_recipient: usize,
@@ -635,6 +706,7 @@ impl RelayQueue {
             entries: Mutex::new(HashMap::new()),
             delivered_removed: AtomicUsize::new(0),
             own_capacity_evictions: AtomicUsize::new(0),
+            own_coalesced: AtomicUsize::new(0),
             max_per_recipient: MAX_PER_RECIPIENT,
             max_total: MAX_TOTAL,
             max_own_per_recipient: MAX_OWN_PER_RECIPIENT,
@@ -660,6 +732,7 @@ impl RelayQueue {
             entries: Mutex::new(HashMap::new()),
             delivered_removed: AtomicUsize::new(0),
             own_capacity_evictions: AtomicUsize::new(0),
+            own_coalesced: AtomicUsize::new(0),
             max_per_recipient,
             max_total,
             max_own_per_recipient,
@@ -695,6 +768,7 @@ impl RelayQueue {
 
         let msg_id = msg.msg_id.clone();
         let kind = message_kind(&msg.msg_id, &msg.chat_scope, &msg.e2e_payload);
+        let class = QueueEntry::class_of(&msg, true, kind);
         let mut entries = self.entries.lock().unwrap();
         if let Some(existing) = entries.get(&msg_id) {
             if !existing.own
@@ -710,6 +784,7 @@ impl RelayQueue {
                     message: msg,
                     own: true,
                     kind,
+                    class,
                 },
             );
             return Ok(true);
@@ -738,13 +813,65 @@ impl RelayQueue {
 
         let mut entries = self.entries.lock().unwrap();
 
+        // Тот же ID у служебного кадра — это ПОВТОР, и важна последняя копия:
+        // «печатает…», состояние игры и анонс живут мгновением, а дедупликация
+        // по ID оставляла в очереди первую копию и не давала полю обновиться.
+        // Переписка так не переписывается: у неё тот же ID значит то же тело.
+        // Заменяем только когда есть что заменять: новая копия отличается телом
+        // или временем. Побайтовый повтор того же кадра ничего не выигрывает —
+        // он и раньше считался дублем («повтор с тем же ID не занимает новый
+        // слот»).
+        let repeated_kind = entries
+            .get(&msg.msg_id)
+            .filter(|existing| {
+                existing.own
+                    && existing.kind.is_transient()
+                    && (existing.message.e2e_payload != msg.e2e_payload
+                        || existing.message.created_at_ms < msg.created_at_ms)
+            })
+            .map(|existing| existing.kind);
+        if let Some(kind) = repeated_kind {
+            let class = QueueEntry::class_of(&msg, true, kind);
+            entries.insert(
+                msg.msg_id.clone(),
+                QueueEntry {
+                    message: msg,
+                    own: true,
+                    kind,
+                    class,
+                },
+            );
+            return Ok(true);
+        }
+
         if entries.contains_key(&msg.msg_id) {
             return Ok(false); // дедупликация
+        }
+
+        // Склейка повторов: на один адрес побудки нужна одна запись, а не все
+        // объявления подряд (см. `coalesce_key`).
+        if let Some(key) = coalesce_key(&msg) {
+            let stale: Vec<String> = entries
+                .values()
+                .filter(|entry| {
+                    entry.own && coalesce_key(&entry.message).as_deref() == Some(key.as_str())
+                })
+                .map(|entry| entry.message.msg_id.clone())
+                .collect();
+            for id in &stale {
+                entries.remove(id);
+            }
+            if !stale.is_empty() {
+                self.own_coalesced.fetch_add(stale.len(), Ordering::Relaxed);
+            }
         }
 
         let now_ms = utc_now_ms();
         // До перемещения сообщения в запись (см. комментарий в enqueue_foreign).
         let kind = message_kind(&msg.msg_id, &msg.chat_scope, &msg.e2e_payload);
+        // Класс важности считается здесь же: он решает, кто уступает место, а
+        // кто нет (см. `traffic_priority`).
+        let class = QueueEntry::class_of(&msg, true, kind);
 
         // Сначала — просроченное своё (освобождает запас без потерь).
         if self.own_count_locked(&entries) >= self.max_own_total
@@ -764,25 +891,43 @@ impl RelayQueue {
             // Сигнал или пакет передачи: у них свой маленький запас, и место
             // переписки они не занимают (владелец 2026-10-07: «своя переписка
             // идёт первой» — и уж точно не вытесняется служебным сигналом).
-            if self.own_transient_count_locked(&entries) >= MAX_OWN_TRANSIENT {
-                Self::evict_oldest_own_transient(&mut entries);
+            if self.own_transient_count_locked(&entries) >= MAX_OWN_TRANSIENT
+                && !Self::evict_oldest_own_transient(&mut entries, class)
+            {
+                // Уступать некому: запас служебного занят пробуждением. Тогда
+                // теряется входящий служебный пакет, а не адрес собеседника.
+                return Ok(false);
             }
         } else {
+            // Свой запас класса: группа не может занять долю личной переписки,
+            // а личная переписка — долю пробуждения (см. `traffic_priority`).
+            let class_count = entries
+                .values()
+                .filter(|e| e.own && e.class == class)
+                .count();
+            if class_count >= class.own_reserve()
+                && !Self::evict_oldest_own_of_class(&mut entries, class)
+            {
+                // Класс переполнен, вытеснять внутри него нечего: входящее не
+                // принято. «Принято» не должно оказаться ложью.
+                return Ok(false);
+            }
+
             if self.own_for_locked(&entries, &msg.recipient) >= self.max_own_per_recipient
-                && Self::evict_oldest_own_for(&mut entries, &msg.recipient)
+                && Self::evict_oldest_own_for(&mut entries, &msg.recipient, class)
             {
                 self.own_capacity_evictions.fetch_add(1, Ordering::Relaxed);
             }
 
             if self.own_count_locked(&entries) >= self.max_own_total {
                 // Первым делом уступает место сигнал, а не переписка.
-                if let Some(victim) = Self::oldest_own_transient(&entries) {
+                if let Some(victim) = Self::oldest_own_transient(&entries, class) {
                     entries.remove(&victim);
                 }
             }
 
             if self.own_count_locked(&entries) >= self.max_own_total
-                && Self::evict_oldest_own(&mut entries)
+                && Self::evict_oldest_own(&mut entries, class)
             {
                 self.own_capacity_evictions.fetch_add(1, Ordering::Relaxed);
             }
@@ -802,6 +947,7 @@ impl RelayQueue {
                 message: msg,
                 own: true,
                 kind,
+                class,
             },
         );
         Ok(true)
@@ -850,6 +996,8 @@ impl RelayQueue {
                 message: msg,
                 own: false,
                 kind,
+                // Чужая пересылка — всегда последний класс.
+                class: TrafficClass::Foreign,
             },
         );
         Ok(true)
@@ -872,47 +1020,95 @@ impl RelayQueue {
 
     // ─── Вытеснение своих (только свои, чужое не трогаем) ───────────
 
-    /// Убрать самое старое своё сообщение этому получателю.
-    fn evict_oldest_own_for(entries: &mut HashMap<String, QueueEntry>, recipient: &str) -> bool {
-        let victim = entries
-            .iter()
-            .filter(|(_, e)| e.own && e.message.recipient == recipient)
-            .min_by_key(|(id, e)| (e.message.created_at_ms, (*id).clone()))
-            .map(|(id, _)| id.clone());
-        victim.is_some_and(|id| entries.remove(&id).is_some())
-    }
-
-    /// Самое старое СВОЁ служебное (сигнал или пакет передачи), если есть.
-    fn oldest_own_transient(entries: &HashMap<String, QueueEntry>) -> Option<String> {
+    /// Кого можно вытеснить ради входящей записи класса `incoming`.
+    ///
+    /// Порядок выбора — от менее важного к более важному, и только внутри
+    /// того, что вообще уступает (см. [`traffic_priority::evictable_for`]):
+    /// сначала «прочее», потом тревога, потом личное. Пробуждение не
+    /// уступает никому, кроме другого пробуждения.
+    fn eviction_victim(
+        entries: &HashMap<String, QueueEntry>,
+        incoming: TrafficClass,
+        recipient: Option<&str>,
+        transient_only: bool,
+    ) -> Option<String> {
         entries
             .iter()
-            .filter(|(_, e)| e.own && e.kind.is_transient())
-            .min_by_key(|(id, e)| (e.message.created_at_ms, (*id).clone()))
+            .filter(|(_, e)| e.own)
+            .filter(|(_, e)| recipient.map_or(true, |r| e.message.recipient == r))
+            .filter(|(_, e)| !transient_only || e.kind.is_transient())
+            .filter(|(_, e)| traffic_priority::evictable_for(incoming, e.class))
+            .min_by_key(|(id, e)| {
+                (
+                    // Сначала уступает самый неважный класс…
+                    std::cmp::Reverse(e.class.rank()),
+                    // …и только внутри класса — самая старая запись.
+                    e.message.created_at_ms,
+                    (*id).clone(),
+                )
+            })
             .map(|(id, _)| id.clone())
     }
 
-    /// Убрать самое старое служебное своё (сигнал или пакет передачи).
-    fn evict_oldest_own_transient(entries: &mut HashMap<String, QueueEntry>) {
-        let victim = Self::oldest_own_transient(entries);
-        if let Some(id) = victim {
-            let kind = entries
-                .get(&id)
-                .map(|e| e.kind.as_str())
-                .unwrap_or("служебное");
-            entries.remove(&id);
-            tracing::debug!(
-                "Relay-очередь: запас служебного исчерпан, вытеснено самое старое ({}) {}",
-                kind,
-                id
-            );
-        }
+    /// Убрать самое старое своё сообщение этому получателю, если оно уступает.
+    fn evict_oldest_own_for(
+        entries: &mut HashMap<String, QueueEntry>,
+        recipient: &str,
+        incoming: TrafficClass,
+    ) -> bool {
+        Self::eviction_victim(entries, incoming, Some(recipient), false)
+            .is_some_and(|id| entries.remove(&id).is_some())
     }
 
-    /// Убрать самое старое своё сообщение по всей очереди.
-    fn evict_oldest_own(entries: &mut HashMap<String, QueueEntry>) -> bool {
+    /// Самое старое СВОЁ служебное (сигнал или пакет передачи), если оно уступает.
+    fn oldest_own_transient(
+        entries: &HashMap<String, QueueEntry>,
+        incoming: TrafficClass,
+    ) -> Option<String> {
+        Self::eviction_victim(entries, incoming, None, true)
+    }
+
+    /// Убрать самое старое служебное своё (сигнал или пакет передачи).
+    ///
+    /// Возвращает false, если уступать некому: пробуждение не вытесняется
+    /// ради «печатает…» или куска файла.
+    fn evict_oldest_own_transient(
+        entries: &mut HashMap<String, QueueEntry>,
+        incoming: TrafficClass,
+    ) -> bool {
+        let Some(id) = Self::oldest_own_transient(entries, incoming) else {
+            return false;
+        };
+        let kind = entries
+            .get(&id)
+            .map(|e| e.kind.as_str())
+            .unwrap_or("служебное");
+        entries.remove(&id);
+        tracing::debug!(
+            "Relay-очередь: запас служебного исчерпан, вытеснено самое старое ({}) {}",
+            kind,
+            id
+        );
+        true
+    }
+
+    /// Убрать самое старое своё сообщение, которое уступает входящему.
+    fn evict_oldest_own(
+        entries: &mut HashMap<String, QueueEntry>,
+        incoming: TrafficClass,
+    ) -> bool {
+        Self::eviction_victim(entries, incoming, None, false)
+            .is_some_and(|id| entries.remove(&id).is_some())
+    }
+
+    /// Убрать самое старое сообщение ТОГО ЖЕ класса (свой запас класса).
+    fn evict_oldest_own_of_class(
+        entries: &mut HashMap<String, QueueEntry>,
+        class: TrafficClass,
+    ) -> bool {
         let victim = entries
             .iter()
-            .filter(|(_, e)| e.own)
+            .filter(|(_, e)| e.own && e.class == class)
             .min_by_key(|(id, e)| (e.message.created_at_ms, (*id).clone()))
             .map(|(id, _)| id.clone());
         victim.is_some_and(|id| entries.remove(&id).is_some())
@@ -1122,6 +1318,11 @@ impl RelayQueue {
         self.delivered_removed.load(Ordering::Relaxed)
     }
 
+    /// Сколько старых копий своих служебных кадров сняла склейка.
+    pub fn own_coalesced(&self) -> usize {
+        self.own_coalesced.load(Ordering::Relaxed)
+    }
+
     /// Удалить все сообщения для получателя (например, после прямой доставки).
     /// Возвращает число удалённых.
     pub fn remove_for_recipient(&self, recipient: &str) -> usize {
@@ -1207,6 +1408,71 @@ impl RelayQueue {
     }
 
     /// Сводка для логов и диагностики: свои и чужие по отдельности.
+    /// Страница СВОЕГО недоставленного — без чужих в окне.
+    ///
+    /// Владелец 2026-11-17: «связь то стабильно, то не пробиться… очереди нужно
+    /// на каждую функцию, чтобы они не спорили, кто главнее». Прежняя страница
+    /// брала 16 кандидатов из ОБЩЕЙ очереди и отбрасывала чужих уже после
+    /// выборки: при трёх тысячах чужих записей своё почти не попадало в окно, и
+    /// старейшее своё висело в очереди десятками минут. Здесь окно — только свои
+    /// записи, и первыми идут важные классы: пробуждение, личное, тревога.
+    pub fn own_pending_page(&self, cursor: usize, limit: usize) -> (Vec<RelayMessage>, usize) {
+        let entries = self.entries.lock().unwrap();
+        let now_ms = utc_now_ms();
+        let mut own: Vec<&QueueEntry> = entries
+            .values()
+            .filter(|e| e.own && !e.message.is_expired_at(now_ms))
+            .collect();
+        own.sort_by(|a, b| {
+            (
+                a.class.rank(),
+                a.message.created_at_ms,
+                a.message.msg_id.as_str(),
+            )
+                .cmp(&(
+                    b.class.rank(),
+                    b.message.created_at_ms,
+                    b.message.msg_id.as_str(),
+                ))
+        });
+        let total = own.len();
+        if total == 0 {
+            return (Vec::new(), 0);
+        }
+        let limit = limit.max(1);
+        let start = cursor % total;
+        let page: Vec<RelayMessage> = own
+            .iter()
+            .skip(start)
+            .take(limit)
+            .map(|entry| entry.message.clone())
+            .collect();
+        let next = (start + limit) % total;
+        (page, next)
+    }
+
+    /// Сколько СВОИХ записей в каждом классе важности.
+    ///
+    /// Нужно отчёту и журналу: «своих=181» ничего не говорит о том, есть ли
+    /// среди них личная переписка или всё занято служебным. Возвращает
+    /// фиксированный набор из пяти чисел в порядке важности.
+    pub fn counts_by_class(&self) -> [(TrafficClass, usize); 5] {
+        let entries = self.entries.lock().unwrap();
+        let mut counts = [0usize; 5];
+        for entry in entries.values() {
+            if entry.own {
+                counts[entry.class.rank() as usize] += 1;
+            }
+        }
+        [
+            (TrafficClass::WakeAddress, counts[0]),
+            (TrafficClass::Personal, counts[1]),
+            (TrafficClass::Alert, counts[2]),
+            (TrafficClass::GroupOther, counts[3]),
+            (TrafficClass::Foreign, counts[4]),
+        ]
+    }
+
     pub fn stats(&self) -> RelayQueueStats {
         let entries = self.entries.lock().unwrap();
         let own = entries
@@ -1330,6 +1596,18 @@ mod tests {
         assert!(q.refresh_own(refreshed).unwrap());
         assert!(q.contains("retry-me"));
         assert_eq!(q.own_count(), 1);
+    }
+
+    /// «Печатает…» — обычный служебный сигнал (класс «прочее»): уступает переписке.
+    fn typing_msg(msg_id: &str, recipient: &str) -> RelayMessage {
+        RelayMessage::new_at_ms(
+            utc_now_ms(),
+            msg_id.into(),
+            recipient.into(),
+            "pk_origin".into(),
+            "chat-1".into(),
+            b"APUTYP1|1".to_vec(),
+        )
     }
 
     #[test]
@@ -1573,13 +1851,30 @@ mod tests {
         // Резерв переписки занят одним письмом, рядом лежит сигнал.
         let q = RelayQueue::with_all_limits(10, 10, 10, 1);
         q.enqueue_own(own_msg("o_old", "pk_b")).unwrap();
-        q.enqueue_own(signal_msg("s1", "pk_b")).unwrap();
+        q.enqueue_own(typing_msg("t1", "pk_b")).unwrap();
 
         assert!(q.enqueue_own(own_msg("o_new", "pk_b")).unwrap());
 
         assert_eq!(q.is_own("o_new"), Some(true));
         assert_eq!(q.own_transient_count(), 0, "первым уступает сигнал");
         assert_eq!(q.own_count(), 1);
+    }
+
+    #[test]
+    fn a_held_address_outranks_correspondence_in_a_tight_own_budget() {
+        // Тот же тесный запас, но вместо «печатает…» лежит адрес собеседника:
+        // уступает письмо, а адрес остаётся — иначе разбудить некому.
+        let q = RelayQueue::with_all_limits(10, 10, 10, 1);
+        q.enqueue_own(own_msg("o_old", "pk_b")).unwrap();
+        q.enqueue_own(signal_msg("udp-sig-1", "pk_b")).unwrap();
+
+        assert!(q.enqueue_own(own_msg("o_new", "pk_b")).unwrap());
+
+        assert_eq!(q.is_own("udp-sig-1"), Some(true), "адрес обязан остаться");
+        assert_eq!(q.is_own("o_new"), Some(true));
+        assert_eq!(q.is_own("o_old"), None, "уступает самое старое письмо");
+        assert_eq!(q.own_count(), 1);
+        assert_eq!(q.own_transient_count(), 1);
     }
 
     #[test]
@@ -1647,6 +1942,42 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn an_own_record_older_than_a_day_is_not_restored_into_ram() {
+        // Владелец 2026-11-15: «своё ждёт получателя=1000» при шести ожидающих
+        // в телефоне. Резерв переписки занимали записи, чьи строки закрыты.
+        let now = 10_000_000_000i64;
+        let day = crate::network::relay_queue::ttl_to_ms(MAX_OWN_RESTORE_AGE);
+        // Свежая и ровно на границе — грузим: сообщение ещё ждёт получателя.
+        assert!(own_restore_admitted(now, now));
+        assert!(own_restore_admitted(now - day, now));
+        // Суточное и старше — нет: телефон о такой записи ничего не просил.
+        assert!(!own_restore_admitted(now - day - 1, now));
+        assert!(!own_restore_admitted(now - 3 * day, now));
+        // Часы, ушедшие назад, не могут отбросить свежее: возраст 0.
+        assert!(own_restore_admitted(now + 5 * day, now));
+    }
+
+    #[test]
+    fn a_foreign_record_is_never_released_by_a_ram_refusal() {
+        // Отказ RAM-очереди по чужому пределу снимает и только что записанную
+        // копию на диске: иначе склад рос неделю без предела (17099 записей в
+        // отчёте владельца). Своё так не чистится — durable-копия остаётся
+        // единственной, когда запас переписки полон.
+        let q = RelayQueue::with_all_limits(4, 4, 4, 4);
+        for i in 0..4 {
+            assert!(q.enqueue(msg(&format!("foreign-{i}"), "pk_b")).unwrap());
+        }
+        // Предел чужого на получателя исчерпан: следующая запись не принимается.
+        // Именно на этом отказе снимается и только что записанная копия на диске.
+        assert!(matches!(
+            q.enqueue(msg("foreign-new", "pk_b")),
+            Err(RelayQueueError::RecipientQueueFull { .. })
+        ));
+        // Своя переписка чужим пределом не связана и по-прежнему принимается.
+        assert!(q.enqueue_own(own_msg("own-1", "pk_b")).unwrap());
+    }
+
     fn zero_own_reserve_is_an_honest_refusal() {
         // Резерв 0 — единственный случай, когда своё честно отклоняется
         // (в бою резерв 1000, значит «своё всегда первостепенно»).
@@ -2302,6 +2633,183 @@ mod tests {
         assert_eq!(q.stats().own_transients, 1);
         assert_eq!(q.stats().own, 1);
         assert_eq!(q.stats().own_capacity_evictions, 0);
+    }
+
+
+    // ─── Лестница важности (владелец 2026-11-17: «кто первый, кто потом») ───
+
+    /// Тревога в группе (SOS) и звонок.
+    fn alert_msg(msg_id: &str, recipient: &str) -> RelayMessage {
+        RelayMessage::new(msg_id.into(), recipient.into(), "pk_origin".into(), "group-1".into(), vec![0xAA; 40])
+    }
+
+    /// Кусок файла: служебное, живёт в запасе служебного.
+    ///
+    /// ID строится по формату `FileTransferWire`: `f` + ровно 32 hex-знака
+    /// передачи + вид пакета. Длину нельзя набирать руками — ошибка в один
+    /// символ превращает кусок файла в обычную переписку и ломает класс.
+    fn file_msg(recipient: &str) -> RelayMessage {
+        RelayMessage::new_at_ms(
+            utc_now_ms(),
+            format!("f{}o", "0".repeat(32)),
+            recipient.into(),
+            "pk_origin".into(),
+            "chat-1".into(),
+            b"sealed file chunk".to_vec(),
+        )
+    }
+
+    #[test]
+    fn alert_flood_never_evicts_personal_correspondence() {
+        // Свой запас получателя — 2. Личное пришло первым, тревога следом:
+        // уступать обязана тревога, а личное сообщение остаётся.
+        let q = RelayQueue::with_all_limits(10, 10, 2, 10);
+        assert!(q.enqueue_own(own_msg("personal-1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(alert_msg("sos1-1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(alert_msg("sos1-2", "pk_b")).unwrap());
+        assert_eq!(q.is_own("personal-1"), Some(true), "личное вытеснено тревогой");
+        assert_eq!(q.is_own("sos1-1"), None, "самая старая тревога обязана уступить");
+        assert_eq!(q.is_own("sos1-2"), Some(true));
+    }
+
+    #[test]
+    fn personal_never_yields_to_a_newer_alert() {
+        // Обратный порядок: тревога первой, личное — важнее, поэтому встаёт
+        // на место тревоги, а не отказывается.
+        let q = RelayQueue::with_all_limits(10, 10, 1, 10);
+        assert!(q.enqueue_own(alert_msg("sos1-1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(own_msg("personal-1", "pk_b")).unwrap());
+        assert_eq!(q.is_own("personal-1"), Some(true));
+        assert_eq!(q.is_own("sos1-1"), None);
+        assert_eq!(q.own_count(), 1);
+    }
+
+    #[test]
+    fn wake_signal_is_never_evicted_by_a_file_chunk() {
+        // Запас служебного занят адресом/пробуждением. Куску файла места нет —
+        // и он теряется сам, а адрес собеседника остаётся.
+        let q = RelayQueue::with_all_limits(10, 10, 100, 10);
+        for i in 0..MAX_OWN_TRANSIENT {
+            assert!(q.enqueue_own(signal_msg(&format!("udp-sig-{i}"), "pk_b")).unwrap());
+        }
+        assert_eq!(q.own_transient_count(), MAX_OWN_TRANSIENT);
+        assert!(!q.enqueue_own(file_msg("pk_b")).unwrap());
+        assert_eq!(q.own_transient_count(), MAX_OWN_TRANSIENT);
+        assert_eq!(q.is_own("udp-sig-0"), Some(true), "адрес вытеснен служебным пакетом");
+    }
+
+    #[test]
+    fn foreign_flood_cannot_evict_any_own_class() {
+        // Чужие ограничены строго и своих не трогают ни в каком классе.
+        let q = RelayQueue::with_all_limits(2, 10, 10, 10);
+        assert!(q.enqueue_own(own_msg("personal-1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(signal_msg("udp-sig-1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(alert_msg("sos1-1", "pk_b")).unwrap());
+        for i in 0..6 {
+            let _ = q.enqueue(msg(&format!("foreign-{i}"), "pk_c"));
+        }
+        assert_eq!(q.is_own("personal-1"), Some(true));
+        assert_eq!(q.is_own("udp-sig-1"), Some(true));
+        assert_eq!(q.is_own("sos1-1"), Some(true));
+    }
+
+    #[test]
+    fn counts_by_class_explain_what_waits_in_the_own_reserve() {
+        let q = RelayQueue::with_all_limits(10, 10, 10, 10);
+        assert!(q.enqueue_own(own_msg("personal-1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(signal_msg("udp-sig-1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(alert_msg("sos1-1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(file_msg("pk_b")).unwrap());
+        let counts: std::collections::HashMap<_, _> = q
+            .counts_by_class()
+            .into_iter()
+            .map(|(class, count)| (class, count))
+            .collect();
+        assert_eq!(counts[&traffic_priority::TrafficClass::WakeAddress], 1);
+        assert_eq!(counts[&traffic_priority::TrafficClass::Personal], 1);
+        assert_eq!(counts[&traffic_priority::TrafficClass::Alert], 1);
+        assert_eq!(counts[&traffic_priority::TrafficClass::GroupOther], 1);
+        assert_eq!(counts[&traffic_priority::TrafficClass::Foreign], 0);
+    }
+
+
+    #[test]
+    fn own_page_never_spends_its_window_on_foreign_entries() {
+        // Чужих — сотни, своих — три. Окно из 2 записей обязано состоять
+        // только из своих: иначе своё вытесняется из окна чужим потоком.
+        let q = RelayQueue::with_all_limits(500, 10_000, 100, 1_000);
+        for i in 0..300 {
+            assert!(q.enqueue(msg(&format!("foreign-{i}"), "pk_far")).unwrap());
+        }
+        assert!(q.enqueue_own(own_msg("personal-1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(signal_msg("udp-sig-1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(alert_msg("sos1-1", "pk_b")).unwrap());
+
+        let (page, next) = q.own_pending_page(0, 2);
+        assert_eq!(page.len(), 2, "все места окна — свои");
+        assert!(page.iter().all(|message| !message.msg_id.starts_with("foreign-")));
+        // Первым идёт самое важное: пробуждение и личное, а не тревога.
+        assert_eq!(page[0].msg_id, "udp-sig-1");
+        assert_eq!(page[1].msg_id, "personal-1");
+
+        let (rest, _) = q.own_pending_page(next, 2);
+        assert_eq!(rest.len(), 1, "осталась тревога");
+        assert_eq!(rest[0].msg_id, "sos1-1");
+    }
+
+    /// Владелец 2026-11-18: «может есть ненужные повторы, которые должны
+    /// удаляться, если появился такой же сигнал?» Адрес побудки уходит отдельным
+    /// сообщением с новым ID при каждом объявлении, поэтому раньше копился: в
+    /// отчёте 536 стояло «своё ждёт получателя=317» при трёх отправленных
+    /// сообщениях. Теперь новая копия снимает старую, и на собеседника остаётся
+    /// ровно одна запись.
+    #[test]
+    fn a_repeated_sleep_address_replaces_the_previous_copy() {
+        let queue = RelayQueue::new();
+        assert!(queue
+            .enqueue_own(msg("push1-aaa", "pk_peer"))
+            .unwrap());
+        assert!(queue
+            .enqueue_own(msg("push1-bbb", "pk_peer"))
+            .unwrap());
+        assert!(queue
+            .enqueue_own(msg("push1-ccc", "pk_peer"))
+            .unwrap());
+        let stats = queue.stats();
+        assert_eq!(stats.own, 1, "должна остаться одна запись на собеседника");
+        assert_eq!(queue.own_coalesced(), 2, "две старые копии сняты склейкой");
+
+        let left = queue.for_recipient("pk_peer");
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].msg_id, "push1-ccc", "важна последняя копия");
+
+        // Другой собеседник — своя запись: склейка через получателей не ходит.
+        assert!(queue
+            .enqueue_own(msg("push1-ddd", "pk_other"))
+            .unwrap());
+        assert_eq!(queue.stats().own, 2);
+        assert_eq!(queue.own_coalesced(), 2);
+    }
+
+    /// Побайтовый повтор того же служебного кадра не занимает новый слот и не
+    /// считается заменой: заменять нечего.
+    #[test]
+    fn an_identical_service_frame_repeat_is_still_a_duplicate() {
+        let queue = RelayQueue::new();
+        let frame = signal_msg("udp-sig-77", "pk_peer");
+        assert!(queue.enqueue_own(frame.clone()).unwrap());
+        assert!(!queue.enqueue_own(frame).unwrap());
+        assert_eq!(queue.own_transient_count(), 1);
+    }
+
+    /// Переписка склейке не подлежит: два письма одному человеку — два письма.
+    #[test]
+    fn ordinary_correspondence_is_never_coalesced() {
+        let queue = RelayQueue::new();
+        assert!(queue.enqueue_own(msg("11111111-1111-1111-1111-111111111111", "pk_peer")).unwrap());
+        assert!(queue.enqueue_own(msg("22222222-2222-2222-2222-222222222222", "pk_peer")).unwrap());
+        assert_eq!(queue.stats().own, 2);
+        assert_eq!(queue.own_coalesced(), 0);
     }
 
 }

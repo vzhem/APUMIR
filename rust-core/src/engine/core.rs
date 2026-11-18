@@ -260,6 +260,7 @@ fn restore_relay_custody(
             let mut queue_full = 0usize;
             let mut own_full = 0usize;
             let mut transient_dropped = 0usize;
+            let mut stale_own_skipped = 0usize;
             for record in outcome.records {
                 // Старые служебные записи, в том числе запечатанные файловые
                 // фрагменты с `frag-` ID и scope `direct`, переживали неделю.
@@ -274,6 +275,24 @@ fn restore_relay_custody(
                         let _ = custody.store.remove_encrypted(&record.msg_id);
                     }
                     transient_dropped += 1;
+                    continue;
+                }
+                // Владелец 2026-11-15: «нужно сделать так чтобы эти очереди не
+                // пладились и не копились». Своя запись, которой на складе
+                // больше суток, в RAM не грузится: её строка в телефоне почти
+                // наверняка уже закрыта, а грузить её значит занимать резерв
+                // переписки записью, которую никто не ждёт, и расшифровывать её
+                // на каждом старте. На диске она остаётся и снимается обычным
+                // абсолютным TTL; если телефон всё ещё хочет её отправить,
+                // досылка заново поставит её в RAM через `enqueue_own`.
+                if !own_origin.is_empty()
+                    && record.origin_sender == own_origin
+                    && !crate::network::relay_queue::own_restore_admitted(
+                        record.created_at_ms,
+                        now_ms,
+                    )
+                {
+                    stale_own_skipped += 1;
                     continue;
                 }
                 // enqueue_first (а не enqueue): под восстановление освобождает
@@ -322,6 +341,16 @@ fn restore_relay_custody(
                 tracing::info!(
                     "MESH durable: убрано {} служебных записей (сигналы/пакеты передачи) — их место не занимает переписку",
                     transient_dropped
+                );
+            }
+            if stale_own_skipped > 0 {
+                // Владелец 2026-11-15: «своё ждёт получателя=1000» при шести
+                // ожидающих в телефоне. Это и были они — записи, чья строка
+                // давно закрыта. Числом в отчёте: сколько резерв переписки не
+                // занял мусором на этом старте.
+                tracing::info!(
+                    "MESH durable: пропущено {} своих записей старше суток — их строки в телефоне закрыты, резерв переписки занят свежим",
+                    stale_own_skipped
                 );
             }
             if recipient_full > 0 || queue_full > 0 || own_full > 0 {
@@ -1914,6 +1943,11 @@ impl P2PCore {
                 text,
                 timestamp: crate::storage::models::now_ms(),
             });
+            // Он только что написал по своему живому соединению: отметка
+            // «в сети» обязана появиться, даже если presence-кадр не дошёл.
+            presence_observation::note_live_sender(
+                &events, &network, &sender_id, "", crate::storage::models::now_ms(),
+            );
             Some(sender_id)
         } else {
             tracing::warn!("QUIC: invalid payload format ({} bytes)", payload.len());
@@ -2803,11 +2837,15 @@ impl P2PCore {
     fn pending_own_fallback(
         queue: &RelayQueue, own_id: &str, cursor: usize, now_ms: i64,
     ) -> (Vec<(String, String, String)>, usize) {
-        const BATCH: usize = 16;
-        let (candidates, total) = queue.gossip_candidates(&[], cursor, BATCH);
-        let next = if total == 0 { 0 } else { (cursor + BATCH) % total };
+        // Окно — только свои записи. Раньше 16 кандидатов брались из общей
+        // очереди и чужие отбрасывались уже после выборки: при трёх тысячах
+        // чужих своё почти не попадало в окно, и старейшее своё висело в
+        // очереди десятками минут (владелец 2026-11-17: «то стабильно, то не
+        // пробиться»). Порядок внутри своих — по важности, а не по карте.
+        const BATCH: usize = 32;
+        let (candidates, next) = queue.own_pending_page(cursor, BATCH);
         let pending = candidates.into_iter().filter_map(|msg| {
-            if queue.is_own(&msg.msg_id) != Some(true) || msg.origin_sender != own_id {
+            if msg.origin_sender != own_id {
                 return None;
             }
             let wire = Self::own_fallback_wire(&msg, now_ms)?;
@@ -3279,7 +3317,11 @@ impl P2PCore {
             // некому. Теперь своё недоставленное (оно лежит в очереди до
             // получения квитанции) предлагается снова каждые полминуты —
             // так же настойчиво, как рой пересылает смену аватарки.
-            if last_own_reoffer_at.elapsed() >= std::time::Duration::from_secs(30) {
+            // Владелец 2026-11-17: «нужно чтобы push работал всегда и в первой
+            // очереди». Своё недоставленное предлагается каждые 10 секунд
+            // страницей из 32 записей: раньше было 30 и окно делили чужие, из-за
+            // чего своя очередь из сотни записей не разбиралась часами.
+            if last_own_reoffer_at.elapsed() >= std::time::Duration::from_secs(10) {
                 last_own_reoffer_at = std::time::Instant::now();
                 if let Some(q) = relay_queue.as_ref() {
                     let (owned, next) = Self::pending_own_fallback(
@@ -3834,11 +3876,52 @@ impl P2PCore {
                                                             "MESH relay: {} not stored (duplicate/hop limit)",
                                                             msg_id
                                                         ),
-                                                        Err(e) => tracing::warn!(
-                                                            "MESH relay: failed to store {}: {}",
-                                                            msg_id,
-                                                            e
-                                                        ),
+                                                        Err(e) => {
+                                                            tracing::warn!(
+                                                                "MESH relay: failed to store {}: {}",
+                                                                msg_id,
+                                                                e
+                                                            );
+                                                            // Диск и RAM — одна и та же custody, и
+                                                            // раньше они расходились. Копия для
+                                                            // чужого получателя писалась на диск
+                                                            // ДО решения RAM-очереди, поэтому её
+                                                            // отказ (предел на получателя либо
+                                                            // общий) оставлял запись в складе
+                                                            // навсегда: снять её мог только
+                                                            // абсолютный TTL через неделю. За
+                                                            // неделю такие записи набирались
+                                                            // десятками тысяч — в отчёте с
+                                                            // телефона 17099 записей при 9
+                                                            // получателях, хотя RAM-очередь
+                                                            // держала 3621 и новых копий никто
+                                                            // не ждал. Склад рос без предела,
+                                                            // а каждая запись ещё и расшифровывалась
+                                                            // на старте.
+                                                            // Своё так не чистится: отказ своего
+                                                            // запаса означает «место переписки
+                                                            // занято», и durable-копия остаётся
+                                                            // единственной (владелец 2026-10-07:
+                                                            // «своя переписка идёт первой»).
+                                                            if !is_own_origin {
+                                                                if let Some(custody) =
+                                                                    relay_custody.as_ref()
+                                                                {
+                                                                    match custody.store.remove_encrypted(&msg_id) {
+                                                                        Ok(true) => tracing::info!(
+                                                                            "MESH relay: released the durable copy of {} the RAM queue refused",
+                                                                            msg_id
+                                                                        ),
+                                                                        Ok(false) => {}
+                                                                        Err(error) => tracing::warn!(
+                                                                            "MESH relay: durable release failed for {}: {}",
+                                                                            msg_id,
+                                                                            error
+                                                                        ),
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
@@ -4149,6 +4232,12 @@ impl P2PCore {
                                     text: text.to_string(),
                                     timestamp: ts,
                                 });
+                                // Публикация в нашу тему приходит прямо сейчас,
+                                // а не из чужой пересылки: отправитель жив.
+                                // Раньше here ставилась только «своим», и друг,
+                                // написавший через брокер, выглядел «не в сети»
+                                // (владелец 2026-11-17).
+                                presence_observation::note_live_sender(&events, &network, sender_id, "", ts);
                                 tracing::info!("MQTT: MessageReceived EMITTED to EventBus");
                             }
                         }
@@ -4182,29 +4271,43 @@ impl P2PCore {
                         // своего резерва (видно «предел достигнут») и возраст
                         // старейшей своей переписки: свежий хвост минут против
                         // застрявшего хвоста суток — разные диагнозы.
+                        // Владелец 2026-11-17: «кто первый, кто потом». Одного
+                        // числа «своих» мало: надо видеть, сколько из них —
+                        // пробуждение, личное, тревога и прочее.
+                        let classes = q.counts_by_class();
+                        let class_text: String = classes
+                            .iter()
+                            .filter(|(_, count)| *count > 0)
+                            .map(|(class, count)| format!("{} {}", class.as_str(), count))
+                            .collect::<Vec<_>>()
+                            .join(", ");
                         match stats.own_oldest_age_ms {
                             Some(age_ms) => tracing::info!(
-                                "Relay-очередь: своих={} сигналов={} чужих={} всего={} получателей={} снято-по-ACK={} вытеснено-своих={} предел-своих={} старейшее-своё={}",
+                                "Relay-очередь: своих={} сигналов={} чужих={} всего={} получателей={} снято-по-ACK={} склеено={} вытеснено-своих={} предел-своих={} старейшее-своё={} по-важности=[{}]",
                                 stats.own,
                                 stats.own_transients,
                                 stats.foreign,
                                 stats.total,
                                 stats.recipients,
                                 q.delivered_removed(),
+                                q.own_coalesced(),
                                 stats.own_capacity_evictions,
                                 stats.own_limit,
-                                age_ms / 1000
+                                age_ms / 1000,
+                                class_text
                             ),
                             None => tracing::info!(
-                                "Relay-очередь: своих={} сигналов={} чужих={} всего={} получателей={} снято-по-ACK={} вытеснено-своих={} предел-своих={} старейшее-своё=нет",
+                                "Relay-очередь: своих={} сигналов={} чужих={} всего={} получателей={} снято-по-ACK={} склеено={} вытеснено-своих={} предел-своих={} старейшее-своё=нет по-важности=[{}]",
                                 stats.own,
                                 stats.own_transients,
                                 stats.foreign,
                                 stats.total,
                                 stats.recipients,
                                 q.delivered_removed(),
+                                q.own_coalesced(),
                                 stats.own_capacity_evictions,
-                                stats.own_limit
+                                stats.own_limit,
+                                class_text
                             ),
                         }
                     }
@@ -5348,7 +5451,22 @@ impl P2PCore {
             self.send_via_quic(&recipient_id, addr_opt, payload)
         };
 
-        if direct_send_ok && !refresh_retention {
+        // Владелец 2026-11-15: «если я общаюсь в чате на прямую и сообщение
+        // сразу доходит, то оно не должно больше никому слаться для резервных
+        // копий — оно сразу доставилось и задача выполнилась».
+        //
+        // Прямой успех ЗАВЕРШАЕТ обязательство, а не начинает его. Раньше
+        // условие содержало `&& !refresh_retention`, поэтому пользовательский
+        // повтор при УСПЕШНОЙ прямой отправке нарочно оставлял копию в
+        // relay-очереди — и она предлагалась соседям и брокеру каждые
+        // полминуты, хотя получатель уже всё получил. А обычная прямая
+        // отправка не снимала удержание вовсе: сообщение, которое сначала
+        // легло в очередь (прямого пути не было), а потом ушло напрямую при
+        // автоматической досылке, продолжало жить резервной копией. Снятие
+        // звал только `confirm_message_delivered`, а его Android вызывает
+        // исключительно по квитанции доставки — прямой успех до него не доходил.
+        if direct_send_ok {
+            self.release_delivered(&message_id);
             let _ = self
                 .storage
                 .update_message_status(&message_id, MessageStatus::Sent);
@@ -5359,10 +5477,11 @@ impl P2PCore {
             return true;
         }
 
-        // M3(d): no direct address (or a user explicitly requested fresh
-        // retention after a successful direct attempt). Keep the existing N-1-compatible
-        // relay encoding, own the origin copy in RelayQueue first, and only then offer one bounded
-        // command to the persistent MQTT session. This is QUEUED_OFFLINE, never a SENT claim.
+        // M3(d): no direct address. Прямой успех сюда не доходит — он
+        // завершается выше, снимая удержание. Keep the existing N-1-compatible
+        // relay encoding, own the origin copy in RelayQueue first, and only then
+        // offer one bounded command to the persistent MQTT session. This is
+        // QUEUED_OFFLINE, never a SENT claim.
         let prepared = match prepare_offline_relay(
             &message_id,
             &recipient_id,
@@ -5692,15 +5811,24 @@ impl P2PCore {
         self.relay_queue.as_ref().map_or_else(Vec::new, |q| q.own_message_ids())
     }
 
-    /// Android calls this only after its outgoing delivery status is committed.
-    /// Legacy mesh receipts alone never enter this cleanup path.
-    pub fn confirm_message_delivered(&self, message_id: &str) -> bool {
+    /// Снять все резервные обязательства по доставленному сообщению.
+    ///
+    /// Один и тот же выход для двух путей: прямая отправка, которая только
+    /// что подтвердила приём стрима, и квитанция доставки от приложения.
+    /// Раньше их было два разных: прямой успех не снимал ничего, поэтому
+    /// доставленная строка продолжала предлагаться соседям «на всякий случай»
+    /// (владелец 2026-11-15).
+    ///
+    /// Снимается и память, и durable-копия, и предложения держателям K5: без
+    /// последнего «резерв» живёт у соседа до истечения срока, хотя доставка
+    /// закрыта.
+    fn release_delivered(&self, message_id: &str) -> bool {
         let Some(node_id) = self.node_id() else { return false; };
         let removed = super::mesh_cleanup::confirmed_local(
             self.relay_queue.as_deref(), self.relay_custody.as_deref(), &node_id, message_id,
         );
         // K5 holders may have accepted a transport stream without the app
-        // storing it. Drop hints are sent only after the outgoing Room commit.
+        // storing it. Drop hints are sent only after delivery is settled.
         let peers = self.custody_offers.take_offered_peers(message_id);
         self.custody_offers.remove(message_id);
         for peer in &peers {
@@ -5709,6 +5837,12 @@ impl P2PCore {
             }
         }
         removed || !peers.is_empty()
+    }
+
+    /// Android calls this only after its outgoing delivery status is committed.
+    /// Legacy mesh receipts alone never enter this cleanup path.
+    pub fn confirm_message_delivered(&self, message_id: &str) -> bool {
+        self.release_delivered(message_id)
     }
 
     /// Прямая отправка через общий QUIC-endpoint (K1).
@@ -6561,7 +6695,21 @@ mod tests {
                 .to_vec(),
         );
         assert_eq!(adopted.as_deref(), Some("pk_2222222222222222222222222222222222222222222222222222222222222222"));
-        assert_eq!(events.len(), 1);
+        // Два события: само сообщение и «отправитель в сети». Живой кадр —
+        // достаточное свидетельство присутствия (v11.74.534): иначе друг,
+        // написавший через брокер, оставался «не в сети».
+        assert_eq!(events.len(), 2);
+        let drained = events.drain();
+        assert!(drained.iter().any(|event| matches!(
+            event,
+            CoreEvent::MessageReceived { sender_id, .. }
+                if sender_id == "pk_2222222222222222222222222222222222222222222222222222222222222222"
+        )));
+        assert!(drained.iter().any(|event| matches!(
+            event,
+            CoreEvent::PeerDiscovered { peer_id, .. }
+                if peer_id == "pk_2222222222222222222222222222222222222222222222222222222222222222"
+        )));
     }
 
     /// K4-2: вопрос «где узел …?» про нас самих уходит в очередь ответов с

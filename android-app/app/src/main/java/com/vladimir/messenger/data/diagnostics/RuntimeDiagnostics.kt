@@ -88,7 +88,16 @@ object RuntimeDiagnostics {
             }, 0, UI_PROBE_INTERVAL_MS, TimeUnit.MILLISECONDS)
         }
         app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
-            override fun onActivityStarted(activity: Activity) { started.add(activity); update() }
+            override fun onActivityStarted(activity: Activity) {
+                started.add(activity)
+                // Единственный признак «в этом процессе был экран». До него ML Kit
+                // не поднимаем: иначе его собственный провайдер, установленный
+                // позже, роняет процесс на `MlKitContext is already initialized`
+                // (см. data/mlkit/MlKitGate.kt) — и вместе с процессом теряется
+                // входящий сигнал.
+                com.vladimir.messenger.data.mlkit.MlKitGate.noteScreen()
+                update()
+            }
             override fun onActivityStopped(activity: Activity) { started.remove(activity); update() }
             override fun onActivityDestroyed(activity: Activity) { started.remove(activity); update() }
             override fun onActivityCreated(activity: Activity, state: Bundle?) = Unit

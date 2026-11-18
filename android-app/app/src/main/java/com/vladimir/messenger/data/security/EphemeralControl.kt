@@ -4,6 +4,9 @@ import java.util.UUID
 
 /** Only replaceable control, never chat/ref/rank/delete/scheduled messages. */
 object EphemeralControl {
+    /** Префикс транспортного ID служебного кадра (см. [transportId]). */
+    private const val TRANSPORT_PREFIX = "eph1-"
+
     fun isReplaceable(text: String): Boolean {
         // Periodic game snapshots are disposable; never grow the durable chat backlog.
         if (text.startsWith(com.vladimir.messenger.data.contactreset.ContactResetWire.PREFIX)) return true
@@ -18,6 +21,30 @@ object EphemeralControl {
         if (text.startsWith("APUGRP1|avv1|")) return true
         // Привязка и замена профиля на том же устройстве (dva1) — заменяемый служебный пакет.
         if (text.startsWith(DeviceProfileAnchor.Wire.PREFIX)) return true
+        // Истории и отклики на них (реакция, комментарий, сводка) — `APUSTORY1:`
+        // и `APUSTORY1:FB1|` (StoryStore.PREFIX / StoryFeedbackWire.MARKER).
+        //
+        // Зачем. Владелец (2026-11-15): «нужно сделать так чтобы эти очереди не
+        // плодились и не копились… это может копится от чего угодно… от сообщений
+        // историй лайков дизлайков видиоисторий фото профиля вип статус». Его
+        // отчёт с телефона: склад пересылки держит 17099 записей, RAM-очередь
+        // 3621, а в самом телефоне ожидает отправки шесть сообщений.
+        //
+        // Пакет истории и отклик НЕ имеют строки в переписке — они поглощаются до
+        // записи (`ChatRepository.saveIncomingMessage`, ветка `isStoryPacket`),
+        // живут сутки и повторяются, пока у собеседника нет прямого пути. Но
+        // транспортный ID им выдавал `StoryOutbox.transportId` — обычный UUID без
+        // отметки. Ядро такой ID не может отличить от переписки (тело запечатано,
+        // префикс не виден), поэтому каждый пакет лёг в резерв ПЕРЕПИСКИ: общий
+        // предел 500 на получателя и 1000 своих, срок хранения неделя. Служебный
+        // трафик занимал место писем и копился.
+        //
+        // С отметкой `message_kind` узнаёт его как сигнал: срок 5 минут, отдельный
+        // маленький резерв, уборка при восстановлении, а квитанция доставки
+        // снимает удержание (см. `serviceFrameWithoutRow`). Сама история не
+        // теряется: её досылка идёт из своего хранилища на телефоне и повторяется
+        // сама.
+        if (text.startsWith("APUSTORY1:")) return true
         val parts = text.split('|', limit = 3)
         return parts.size >= 2 && parts[0] in setOf("APUGIF1", "APUSTK1") &&
             parts[1] in setOf("ask", "have", "want", "thumb", "thmb")
@@ -25,5 +52,21 @@ object EphemeralControl {
 
     /** Stable for retry of the same caller ID/recipient; private body is not hashed/exported. */
     fun transportId(id: String, peer: String, text: String): String = if (isReplaceable(text))
-        "eph1-" + UUID.nameUUIDFromBytes(("apu-control:$peer:$id").toByteArray(Charsets.UTF_8)) else id
+        TRANSPORT_PREFIX + UUID.nameUUIDFromBytes(("apu-control:$peer:$id").toByteArray(Charsets.UTF_8)) else id
+
+    /**
+     * Это транспортный ID, выданный [transportId], а не ID сообщения переписки.
+     *
+     * У служебного кадра строки в чате не бывает, поэтому квитанция о его
+     * доставке — единственное доказательство, что он дошёл. Отчёт с телефона на
+     * 517 показал, что без этого признака такая квитанция не снимала удержание
+     * резервной копии: «ACK без локальной строки=1004» при живых
+     * «delivery ACK received for eph1-[id]».
+     *
+     * Обычный ID переписки префикса не носит, а `UUID.fromString` отсекает всё,
+     * что не канонический UUID: совпадение «на всякий случай» невозможно.
+     */
+    fun isTransportId(id: String): Boolean =
+        id.startsWith(TRANSPORT_PREFIX) &&
+            runCatching { UUID.fromString(id.substring(TRANSPORT_PREFIX.length)) }.isSuccess
 }

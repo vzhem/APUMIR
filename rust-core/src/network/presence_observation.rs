@@ -46,6 +46,51 @@ pub fn remember_route(
     remember_locked(&mut addresses.lock().unwrap(), book, id, addr, observed_at_ms)
 }
 
+/// A message that just arrived over a LIVE path is proof the sender was on
+/// line: they wrote it while connected, and the frame reached us through their
+/// own session or through the broker right now.
+///
+/// Зачем это нужно. Presence-кадр приходит раз в минуту и живёт 200 с; если
+/// собеседник только что написал, а его кадр задержался в брокере или ушёл
+/// раньше, чем мы проснулись, интерфейс показывал «не в сети» при дошедшем
+/// сообщении. Владелец 2026-11-17: «не показывает, что друзья на связи»,
+/// хотя сообщение от них дошло.
+///
+/// Только живые пути: прямой кадр (QUIC/TCP) и публикация в теме прямо сейчас.
+/// Копия из чужой пересылки (`relay|`) или из кастодии может быть часами
+/// старой: пометить по ней отправителя «в сети» значило бы показать
+/// выключенный телефон онлайн — ровно то, на что владелец жаловался.
+pub fn note_live_sender(
+    event_bus: &EventBus,
+    network: &NetworkManagerFfi,
+    peer_id: &str,
+    display_name: &str,
+    now_ms: i64,
+) -> bool {
+    if !peer_id.starts_with("pk_") || peer_id.len() <= 3 || peer_id.len() > 131 || now_ms <= 0 {
+        return false;
+    }
+    // Пустое имя из сообщения не должно стирать имя, которое уже знаем:
+    // в кадре сообщения имени нет, а в списке соседей оно есть.
+    let name = if !display_name.trim().is_empty() {
+        display_name.trim().to_string()
+    } else {
+        network.peers().into_iter()
+            .find(|peer| peer.peer_id == peer_id)
+            .map(|peer| peer.display_name)
+            .unwrap_or_default()
+    };
+    network.observe_peer_at(peer_id, &name, now_ms);
+    network.set_status(NetworkStatus::Connected);
+    event_bus.emit(CoreEvent::PeerDiscovered {
+        peer_id: peer_id.to_string(),
+        display_name: name,
+        is_local: false,
+        observed_at_ms: now_ms,
+    });
+    true
+}
+
 /// Address hints still are not proof that a connection can actually be made.
 pub fn observe(
     event_bus: &EventBus,
@@ -119,6 +164,26 @@ mod tests {
         assert_eq!(observe(&events, &network, &addresses, &book, frame(id, addr, old), now, true), PresenceOutcome::Candidate);
         assert!(events.is_empty());
         assert_eq!(network.peers()[0].last_seen_ms, sent);
+    }
+
+    #[test]
+    fn a_message_that_arrived_now_marks_the_sender_online() {
+        // Владелец 2026-11-17: «не показывает, что друзья на связи», хотя
+        // сообщение дошло. Живой кадр от отправителя — достаточное свидетельство.
+        let now = crate::storage::models::now_ms();
+        let events = EventBus::with_defaults();
+        let network = NetworkManagerFfi::new();
+        let id = "pk_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        assert!(note_live_sender(&events, &network, id, "Абонент", now));
+        assert!(matches!(events.poll(), Some(CoreEvent::PeerDiscovered { observed_at_ms, .. }) if observed_at_ms == now));
+        assert_eq!(network.peers()[0].last_seen_ms, now);
+        // Пустое имя в сообщении не стирает уже известное.
+        assert!(note_live_sender(&events, &network, id, "", now + 1));
+        assert_eq!(network.peers()[0].display_name, "Абонент");
+        // Мусорный идентификатор не создаёт «контакт-призрак».
+        assert!(!note_live_sender(&events, &network, "APUCALL1", "Абонент", now));
+        assert!(!note_live_sender(&events, &network, "", "Абонент", now));
+        assert_eq!(network.peers().len(), 1);
     }
 
     #[test]

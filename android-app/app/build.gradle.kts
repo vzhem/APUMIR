@@ -14,6 +14,12 @@ plugins {
 // this property only after validating the protected google-services.json. This
 // configures the SDK but does not enable token registration or remote push.
 val firebaseClientConfigured = providers.gradleProperty("apuFirebaseClient").orNull == "true"
+// Two further build-time facts for the disabled remote-push runtime. Neither is
+// ever read from the network, a provider payload, a deep link or a peer packet,
+// and an empty endpoint keeps the transport unconstructible even when the test
+// flag is set. Shipped builds leave both at their defaults.
+val pushTestedBuild = providers.gradleProperty("apuPushTested").orNull == "true"
+val pushEndpoint = providers.gradleProperty("apuPushEndpoint").orNull.orEmpty().trim()
 if (firebaseClientConfigured) {
     require(file("google-services.json").isFile) { "Firebase client config is required for this build" }
     pluginManager.apply("com.google.gms.google-services")
@@ -121,7 +127,14 @@ android {
         targetSdk = libs.versions.targetSdk.get().toInt()
         versionCode = releaseVersionCode
         versionName = releaseVersionName
+        // Remote push stays off unless a build is *explicitly* marked as a push
+        // test build on top of a verified Firebase client configuration. The
+        // reviewed endpoint host is a third, independent build-time fact: while
+        // it is empty PushRuntimeConfig still refuses to construct a transport,
+        // so this flag alone cannot make the app send or receive anything.
         buildConfigField("boolean", "APU_FIREBASE_CLIENT_CONFIGURED", firebaseClientConfigured.toString())
+        buildConfigField("boolean", "APU_PUSH_TESTED", pushTestedBuild.toString())
+        buildConfigField("String", "APU_PUSH_ENDPOINT", "\"$pushEndpoint\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

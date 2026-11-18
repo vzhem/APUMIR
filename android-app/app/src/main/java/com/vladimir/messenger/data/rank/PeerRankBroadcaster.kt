@@ -183,8 +183,17 @@ class PeerRankBroadcaster @Inject constructor(
         val prefs = app.getSharedPreferences(REPLY_PREFS, Context.MODE_PRIVATE)
         val key = "ask_" + peer.hashCode()
         val nowMs = System.currentTimeMillis()
-        if (nowMs - prefs.getLong(key, 0L) < REQUEST_MIN_INTERVAL_MS) return@withContext false
-        val chatId = resolveChatId(peerId) ?: return@withContext false
+        if (nowMs - prefs.getLong(key, 0L) < REQUEST_MIN_INTERVAL_MS) {
+            com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                .noteRankRefusal(com.vladimir.messenger.data.diagnostics.TransferDiagnostics.RankRefusalReason.GATE_DAILY)
+            return@withContext false
+        }
+        val chatId = resolveChatId(peerId)
+        if (chatId == null) {
+            com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                .noteRankRefusal(com.vladimir.messenger.data.diagnostics.TransferDiagnostics.RankRefusalReason.NO_CHAT)
+            return@withContext false
+        }
         // Три исхода, а не два. `RustBridge.sendMessage` сообщает только
         // «доставлено напрямую сейчас»; письмо, положенное в офлайн-очередь
         // ядра, тоже уйдёт - как только собеседник появится. Пока этот случай
@@ -217,8 +226,10 @@ class PeerRankBroadcaster @Inject constructor(
             Log.i(TAG, "rank requested from $peer: queued for delivery")
             return@withContext true
         }
+        // Отказ называется точно: гейт, отсутствие чата или отказ ядра —
+        // строку пишет сама noteRankRefusal.
         com.vladimir.messenger.data.diagnostics.TransferDiagnostics
-            .recordWarning("rank", "запрос ранга не ушёл: нет чата с собеседником или ядро отказало")
+            .noteRankRefusal(com.vladimir.messenger.data.diagnostics.TransferDiagnostics.RankRefusalReason.NO_OWN_NODE)
         false
     }
 

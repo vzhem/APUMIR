@@ -39,7 +39,7 @@ def test_environment():
 
 
 def test_policy():
-    return {"total_count": 1, "branch_policies": [{"name": preflight.BRANCH, "type": "branch"}]}
+    return {"total_count": 1, "branch_policies": [{"name": preflight.BRANCHES[0], "type": "branch"}]}
 
 
 class CredentialTests(unittest.TestCase):
@@ -119,7 +119,7 @@ class CredentialTests(unittest.TestCase):
         values = self.config()
         values[preflight.CLIENT_CONFIG_NAME] = test_client("another-project-456")
         env = {**values, "GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": preflight.REPO,
-               "GITHUB_REF": "refs/heads/" + preflight.BRANCH}
+               "GITHUB_REF": "refs/heads/" + preflight.BRANCHES[0]}
         stdout, stderr = io.StringIO(), io.StringIO()
         with mock.patch.dict(os.environ, env, clear=True), \
              mock.patch.object(preflight, "check_cloudflare") as cloudflare, \
@@ -169,7 +169,7 @@ class CredentialTests(unittest.TestCase):
         )
         for name, value, code in cases:
             env = {**self.config(), name: value, "GITHUB_ACTIONS": "true",
-                   "GITHUB_REPOSITORY": preflight.REPO, "GITHUB_REF": "refs/heads/" + preflight.BRANCH}
+                   "GITHUB_REPOSITORY": preflight.REPO, "GITHUB_REF": "refs/heads/" + preflight.BRANCHES[0]}
             stdout, stderr = io.StringIO(), io.StringIO()
             with self.subTest(code=code), mock.patch.dict(os.environ, env, clear=True), \
                  mock.patch.object(preflight, "check_cloudflare") as cloudflare, \
@@ -238,12 +238,28 @@ class EnvironmentTests(unittest.TestCase):
     def test_wildcard_tag_extra_or_missing_branch_policy_fails_closed(self):
         variants = [None, {}, {"total_count": 0, "branch_policies": []},
                     {"total_count": 1, "branch_policies": [{"name": "arena/*", "type": "branch"}]},
-                    {"total_count": 1, "branch_policies": [{"name": preflight.BRANCH, "type": "tag"}]},
+                    {"total_count": 1, "branch_policies": [{"name": preflight.BRANCHES[0], "type": "tag"}]},
                     {"total_count": 2, "branch_policies": test_policy()["branch_policies"] * 2}]
         for policies in variants:
             with self.subTest(policies=policies), self.assertRaises(preflight.PreflightError) as error:
                 self.run_guard(test_environment(), policies)
             self.assertEqual(error.exception.code, "environment")
+
+    def test_one_rule_per_reviewed_branch_is_the_normal_state(self):
+        # The environment gains one rule per branch allowed to start a deployment,
+        # so two rules for the two branches of this line of work must pass, and
+        # the current branch must be one of them.
+        policies = {"total_count": 2, "branch_policies": [
+            {"name": preflight.BRANCHES[0], "type": "branch"},
+            {"name": preflight.BRANCHES[1], "type": "branch"},
+        ]}
+        self.run_guard(test_environment(), policies)
+        # An extra rule for any other branch widens the environment: fail closed.
+        widened = {"total_count": 3, "branch_policies": policies["branch_policies"] +
+                   [{"name": "some-other-branch", "type": "branch"}]}
+        with self.assertRaises(preflight.PreflightError) as error:
+            self.run_guard(test_environment(), widened)
+        self.assertEqual(error.exception.code, "environment")
 
     def test_api_errors_fail_closed(self):
         for first, second in ((404, 200), (403, 200), (200, 404), (200, 500)):
@@ -296,7 +312,16 @@ class CloudflareTests(unittest.TestCase):
 
 class RedactionAndTransportTests(unittest.TestCase):
     def test_invocation_only_in_designated_actions_ref(self):
-        values = {"GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": preflight.REPO, "GITHUB_REF": "refs/heads/" + preflight.BRANCH}
+        # The current work line may use the same protected environment; an
+        # unrelated branch still may not.
+        self.assertEqual(["arena/1266946d-apumir", "arena/2d5de8a6-apumir"], list(preflight.BRANCHES))
+        values = {"GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": preflight.REPO,
+                  "GITHUB_REF": "refs/heads/arena/2d5de8a6-apumir"}
+        preflight.invocation(values)
+        values["GITHUB_REF"] = "refs/heads/arena/unknown-apumir"
+        with self.assertRaises(preflight.PreflightError):
+            preflight.invocation(values)
+        values = {"GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": preflight.REPO, "GITHUB_REF": "refs/heads/" + preflight.BRANCHES[0]}
         preflight.invocation(values)
         for key in values:
             with self.subTest(key=key), self.assertRaises(preflight.PreflightError):
@@ -326,7 +351,7 @@ class RedactionAndTransportTests(unittest.TestCase):
     def test_unexpected_exception_never_prints_its_secret(self):
         sentinel = "SECRET_SENTINEL_MUST_NOT_APPEAR"
         values = {"GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": preflight.REPO,
-                  "GITHUB_REF": "refs/heads/" + preflight.BRANCH, "GH_TOKEN": sentinel}
+                  "GITHUB_REF": "refs/heads/" + preflight.BRANCHES[0], "GH_TOKEN": sentinel}
         stdout, stderr = io.StringIO(), io.StringIO()
         with mock.patch.dict(os.environ, values, clear=True), mock.patch.object(preflight, "check_environment", side_effect=RuntimeError(sentinel)), \
              contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
@@ -338,7 +363,7 @@ class RedactionAndTransportTests(unittest.TestCase):
     def test_failure_annotations_are_fixed_and_never_include_exception_contents(self):
         sentinel = "SECRET_SENTINEL_MUST_NOT_APPEAR"
         values = {"GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": preflight.REPO,
-                  "GITHUB_REF": "refs/heads/" + preflight.BRANCH, "GH_TOKEN": sentinel}
+                  "GITHUB_REF": "refs/heads/" + preflight.BRANCHES[0], "GH_TOKEN": sentinel}
         for code in [*preflight.MESSAGES, sentinel]:
             stdout, stderr = io.StringIO(), io.StringIO()
             with self.subTest(code=code), mock.patch.dict(os.environ, values, clear=True), \
@@ -350,7 +375,7 @@ class RedactionAndTransportTests(unittest.TestCase):
             self.assertNotIn(sentinel, stdout.getvalue() + stderr.getvalue())
 
     def test_secret_variables_popped_before_network(self):
-        values = {"GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": preflight.REPO, "GITHUB_REF": "refs/heads/" + preflight.BRANCH,
+        values = {"GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": preflight.REPO, "GITHUB_REF": "refs/heads/" + preflight.BRANCHES[0],
                   preflight.CF_TOKEN_NAME: "secret", preflight.CF_ACCOUNT_NAME: "account", preflight.FCM_ACCOUNT_NAME: "private", preflight.CLIENT_CONFIG_NAME: "client"}
 
         captured = []

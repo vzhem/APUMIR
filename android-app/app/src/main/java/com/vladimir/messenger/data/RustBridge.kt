@@ -771,7 +771,10 @@ object RustBridge {
         if (rejectMainThreadCall("retryMessage(chat=$chatId)")) return false
         return try {
             val payload = sealOutgoing(recipientId, text) ?: return false
-            val sentDirectly = engine?.retryMessage(messageId, chatId, recipientId, payload) == true
+            // Тот же признак служебного кадра, что и у первой отправки: иначе
+            // повтор ушёл бы под СВОИМ UUID, и для ядра это стало бы второй
+            // записью той же команды - резерв пересылки рос бы от повторов.
+            val sentDirectly = engine?.retryMessage(com.vladimir.messenger.data.security.EphemeralControl.transportId(messageId, recipientId, text), chatId, recipientId, payload) == true
             Log.i(TAG, "Rust explicit retry result: direct=$sentDirectly sealed=${payload !== text}")
             sentDirectly
         } catch (ex: Exception) {

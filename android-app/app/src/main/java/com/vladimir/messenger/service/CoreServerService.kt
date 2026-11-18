@@ -139,12 +139,12 @@ class CoreServerService : Service() {
                 if (id != peer) chatRepository.updateContactOnlineStatus(id, online)
             },
             onOnline = { peer, seen ->
-                // Start immediately under PresenceRecovery's lock: the router's
-                // in-memory mark happens before a competing offline transition.
+                // Start immediately under PresenceRecovery's lock: in-memory mark wins races.
                 serviceScope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
                     try { fileTransferRouter.markOnline(peer, seen) }
                     catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                     catch (error: Exception) { Log.w(TAG, "custody presence failed", error) }
+                    announceOwnEpoch(applicationContext, peer)
                 }
             },
             onOffline = { peer, expired ->
@@ -477,7 +477,7 @@ class CoreServerService : Service() {
         ) {
             return true
         }
-        return false
+        return announceUnroutedIncoming(applicationContext, senderId)
     }
 
     /**
@@ -1189,7 +1189,10 @@ class CoreServerService : Service() {
                             is RelayEnvelope.Parsed.Message -> {
                                 val messageId = parsed.messageId
                                 val cfContent = if (SealedWire.isSealed(parsed.content)) MessageSealer.open(applicationContext, parsed.content) else parsed.content
-                                if (PushControlIngress.isReserved(cfContent)) return@launch
+                                // The reserved push-control family stays quarantined here; the
+                                // only honest exception is a sealed epoch packet from the
+                                // pinned peer, which the push feature may import.
+                                if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, cfContent, senderId, parsed.content)) return@launch
                                 var acknowledge = false // Only a stored text or an explicitly handled service packet.
                                 // Дедупликация: сообщение уже в БД
                                 val existingMsg = chatRepository.getMessageById(messageId)
@@ -1272,7 +1275,7 @@ class CoreServerService : Service() {
                                                 timestamp = parsed.timestamp,
                                                 channel = MessageChannel.CF,
                                             )
-                                            acknowledge = storedIncomingText(messageId, senderId, chat.id, saved, appDatabase.messageDao()::getMessageById)
+                                            acknowledge = storedIncomingText(messageId = messageId, senderId = senderId, chatId = chat.id, inserted = saved, serviceFrame = serviceFrameWithoutRow(messageId, cfContent.orEmpty()), load = appDatabase.messageDao()::getMessageById)
                                             Log.i(TAG, "CF message handled for chat ${chat.id} msgId=$messageId")
                                             if (chatRepository.isInviteBlocked(senderId, cfContent)) {
                                                 runCatching { sendInviteReject(senderId, cfContent) }
@@ -1304,7 +1307,7 @@ class CoreServerService : Service() {
                             }
 
                             is RelayEnvelope.Parsed.Other -> {
-                                if (PushControlIngress.isReserved(if (SealedWire.isSealed(parsed.raw)) MessageSealer.open(applicationContext, parsed.raw) else parsed.raw)) return@launch
+                                if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, if (SealedWire.isSealed(parsed.raw)) MessageSealer.open(applicationContext, parsed.raw) else parsed.raw, senderId, parsed.raw)) return@launch
                                 // Legacy plain-text payload (не envelope) — сохраняем как раньше.
                                 // Раунд 140: но только не служебный конверт - он
                                 // разбирается стражем, в чат ему дороги нет.
@@ -2241,14 +2244,12 @@ class CoreServerService : Service() {
             }
 
             "message_received" -> {
-                val originalTs = event.timestamp
-                val ts = originalTs ?: System.currentTimeMillis()
-                Log.i(TAG, "📨 MESSAGE_RECEIVED: sender=${event.senderId} msgId=${event.messageId} originalTs=$originalTs ts=$ts")
+                val ts = event.timestamp ?: System.currentTimeMillis()
                 val senderId = event.senderId ?: return
                 val chatId = event.chatId ?: return
                 val messageId = event.messageId ?: return
                 val rawText = event.text ?: return
-                if (PushControlIngress.isReserved(rawText)) return
+                if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, rawText, senderId, rawText)) return acknowledgeEpochPacket(serviceScope, messageId, senderId)
                 val timestamp = ts
 
                 // Отправитель обязан быть узлом (pk_…): ядро не проверяет первое поле, и
@@ -2309,7 +2310,7 @@ class CoreServerService : Service() {
                 // ядро на каждом входящем тормозил разбор очереди.
                 val sealed = SealedWire.isSealed(rawText)
                 val preopened = if (sealed) MessageSealer.open(applicationContext, rawText) else rawText
-                if (PushControlIngress.isReserved(preopened)) return
+                if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, preopened, senderId, rawText)) return
                 val myNodeId = com.vladimir.messenger.data.mirror.MirrorHub.nodeIdCached()
                 if (myNodeId.isNotBlank() && senderId == myNodeId) {
                     Log.w(TAG, "self-addressed packet ignored msgId=$messageId text=" + rawText.take(24))
@@ -2762,9 +2763,9 @@ class CoreServerService : Service() {
                         )
                     }
                     
-                    // Отправить ACK отправителю
+                    // Отправить ACK отправителю (служебный кадр без строки - тоже).
                     try {
-                        if (acknowledgeStoredIncomingText(messageId, senderId, chat.id, incomingSaved, appDatabase.messageDao()::getMessageById, { sealed && MessageSealer.openedByExpectedSender(rawText, senderId) }) { verified -> RustBridge.sendDeliveryAck(messageId, senderId, roomCommitted = verified) }) { Log.i(TAG, "📤 Delivery ACK queued for msgId=$messageId") } else Log.w(TAG, "Incoming text not stored; ACK withheld for msgId=$messageId")
+                        if (acknowledgeStoredIncomingText(messageId = messageId, senderId = senderId, chatId = chat.id, inserted = incomingSaved, serviceFrame = serviceFrameWithoutRow(messageId, text), load = appDatabase.messageDao()::getMessageById, openedByExpectedSender = { sealed && MessageSealer.openedByExpectedSender(rawText, senderId) }) { verified -> RustBridge.sendDeliveryAck(messageId, senderId, roomCommitted = verified) }) { Log.i(TAG, "📤 Delivery ACK queued for msgId=$messageId") } else Log.w(TAG, "Incoming text not stored; ACK withheld for msgId=$messageId")
                     } catch (e: Exception) {
                         Log.w(TAG, "⚠ ACK send failed: ${e.message}")
                     }
@@ -2784,7 +2785,7 @@ class CoreServerService : Service() {
                 if (!peerId.startsWith("pk_")) return  // Skip mDNS duplicates
                 val peerName = event.displayName?.takeIf { it.isNotBlank() } ?: "Anonymous"
                 try {
-                    val existing = contactRepository.getContactByFingerprint(peerId)
+                    val existing = resolvePresenceContact(contactRepository, peerId)
                     val observation = presence.observe(peerId, existing?.id, event.timestamp) ?: return
                     val lightTouch = observation.lightTouch
                     // Рейтинг отражает исходное время принятого наблюдения, а не время доставки.

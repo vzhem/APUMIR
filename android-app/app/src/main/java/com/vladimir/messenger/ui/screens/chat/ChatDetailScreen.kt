@@ -91,6 +91,7 @@ fun ChatDetailScreen(
     viewModel: ChatDetailViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    com.vladimir.messenger.ui.components.TrackOpenChat(chatId)  // этот чат читают: плашку не мигать
     var showWallpaper by remember { mutableStateOf(false) }
     if (showWallpaper) com.vladimir.messenger.ui.components.ConversationWallpaperDialog(
         scope = "direct:$chatId", onDismiss = { showWallpaper = false })
@@ -166,15 +167,17 @@ fun ChatDetailScreen(
     // р252: опрос в личном чате. Вопрос уходит обычным сообщением, варианты -
     // конвертом APUPOLL1 (ранг 3 проверяет ViewModel).
     var showCreatePoll by remember { mutableStateOf(false) }
-    if (showCreatePoll) {
-        com.vladimir.messenger.ui.components.CreatePollDialog(
-            onDismiss = { showCreatePoll = false },
-            onCreate = { draft ->
-                showCreatePoll = false
-                viewModel.createPoll(draft.question, draft.options, draft.anonymous)
-            },
-        )
-    }
+    var openPollMessageId by remember { mutableStateOf<String?>(null) }
+    DirectPollDialogs(
+        showCreate = showCreatePoll,
+        onDismissCreate = { showCreatePoll = false },
+        onCreate = viewModel::createPoll,
+        polls = uiState.polls,
+        openMessageId = openPollMessageId,
+        onDismissOpen = { openPollMessageId = null },
+        onToggle = { poll, index -> viewModel.togglePollChoice(poll, index) },
+        onClose = { viewModel.closePoll(it) },
+    )
 
     if (showGifCatalog) {
         // Раунд 138: единая панель ввода - Эмодзи / Гиф / Стикеры в одном
@@ -458,7 +461,8 @@ fun ChatDetailScreen(
                 onVoiceReady = { uri -> viewModel.onFileSelected(uri) },
                 onVoiceLocked = viewModel::onVoiceLocked,
                 onCancelScheduled = { id -> com.vladimir.messenger.worker.ScheduledSendWorker.cancel(context, id) },
-                replyAuthor  = uiState.replyTo?.replyAuthor?.ifBlank { if (uiState.replyTo?.isFromMe == true) stringResource(R.string.grp_you) else contactName },
+                // `?.let` обязателен: без него имя подставлялось и без выбора, и плашка не закрывалась.
+                replyAuthor  = uiState.replyTo?.let { if (it.isFromMe) stringResource(R.string.grp_you) else contactName },
                 replyText    = uiState.replyTo?.content.orEmpty(),
                 onClearReply = viewModel::clearReply,
                 isSending    = uiState.isSending,
@@ -853,8 +857,7 @@ fun ChatDetailScreen(
                                     linkColor = ApuBubbleLinkColor,
                                     onContactInvite = onAddContactInvite,
                                     onGroupInvite = { viewModel.joinByInviteLink(it) },
-                                    // Одно нажатие - сразу пузырь с реакциями:
-                                    // владелец просил ставить их в один тап.
+                                    // Один тап - сразу пузырь с реакциями (просьба владельца).
                                     // Остальные действия - долгое нажатие.
                                     onTap = { reactionFor = message.id },
                                     onReply = { viewModel.startReply(message) },
@@ -873,18 +876,17 @@ fun ChatDetailScreen(
                                         showCopyDialog = message
                                     },
                                     onRetry = { viewModel.retryMessage(message) },
+                                    hideBubble = uiState.polls.containsKey(message.id), // вопрос уже в карточке
                                 )
                                 }
-                                // р252: карточка опроса - сразу под пузырём
-                                // вопроса, во всю ширину ленты (как в группах).
                                 uiState.polls[message.id]?.let { poll ->
-                                    com.vladimir.messenger.ui.components.ApuPollCard(
+                                    DirectPollFeedCard(
                                         poll = poll,
                                         onToggle = { index -> viewModel.togglePollChoice(poll, index) },
                                         onClose = { viewModel.closePoll(poll) },
                                         canClose = poll.isMine && !poll.closed,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
+                                        onOpen = { openPollMessageId = message.id },
+                                        modifier = Modifier.fillMaxWidth()
                                             .padding(horizontal = 14.dp, vertical = 4.dp),
                                     )
                                 }
@@ -924,10 +926,8 @@ fun ChatDetailScreen(
             title = { Text(stringResource(R.string.chat_message_actions)) },
             text = {
                 Column {
-                    // Раунд 203: превью без служебных строк пересылки.
-                    // Раунд 222 (владелец): служебные маркеры - по-человечески:
-                    // гифка - словом «Гифка» (а не «APUGIFREF1|хэш»), файл -
-                    // «📎 имя (размер)», как на карточке.
+                    // Раунд 203/222: превью без служебных строк пересылки, а
+                    // маркеры - по-человечески: «Гифка» или «📎 имя (размер)».
                     val previewText = remember(message.id) {
                         val stripped = com.vladimir.messenger.util.ForwardMarker.stripHeader(com.vladimir.messenger.util.QuietMessage.strip(message.content))
                         when {
@@ -943,9 +943,9 @@ fun ChatDetailScreen(
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Spacer(modifier = Modifier.height(12.dp))
-                    // Раунд 211: пункты - золотыми пузырями, как в «точках»
-                    // групп и каналов (владелец: единый стиль). Опасное -
-                    // красным. Состав действий прежний.
+                    // Раунд 211/253: пункты - золотыми пузырями, как в
+                    // группах; ответ на сообщение - первым пунктом меню.
+                    ChatReplyActionBubble { resetSelection(); viewModel.startReply(message) }
                     com.vladimir.messenger.ui.components.ApuActionBubble(
                         stringResource(R.string.chat_share_in_apu),
                         androidx.compose.material.icons.Icons.Filled.Send,

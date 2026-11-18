@@ -54,6 +54,11 @@ cd android-app || exit 1
     --tests '*PushWakePeriodicRecoveryTest*' --tests '*PushWakeRunLoopTest*' --tests '*PushWakeDrainTest*' --tests '*PushWakeRecoveryScanTest*' \
     --tests '*PushHttpClientTest*' --tests '*PushWakeCryptoTest*' --tests '*PushMailboxHttpClientTest*' --tests '*PushMailboxAccessSignerTest*' --tests '*PushMailboxHttpsTransportTest*' --tests '*PushHttpLoopbackTlsTest*' \
     --tests '*PushEpochEnvelopeTest*' --tests '*PushMailboxMessageCodecTest*' --tests '*PushMailboxTextPolicyTest*' --tests '*PushMailboxMessageOpenerTest*' --tests '*PushMailboxMessageSealerTest*' --tests '*PushMailboxDrainTest*' --tests '*PushMailboxPutBuilderTest*' \
+    --tests '*PushSignalPolicyTest*' --tests '*PushRuntimeConfigTest*' --tests '*PushRuntimeCoordinatorTest*' --tests '*FcmTokenCipherTest*' --tests '*PushDrainTrustGateTest*' \
+    --tests '*PushRegistrationFlowTest*' --tests '*PushEpochImportTest*' --tests '*PushWakeSignalTest*' --tests '*PushSignalInboxTest*' --tests '*PushReceiveWindowTest*' \
+    --tests '*PushWakeSyncTest*' --tests '*PushFullScanTest*' --tests '*PushSignalSinkTest*' \
+    --tests '*PushTargetsTest*' --tests '*PushTrustResolverTest*' --tests '*PushTokenRegistrarTest*' \
+    --tests '*PushTokenErrorCodeTest*' \
     --tests '*MirrorPendingOutgoingTest*' --tests '*MirrorPendingScheduleIntegrationTest*' --tests '*MirrorPendingFlusherTest*' \
     --tests '*MirrorOutgoingFrameTest*' --tests '*MirrorOutgoingDispatcherTest*' --tests '*ReplyAwareOutboxSenderTest*' --tests '*DeletionOutboxTest*' \
     --tests '*IncomingNotificationProcessorTest*' --tests '*IncomingNotificationSweepTest*' --tests '*NotificationRecoveryScheduleGateTest*' --tests '*NotificationRecoveryOperationObserverTest*'

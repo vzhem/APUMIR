@@ -454,6 +454,69 @@ class PushRegistrationStoreInstrumentedTest {
         } finally { start.countDown(); executor.shutdownNow() }
     }
 
+    @Test fun ensureCreatesTheFirstEpochOnceAndNeverReplacesAnExistingOne() {
+        val journal = store()
+        // A freshly pinned pair has no record: without this, register() can only
+        // ever answer Rejected, which is exactly why push could not start.
+        assertEquals(PushRegistrationStore.Result.Missing, journal.read(participants()))
+        val created = ready(journal.ensure(participants(), 1_000))
+        assertEquals(PushRegistrationState.Phase.ACTIVE, created.phase)
+        assertEquals(0L, created.registeredAtMs)
+        assertTrue(created.epochHex.isNotEmpty())
+        // Creating a record is not a reservation: nothing was sent yet.
+        assertEquals(0L, created.sequence)
+        // A second call is a read: same epoch, same device, same sequence.
+        val again = ready(journal.ensure(participants(), 2_000))
+        assertEquals(created.epochHex, again.epochHex)
+        assertEquals(created.deviceHex, again.deviceHex)
+        assertEquals(created.sequence, again.sequence)
+        assertEquals(created.ownerHash, again.ownerHash)
+        // The created record is usable by the real reserve path.
+        assertEquals(1L, ready(journal.reserve(participants(), 3_000)).sequence)
+        assertEquals(1L, ready(journal.read(participants())).sequence)
+    }
+
+    @Test fun ensureDoesNotCreateForChangedIdentityOrPinOrAfterARevoke() {
+        val journal = store()
+        val created = ready(journal.ensure(participants(), 1_000))
+        // A changed pin must be an explicit recovery, not a silent new record.
+        assertEquals(PushRegistrationStore.Result.Rejected,
+            journal.ensure(participants(peerBinding = changedPeer), 2_000))
+        assertEquals(PushRegistrationStore.Result.Rejected,
+            journal.ensure(participants(localBinding = changedLocal), 2_000))
+        assertEquals(created.epochHex, ready(journal.read(participants())).epochHex)
+        // A revoking pair is not resurrected into a new registration attempt.
+        val revoking = ready(journal.beginRevocation(participants()))
+        assertEquals(PushRegistrationState.Phase.REVOKING, revoking.phase)
+        assertNull(revoking.announcement())
+        val kept = ready(journal.ensure(participants(), 2_000))
+        assertEquals(revoking.generation, kept.generation)
+        assertEquals(PushRegistrationState.Phase.REVOKING, kept.phase)
+        // A completed revoke plus a rotation is a new epoch for the same pair:
+        // ensure reads it back and never falls back to the previous one.
+        val revokeSequence = ready(journal.reserve(participants(), 3_000)).sequence
+        val revoked = ready(journal.revoked(participants(), revokeSequence))
+        assertEquals(PushRegistrationState.Phase.REVOKED, revoked.phase)
+        ready(journal.announced(participants(), revoked.generation))
+        val rotated = ready(journal.rotate(participants()))
+        assertFalse(rotated.epochHex == created.epochHex)
+        assertEquals(rotated.epochHex, ready(journal.ensure(participants(), 4_000)).epochHex)
+        assertEquals(PushRegistrationState.Phase.ACTIVE, ready(journal.read(participants())).phase)
+    }
+
+    @Test fun ensureRespectsTheQuotaAndFailedEntropyWithoutCreatingARow() {
+        val journal = store(maxEntries = 1)
+        ready(journal.ensure(participants(), 1_000))
+        assertEquals(PushRegistrationStore.Result.Full,
+            journal.ensure(participants(peerBinding = other, id = otherId), 1_000))
+        journal.close()
+        context.deleteDatabase(dbFile.absolutePath)
+        val zeroRandom = object : SecureRandom() { override fun nextBytes(bytes: ByteArray) { bytes.fill(0) } }
+        val noEntropy = store(random = zeroRandom)
+        assertEquals(PushRegistrationStore.Result.Unavailable, noEntropy.ensure(participants(), 1_000))
+        assertEquals(PushRegistrationStore.Result.Missing, noEntropy.read(participants()))
+    }
+
     @Test fun quotaAndFailedEntropyDoNotEvictOrCreateARegistration() {
         val journal = store(maxEntries = 1)
         val first = ready(journal.reserve(participants(), 1000))

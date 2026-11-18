@@ -262,16 +262,22 @@ class ChatRepository @Inject constructor(
 
             Log.i(TAG, "sendMessage direct=$sentDirectly messageId=$messageId recipient=$actualRecipientId")
 
+            // Personal chat, ordinary attempt did not get through: ask the push
+            // service to wake that phone, so it comes back on its own and looks
+            // for what arrived. Only 1:1 - groups, channels and other sections
+            // keep their current behaviour until waking is proven on real phones.
+            // Fire-and-forget: it cannot change the result above or the status.
+            if (!sentDirectly && actualRecipientId.isNotBlank()) {
+                wakeCorrespondentIfUnreachable(context, actualRecipientId, sentDirectly)
+            }
+
             // р242: отметка для диагностики - когда последний раз отправляли.
             com.vladimir.messenger.data.mirror.MirrorHub.noteOutgoing()
             if (sentDirectly) {
                 // Guarded update: an early delivery ACK must not be downgraded
                 // back to SENT by this transport completion callback.
-                messageDao.updateOutgoingRetryResult(
-                    messageId,
-                    MessageStatus.SENT.name,
-                    MessageChannel.LOCAL.name,
-                )
+                messageDao.updateOutgoingRetryResult(messageId, MessageStatus.SENT.name, MessageChannel.LOCAL.name)
+                confirmDirectDelivery(messageId)
                 // Диагностика (2026-10-07): считаем ЗДЕСЬ, а не в конце функции:
                 // отложенное до сети — это ещё не отправка, и путать их нельзя.
                 com.vladimir.messenger.data.diagnostics.TransferDiagnostics

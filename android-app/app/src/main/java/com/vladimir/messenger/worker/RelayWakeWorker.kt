@@ -2,7 +2,12 @@ package com.vladimir.messenger.worker
 
 import android.content.Context
 import android.util.Log
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequest
+import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.security.DeviceIdentityMarker
@@ -94,6 +99,33 @@ class RelayWakeWorker(
         const val FLEX_HOURS = 1L
         const val INITIAL_DELAY_MINUTES = 30L
         const val ACTIVE_WINDOW_MS = 25_000L
+
+        /**
+         * Run one bounded pass now. A push signal is exactly the moment the relay
+         * window is needed and the periodic schedule is not: the phone may have
+         * been asleep for hours. The name is unique so a burst of signals becomes
+         * one pending pass rather than a queue of them, and KEEP means an already
+         * scheduled pass is not restarted.
+         */
+        fun enqueueOnce(context: android.content.Context) {
+            try {
+                val request = OneTimeWorkRequest.Builder(RelayWakeWorker::class.java)
+                    .setConstraints(
+                        Constraints.Builder()
+                            .setRequiredNetworkType(NetworkType.CONNECTED)
+                            .build(),
+                    )
+                    .build()
+                WorkManager.getInstance(context.applicationContext)
+                    .enqueueUniqueWork(
+                        WORK_NAME + "_now",
+                        ExistingWorkPolicy.KEEP,
+                        request,
+                    )
+            } catch (_: Exception) {
+                Log.w(TAG, "bounded wake request not scheduled")
+            }
+        }
 
         private const val PREFS_NAME = "p2p_prefs"
         private const val KEY_IDENTITY_CREATED = "identity_created"

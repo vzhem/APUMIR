@@ -24,6 +24,7 @@ pub mod connection_pool;
 pub mod dht;
 pub(crate) mod direct_priority;
 pub mod direct_transport;
+pub mod traffic_priority;
 pub mod dual_stack;
 pub mod fallback_chain;
 pub mod file_control;

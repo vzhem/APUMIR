@@ -83,7 +83,8 @@ class NotificationResultsTest(unittest.TestCase):
 
     def test_push_source_cases_match_the_report_gate(self):
         tests = Path(__file__).resolve().parents[2] / "android-app/app/src/androidTest/java/com/vladimir/messenger/data/push"
-        for name, classname in (("PushRegistrationStoreInstrumentedTest", checker.REGISTRATION_CLASS),
+        for name, classname in (("FcmTokenJournalInstrumentedTest", checker.FCM_JOURNAL_CLASS),
+                                ("PushRegistrationStoreInstrumentedTest", checker.REGISTRATION_CLASS),
                                 ("PushWakeIntegrationInstrumentedTest", checker.PUSH_INTEGRATION_CLASS),
                                 ("PushMailboxDrainInstrumentedTest", checker.MAILBOX_DRAIN_CLASS),
                                 ("PushMailboxRoomStoreInstrumentedTest", checker.MAILBOX_ROOM_CLASS),

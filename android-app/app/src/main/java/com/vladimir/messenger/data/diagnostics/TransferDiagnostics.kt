@@ -119,6 +119,16 @@ object TransferDiagnostics {
         synchronized(lock) { counters[key] = (counters[key] ?: 0L) + delta }
     }
 
+    /**
+     * Поставить значение-«стрелку», а не счётчик: сколько соседей телефон
+     * считает в сети ПРЯМО СЕЙЧАС. Счётчик тут врёт (он только растёт), а
+     * владельцу 2026-11-17 нужно было видеть текущее состояние: «не
+     * показывает, что друзья на связи».
+     */
+    fun gauge(key: String, value: Long) {
+        synchronized(lock) { counters[key] = value }
+    }
+
     /** Read-only seam for JVM regression tests of event counters. */
     internal fun counterValueForTests(key: String): Long =
         synchronized(lock) { counters[key] ?: 0L }
@@ -256,25 +266,93 @@ object TransferDiagnostics {
         }
     }
 
+    /** Где именно обнаружилось расхождение ключа: это разные поломки. */
+    enum class KeyChangedPath { HELLO, OPENED, UNKNOWN }
+
     /**
      * Собеседник прислал новый ключ обмена, а у нас закреплён старый (он
      * переустановил приложение или восстановил профиль). Переписка с ним
      * ломается в обе стороны — и именно так выглядит жалоба «от него ко мне не
      * приходят», хотя внешне ничего не сломано. Пишем предупреждением один раз
      * и каждое пятое: подсказка «отсканируйте QR заново» должна быть на виду.
+     *
+     * [path] называет, ГДЕ поймали расхождение: `hello` — файловый обмен
+     * ключами, `opened` — ключ из уже вскрытого сообщения. Без этого отчёт
+     * говорил «ключ не совпал», хотя сообщения от собеседника при этом
+     * открывались, и понять, какая из двух дорог сломана, было нельзя
+     * (владелец 2026-11-14: «этот телефон у кого-то не видит VIP-статус»).
      */
-    fun notePeerKeyChanged() {
+    fun notePeerKeyChanged(path: KeyChangedPath = KeyChangedPath.UNKNOWN) {
         peerKeyChangedAtMs = System.currentTimeMillis()
+        when (path) {
+            KeyChangedPath.HELLO -> helloKeyMismatch = (helloKeyMismatch ?: 0L) + 1L
+            KeyChangedPath.OPENED -> openedKeyMismatch = (openedKeyMismatch ?: 0L) + 1L
+            KeyChangedPath.UNKNOWN -> Unit
+        }
         val total = bump(Counters.MSG_PEER_KEY_CHANGED)
         if (total == 1L || total % 5L == 0L) {
             append(
                 DiagnosticsLevel.WARN,
                 "msg",
-                "подписанный HELLO не совпал с закреплённым ключом собеседника; " +
-                    "проверьте его личность по другому каналу, прежде чем обновлять QR",
+                "подписанный HELLO не совпал с закреплённым ключом собеседника" +
+                    when (path) {
+                        KeyChangedPath.HELLO -> " (проверка HELLO)"
+                        KeyChangedPath.OPENED -> " (ключ из вскрытого сообщения)"
+                        KeyChangedPath.UNKNOWN -> ""
+                    } +
+                    "; проверьте его личность по другому каналу, прежде чем обновлять QR",
             )
         }
     }
+
+    /** Почему запрос ранга собеседнику не ушёл. Причина, а не «молча нет». */
+    enum class RankRefusalReason {
+        /** Суточный гейт частоты ещё не отпустил: запрос намеренно не повторялся. */
+        GATE_DAILY,
+        /** Чата с этим собеседником на телефоне нет — отправлять запрос некуда. */
+        NO_CHAT,
+        /** Ядро отказало: письмо не ушло и не легло в офлайн-очередь. */
+        NO_OWN_NODE,
+    }
+
+    /**
+     * Запрос ранга не ушёл. Раньше отказ был молчаливым: значок VIP не
+     * появлялся, и по отчёту нельзя было понять, почему — суточный гейт,
+     * отсутствие чата или отказ ядра (владелец 2026-11-14: «этот телефон у
+     * кого-то не видит VIP-статус»). Причина считается и называется: числа
+     * видны в разделе `[сессия]`, первая и каждая двадцатая — в журнале,
+     * чтобы часто спрашиваемый чат не заливал его строками.
+     */
+    fun noteRankRefusal(reason: RankRefusalReason) {
+        val key = when (reason) {
+            RankRefusalReason.GATE_DAILY -> "rank_refused_gate_daily"
+            RankRefusalReason.NO_CHAT -> "rank_refused_no_chat"
+            RankRefusalReason.NO_OWN_NODE -> "rank_refused_no_own_node"
+        }
+        val total = bump(key)
+        if (total == 1L || total % 20L == 0L) {
+            append(
+                DiagnosticsLevel.WARN,
+                "rank",
+                when (reason) {
+                    RankRefusalReason.GATE_DAILY ->
+                        "ранг собеседника не запрошен: ещё не прошёл суточный интервал между запросами"
+                    RankRefusalReason.NO_CHAT ->
+                        "ранг собеседника не запрошен: чата с ним на этом телефоне нет"
+                    RankRefusalReason.NO_OWN_NODE ->
+                        "ранг собеседника не запрошен: ядро отказало, в офлайн-очередь письмо не легло"
+                } + " (попыток с начала сессии: $total)",
+            )
+        }
+    }
+
+    /** Сколько расхождений поймано на каждой дороге; null — таких не было. */
+    @Volatile
+    var helloKeyMismatch: Long? = null
+        private set
+    @Volatile
+    var openedKeyMismatch: Long? = null
+        private set
 
     /** Пакет без узла-отправителя: обрывок служебной строки, в переписку нельзя. */
     fun noteBadSender() {
@@ -375,6 +453,7 @@ object TransferDiagnostics {
                 relayQueueOwnLimit = logcat.queueOwnLimit,
                 relayQueueOwnOldestSecs = logcat.queueOwnOldestSecs,
                 relayQueueOwnEvictions = logcat.queueOwnEvictions,
+                relayQueueOwnDrained = logcat.queueOwnDrained,
                 relayQueueOwnEvictionsAreCumulative = logcat.queueOwnEvictionsAreCumulative,
                 stunFailedCycles = logcat.stunFailedCycles,
                 stunSuccessfulBindings = logcat.stunSuccessfulBindings,
@@ -401,9 +480,21 @@ object TransferDiagnostics {
             com.vladimir.messenger.data.schedule.ScheduledSendStore.cancelDiagnostics() +
             CrashTrace.report(context.applicationContext)
         snapshotOf(facts.copy(relayStorage = storage, runtimeHealth = health,
-            operationalHealth = OperationalDiagnostics.tracker.snapshot(), operationalDetails = details),
+            operationalHealth = OperationalDiagnostics.tracker.snapshot(), operationalDetails = details,
+            push = facts.push ?: pushSnapshot(context.applicationContext)),
             journalSnapshot.first, logcat.lines, createdAtMs)
     }
+
+    /**
+     * Read-only push state. Never constructs the push runtime, so a report taken
+     * in a build with the gate closed costs nothing and cannot create journals.
+     */
+    private fun pushSnapshot(context: Context): PushSnapshot? = runCatching {
+        val gate = com.vladimir.messenger.data.push.PushServiceLocator.enabled(context)
+        val receive = com.vladimir.messenger.data.push.PushServiceLocator.receiving(context)
+        val endpoint = com.vladimir.messenger.data.push.PushServiceLocator.endpoint(context) != null
+        com.vladimir.messenger.data.push.PushDiagnostics.snapshot(context, gate, receive, endpoint)
+    }.getOrNull()
 
     private fun snapshotOf(
         facts: DiagnosticsFacts,
@@ -457,6 +548,9 @@ object TransferDiagnostics {
         // Полное имя java.lang.Runtime: иначе песочница, где нет JDK, видит
         // «Runtime» как имя без объявления (ложное срабатывание проверки).
         val runtime = java.lang.Runtime.getRuntime()
+        // Состояние push читается без побочных эффектов: гейт и приём — из
+        // сборки и настроек SDK, остальное — счётчики, уже записанные runtime.
+        val pushSnapshot: PushSnapshot? = pushSnapshot(context)
         return DiagnosticsFacts(
             createdAtMs = createdAtMs,
             sessionStartedAtMs = sessionStartedAtMs,
@@ -536,6 +630,8 @@ object TransferDiagnostics {
             lastOutgoingAtMs = lastOutgoingAtMs,
             lastAckAtMs = lastAckAtMs,
             peerKeyChangedAtMs = peerKeyChangedAtMs,
+            helloKeyMismatch = helloKeyMismatch,
+            openedKeyMismatch = openedKeyMismatch,
             coreMessageSignals = logcat.coreMessageSignals,
             relayQueueFull = logcat.relayQueueFull,
             relayQueueOwn = logcat.queueOwn,
@@ -576,6 +672,8 @@ object TransferDiagnostics {
         val queueOwnOldestSecs: Long?,
         val queueOwnEvictions: Long,
         val queueOwnEvictionsAreCumulative: Boolean,
+        /** «снято-по-ACK» из той же сводки: очередь не просто стоит. */
+        val queueOwnDrained: Long?,
         val stunFailedCycles: Long,
         val stunSuccessfulBindings: Long,
         val stunLastAttemptFailed: Boolean?,
@@ -606,6 +704,7 @@ object TransferDiagnostics {
                 queueOwnOldestSecs = null,
                 queueOwnEvictions = 0L,
                 queueOwnEvictionsAreCumulative = false,
+                queueOwnDrained = null,
                 stunFailedCycles = 0L,
                 stunSuccessfulBindings = 0L,
                 stunLastAttemptFailed = null,
@@ -829,6 +928,7 @@ object TransferDiagnostics {
             queueOwnLimit = queueStat(all, "предел-своих="),
             queueOwnOldestSecs = queueStat(all, "старейшее-своё="),
             queueOwnEvictions = evictionScan.count,
+            queueOwnDrained = relayQueueOwnDrained(all),
             queueOwnEvictionsAreCumulative = evictionScan.cumulative,
             stunFailedCycles = all.count { it.contains(STUN_ALL_SERVERS_FAILED) }.toLong(),
             stunSuccessfulBindings = all.count(::isStunSuccess).toLong(),

@@ -97,6 +97,18 @@ internal class PushRegistrationStore(
     fun reserve(participants: Participants, nowMs: Long): Result =
         change(participants, true, nowMs) { it.reserve() }
 
+    /**
+     * Creates the record for a newly pinned pair if it does not exist yet, and
+     * returns the current one otherwise.
+     *
+     * The epoch and device id are generated here, locally, and never leave this
+     * journal unencrypted: the peer only ever receives the sealed announcement.
+     * This does not register anything and does not prove the peer can be
+     * reached; it only makes a first `register` attempt possible.
+     */
+    fun ensure(participants: Participants, nowMs: Long): Result =
+        change(participants, true, nowMs, write = true) { it }
+
     /** Index the derived route only after the matching server operation was accepted. */
     fun registered(participants: Participants, sequence: Long, tokenFingerprint: String, nowMs: Long, route: String): Result {
         if (!ROUTE.matches(route)) return Result.Rejected
@@ -121,6 +133,27 @@ internal class PushRegistrationStore(
      * or current trust; bind the result to the live profile/pin and re-derive
      * the route before scheduling work or displaying any notification.
      */
+    /**
+     * Number of routes currently in the index, for diagnostics only.
+     *
+     * A count, never a route and never a participant id: the report must show
+     * whether this device is addressable at all without exposing who with. Zero
+     * is the interesting value - it means a wake cannot reach this device
+     * whatever the provider does.
+     */
+    fun indexedRoutes(): Int? = synchronized(LOCK) {
+        try {
+            val db = db()
+            db.rawQuery("SELECT count(*) FROM registrations", null).use { cursor ->
+                if (!cursor.moveToFirst()) null else cursor.getInt(0)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun findRoute(route: String): RouteResult = synchronized(LOCK) {
         if (!ROUTE.matches(route)) return@synchronized RouteResult.Unavailable
         try {

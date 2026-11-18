@@ -15,6 +15,7 @@ OUTBOX_CLASS = "com.vladimir.messenger.data.repository.OutboxFairnessInstrumente
 REPLY_OUTBOX_CLASS = "com.vladimir.messenger.data.repository.ReplyAwareOutboxSenderInstrumentedTest"
 DELETION_OUTBOX_ROUTING_CLASS = "com.vladimir.messenger.data.repository.DeletionOutboxRoutingInstrumentedTest"
 CLEAR_LOOKUP_CLASS = "com.vladimir.messenger.data.chatclear.ChatClearTombstonesInstrumentedTest"
+FCM_JOURNAL_CLASS = "com.vladimir.messenger.data.push.FcmTokenJournalInstrumentedTest"
 PUSH_CLASS = "com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest"
 REGISTRATION_CLASS = "com.vladimir.messenger.data.push.PushRegistrationStoreInstrumentedTest"
 PUSH_INTEGRATION_CLASS = "com.vladimir.messenger.data.push.PushWakeIntegrationInstrumentedTest"
@@ -138,6 +139,14 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "corruptedCiphertextAndMissingKeystoreKeyFailClosed",
     "quotaDoesNotEvictOrRearmTheFirstPeer",
     "conflictingConcurrentOffersHaveExactlyOneWinnerAcrossInstances",
+}, FCM_JOURNAL_CLASS: {
+    "firstTokenIsMissingThenRotationIsDetectedAndSurvivesReopen",
+    "thePlaintextTokenNeverAppearsInTheDatabaseFile",
+    "malformedTokenIsRejectedWithoutBeingStored",
+    "forgetMakesTheNextTokenLookNew",
+    "legacyRowAuthenticatesAndForcesRegistrationBeforeUsingNewFormat",
+    "pendingRegistrationSurvivesReopenAndCannotConfirmAnotherToken",
+    "aLostKeystoreKeyIsNotSilentlyReplaced",
 }, REGISTRATION_CLASS: {
     "reservationIsEncryptedAndSurvivesReopen",
     "concurrentReservationsNeverReuseASequenceAcrossInstances",
@@ -158,6 +167,9 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, INCOMING_CLASS: {
     "recoveryRejectsAnOversizedJournalInsteadOfSkippingItsTail",
     "concurrentCreatorsCannotExceedTheRegistrationQuota",
     "quotaAndFailedEntropyDoNotEvictOrCreateARegistration",
+    "ensureCreatesTheFirstEpochOnceAndNeverReplacesAnExistingOne",
+    "ensureDoesNotCreateForChangedIdentityOrPinOrAfterARevoke",
+    "ensureRespectsTheQuotaAndFailedEntropyWithoutCreatingARow",
 }, PUSH_INTEGRATION_CLASS: {
     "realFfiAndDeviceJournalsMatchWorkerVectorsWithoutProviderNetwork",
     "mailboxRoundTripAuthenticatesRealFfiAndPreviouslyPinnedParticipants",

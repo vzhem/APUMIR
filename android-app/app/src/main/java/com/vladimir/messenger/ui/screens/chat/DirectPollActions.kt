@@ -59,14 +59,21 @@ internal object DirectPollActions {
         val messageId = UUID.randomUUID().toString()
         scope.launch {
             onSending(true)
-            val envelope = polls.create(
-                chatId = chatId,
-                messageId = messageId,
-                question = cleanQuestion,
-                options = cleanOptions,
-                anonymous = anonymous,
-                creatorId = runCatching { RustBridge.nodeId() }.getOrNull().orEmpty(),
-            ).getOrNull()
+            // Создание карточки в базе — тоже точка отказа (миграция, диск).
+            // Без этого исключение уносило корутину, «отправка» не заканчивалась
+            // и в чате не появлялось ничего: со стороны выглядело как «опрос
+            // отправился и исчез».
+            val created = runCatching {
+                polls.create(
+                    chatId = chatId,
+                    messageId = messageId,
+                    question = cleanQuestion,
+                    options = cleanOptions,
+                    anonymous = anonymous,
+                    creatorId = runCatching { RustBridge.nodeId() }.getOrNull().orEmpty(),
+                )
+            }.getOrNull()
+            val envelope = created?.getOrNull()
             if (envelope == null) {
                 onSending(false)
                 notify(invalidHint)
@@ -82,6 +89,11 @@ internal object DirectPollActions {
                 }
                 .onFailure { e ->
                     onSending(false)
+                    // Карточка уже в базе, а строки вопроса в переписке нет:
+                    // карточку не к чему привязать, и она навсегда осталась бы
+                    // невидимой. Убираем её, чтобы не копить мусор, и говорим
+                    // об ошибке прямо.
+                    runCatching { polls.deleteForMessage(messageId) }
                     notify(sendErrorHint(e.message))
                 }
         }

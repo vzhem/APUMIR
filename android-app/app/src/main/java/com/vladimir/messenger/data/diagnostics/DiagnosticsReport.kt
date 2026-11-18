@@ -52,7 +52,7 @@ enum class DiagnosticsLineTone {
 // Заголовки разделов перечислены явно: под этот шаблон не попадут ни метки
 // приватности вида [contact], ни скрытые тела сообщений.
 private val toneSectionRegex = Regex(
-    "^\\[(?:сводка|окружение|сеть|обновления|ядро|mqtt|помощники|сообщения|передачи|сессия|журнал|лог процесса)\\]",
+    "^\\[(?:сводка|окружение|сеть|обновления|ядро|mqtt|помощники|сообщения|push|передачи|сессия|журнал|лог процесса)\\]",
 )
 private val toneBadSummaryRegex = Regex("^✖")
 private val toneWarnSummaryRegex = Regex("^!")
@@ -194,9 +194,13 @@ data class DiagnosticsFacts(
     val relayQueueOwnLimit: Long? = null,
     /** Возраст старейшей своей записи, секунды: хвост суток и хвост минут — разные диагнозы. */
     val relayQueueOwnOldestSecs: Long? = null,
-    /** Вытеснения своей переписки из RAM-кэша: накопительный счётчик либо выборка старых логов. */
     val relayQueueOwnEvictions: Long = 0L,
+    val relayQueueOwnDrained: Long? = null,
     val relayQueueOwnEvictionsAreCumulative: Boolean = false,
+    /** Расхождений ключа обмена поймано на HELLO; null — таких не было. */
+    val helloKeyMismatch: Long? = null,
+    /** Расхождений поймано на ключе из вскрытого сообщения; null — не было. */
+    val openedKeyMismatch: Long? = null,
     /** Полные циклы STUN, в которых ни один сервер не ответил. */
     val stunFailedCycles: Long = 0L,
     /** Успешные ответы STUN в выборке системного журнала. */
@@ -217,6 +221,7 @@ data class DiagnosticsFacts(
     val runtimeHealth: RuntimeHealthSnapshot = RuntimeHealthSnapshot(),
     val operationalHealth: OperationalSnapshot = OperationalSnapshot(),
     val operationalDetails: String = "",
+    val push: PushSnapshot? = null,
     val networkValidated: Boolean? = null,
     val networkCaptivePortal: Boolean? = null,
     val privateDnsActive: Boolean? = null,
@@ -511,9 +516,7 @@ object DiagnosticsPrivacy {
     }
 
     /**
-     * Берёт самый свежий queue counter из текущего запуска ядра. Startup summary
-     * сбрасывает старый cumulative value после перезапуска; periodic summary
-     * обновляет его. Older builds fall back to the bounded legacy warning sample.
+     * Берёт самый свежий queue counter из текущего запуска ядра.
      */
     fun parseRelayQueueOwnEvictions(lines: List<String>): RelayQueueEvictionDiagnostics {
         for (line in lines.asReversed()) {
@@ -662,7 +665,7 @@ object DiagnosticsPrivacy {
 /** Сборка текста отчёта и строк сводки. Ничего не читает сама — только форматирует. */
 object DiagnosticsReport {
     /** Версия формата отчёта: по ней видно, что файл разобран теми же правилами. */
-    const val SCHEMA = "apu-diag/5"
+    const val SCHEMA = "apu-diag/6"
 
     private const val MAX_JOURNAL_LINES = 240
 
@@ -695,6 +698,8 @@ object DiagnosticsReport {
         appendMqtt(facts)
         appendHelperRoutes(facts)
         appendMessages(facts)
+        // Раздел [push] живёт в PushDiagnosticsReport.kt (потолок god-файла).
+        appendPush(facts)
         append(facts.operationalHealth.render())
         append(facts.operationalDetails)
         appendLine()
@@ -704,6 +709,7 @@ object DiagnosticsReport {
         appendLine()
         appendTransfers(facts)
         appendSession(facts)
+        appendPresence(facts) // <<< НОВАЯ СТРОКА: присутствие
         appendJournal(journal, facts)
         appendLogcat(facts, logcat)
     }
@@ -1174,6 +1180,7 @@ object DiagnosticsReport {
                 } ?: "") +
                 (if (facts.relayQueueOwn != null) " (последняя сводка logcat)" else ""),
         )
+        appendOwnQueueDrain(facts)
         appendLine(
             "очередь ядра: чужая пересылка=" +
                 (facts.relayQueueForeign?.toString() ?: "нет данных") +
@@ -1204,12 +1211,7 @@ object DiagnosticsReport {
                     "не было"
                 },
         )
-        if (facts.peerKeyChangedAtMs > 0L) {
-            appendLine(
-                "  ↳ подписанный HELLO не совпал с закреплённым ключом; проверьте " +
-                    "личность собеседника вне приложения перед обновлением QR",
-            )
-        }
+        appendKeyMismatch(facts)
         if (notOpened > 0L) {
             appendLine(
                 "  ↳ это попытки, не число уникальных сообщений: неизвестно, кому " +
@@ -1333,9 +1335,14 @@ object DiagnosticsReport {
             Counters.TRANSFER_EXPIRED_ROWS,
             Counters.TRANSFER_EXPIRED_COPIES,
         )
-        c.entries.filter { it.key !in known }.sortedBy { it.key }
+        c.entries.filter { it.key !in known && it.key !in PresenceReportStrings.counterKeys }.sortedBy { it.key }
             .forEach { (key, value) -> appendLine("$key=$value") }
         appendLine()
+    }
+
+    /** Добавление строки присутствия из PresenceReportStrings.kt */
+    private fun StringBuilder.appendPresence(facts: DiagnosticsFacts) {
+        appendLine(PresenceReportStrings.appendPresenceLine(facts))
     }
 
     private fun StringBuilder.appendJournal(
@@ -1387,9 +1394,7 @@ object DiagnosticsReport {
         }
     }
 
-    // ------------------------------------------------------------------
-    // Служебное форматирование
-    // ------------------------------------------------------------------
+    // Служебное форматирование.
     private fun marker(level: DiagnosticsLevel): String = when (level) {
         DiagnosticsLevel.OK -> "✔"
         DiagnosticsLevel.INFO -> "•"
@@ -1429,7 +1434,6 @@ object DiagnosticsReport {
         }
     }
 
-    /** «8.4 МиБ», «512 КиБ», «1.20 ГиБ», «0 Б». */
     fun formatBytes(bytes: Long): String {
         val safe = bytes.coerceAtLeast(0L)
         return when {

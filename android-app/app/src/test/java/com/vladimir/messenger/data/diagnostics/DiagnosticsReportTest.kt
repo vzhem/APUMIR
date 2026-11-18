@@ -39,6 +39,7 @@ class DiagnosticsReportTest {
         relayQueueOwnSignals: Long? = null,
         relayQueueRecipients: Long? = null,
         relayQueueOwnLimit: Long? = null,
+        relayQueueOwnDrained: Long? = null,
         relayQueueOwnOldestSecs: Long? = null,
         relayQueueOwnEvictions: Long = 0L,
         relayQueueOwnEvictionsAreCumulative: Boolean = false,
@@ -110,6 +111,7 @@ class DiagnosticsReportTest {
         relayQueueOwnSignals = relayQueueOwnSignals,
         relayQueueRecipients = relayQueueRecipients,
         relayQueueOwnLimit = relayQueueOwnLimit,
+        relayQueueOwnDrained = relayQueueOwnDrained,
         relayQueueOwnOldestSecs = relayQueueOwnOldestSecs,
         relayQueueOwnEvictions = relayQueueOwnEvictions,
         relayQueueOwnEvictionsAreCumulative = relayQueueOwnEvictionsAreCumulative,
@@ -800,7 +802,7 @@ class DiagnosticsReportTest {
         )
 
         listOf(
-            "apu-diag/5",
+            "apu-diag/6",
             "[сводка]",
             "[окружение]",
             "[сеть]",
@@ -1251,6 +1253,367 @@ class DiagnosticsReportTest {
         }
     }
 
+    @Test fun pushSectionAnswersWhereTheWakeStopped() {
+        // Раздел существует ровно потому, что отчёт v11.74.512 не сказал о push
+        // ни слова: провал приёма выглядел как «тихое приложение».
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = false,
+            tokenRecorded = true,
+            endpointConfigured = true,
+            registeredRoutes = 0,
+            phase = PushPhase.FAILED,
+            lastRegisterAtMs = 1_700_000_000_000L,
+            signalsReceived = 0,
+            signalsRejected = 2,
+            lastSignalAtMs = 0L,
+            wakeAttempts = 1,
+            lastWake = PushWakeOutcome.NOT_REGISTERED,
+            lastWakeAtMs = 1_700_000_000_000L,
+            inboxPending = "0",
+            endpointReachable = true,
+            lastError = "token registration",
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        for (line in listOf(
+            "[push]",
+            "гейт=открыт",
+            "приём=off",
+            "адрес_службы=задан",
+            "токен=записан",
+            "маршрутов=0",
+            "фаза=failed",
+            "сигналов=0 · отклонено=2",
+            "сигнал_назад=не было",
+            "последнее=not_registered",
+            "служба=отвечала",
+        )) {
+            assertTrue("нет строки: $line", report.contains(line))
+        }
+        // Значение токена и маршрут в раздел не попадают — только «записан»/«нет».
+        assertFalse(report.contains("маршрут="))
+    }
+
+    @Test fun pushSectionNamesWhichHalfOfTheAddressIsMissing() {
+        // Отчёт 523: регистрация прошла (`маршрутов=8`), а сигналов ноль.
+        // Владелец спрашивал «может push работает, а я не вижу». Раздел обязан
+        // отвечать по-разному: «меня ещё никто не будил» и «мне нечем будить».
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = true,
+            endpointConfigured = true,
+            registeredRoutes = 8,
+            phase = PushPhase.REGISTERED,
+            lastRegisterAtMs = 1_699_998_800_000L,
+            signalsReceived = 0,
+            signalsRejected = 0,
+            lastSignalAtMs = 0L,
+            wakeAttempts = 30,
+            lastWake = PushWakeOutcome.NO_PEER_EPOCH,
+            lastWakeAtMs = 1_699_940_000_000L,
+            peerEpochs = 0,
+            endpointReachable = false,
+            endpointCheckedAtMs = 1_699_998_810_000L,
+            lastWakeAcceptedAtMs = 0L,
+            inboxPending = "?",
+            lastError = "-",
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        for (line in listOf(
+            "маршрутов=8",
+            "фаза=registered",
+            "последнее=no_peer_epoch",
+            "принято_службой=не было",
+            "принятие заявки — не доставка",
+            "эпох_собеседников=0",
+            "ни один собеседник ещё не присылал свою эпоху",
+            "этот телефон готов принимать, но ни один сигнал не приходил",
+            "последний ответ",
+        )) {
+            assertTrue("нет строки: $line", report.contains(line))
+        }
+    }
+
+    @Test fun aMissingPeerEpochNamesWhichHalfIsMissing() {
+        // «no_peer_epoch» покрывал четыре разные поломки: собеседник ещё не
+        // присылал эпоху, присылал и мы её потеряли, отозвал, или запись есть,
+        // но больше не совпадает с привязками этой пары. Чинят их в разных
+        // местах — на его телефоне и на нашем.
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = true,
+            endpointConfigured = true,
+            registeredRoutes = 10,
+            phase = PushPhase.REGISTERED,
+            lastRegisterAtMs = 1_699_998_800_000L,
+            signalsReceived = 2,
+            signalsRejected = 0,
+            lastSignalAtMs = 1_699_998_000_000L,
+            wakeAttempts = 378,
+            lastWake = PushWakeOutcome.NO_PEER_EPOCH,
+            lastWakeAtMs = 1_699_998_790_000L,
+            lastWakeDetail = "epoch_unreadable",
+            peerEpochs = 4,
+            endpointReachable = true,
+            endpointCheckedAtMs = 1_699_998_810_000L,
+            lastWakeAcceptedAtMs = 1_699_998_800_000L,
+            inboxPending = "?",
+            lastError = "-",
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        assertTrue(
+            report.contains("последнее=no_peer_epoch · запись эпохи не совпала с привязками этой пары"),
+        )
+        // Счётчик строк и причина чтения — два разных факта: 4 записи могут
+        // все не подходить этой паре, и отчёт не должен это скрывать.
+        assertTrue(report.contains("эпох_собеседников=4"))
+    }
+
+    @Test fun aWakeWithoutTrustNamesTheMissingHalf() {
+        // «not_registered» покрывал три разные поломки сразу: у собеседника нет
+        // закреплённого ключа, свой ключ обмена не готов, хранилище не читается.
+        // Чинят их в разных местах, поэтому причина печатается рядом с исходом.
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = true,
+            endpointConfigured = true,
+            registeredRoutes = 8,
+            phase = PushPhase.REGISTERED,
+            lastRegisterAtMs = 1_699_998_800_000L,
+            signalsReceived = 0,
+            signalsRejected = 0,
+            lastSignalAtMs = 0L,
+            wakeAttempts = 28,
+            lastWake = PushWakeOutcome.NOT_REGISTERED,
+            lastWakeAtMs = 1_699_998_780_000L,
+            lastWakeDetail = "no_pin",
+            inboxPending = "?",
+            lastError = "-",
+            endpointReachable = null,
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        assertTrue(report.contains("последнее=not_registered · у собеседника нет закреплённого ключа"))
+    }
+
+    @Test fun theEpochExchangeSaysWhichHalfIsMissing() {
+        // «эпох_собеседников=0» на обеих сторонах читается одинаково, хотя
+        // причины разные: свой анонс не ушёл, ушёл и не дошёл, дошёл и был
+        // отвергнут. Счётчики разделяют эти три случая.
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = true,
+            endpointConfigured = true,
+            registeredRoutes = 7,
+            phase = PushPhase.REGISTERED,
+            lastRegisterAtMs = 1_699_998_800_000L,
+            signalsReceived = 0,
+            signalsRejected = 0,
+            lastSignalAtMs = 0L,
+            wakeAttempts = 7,
+            lastWake = PushWakeOutcome.NO_PEER_EPOCH,
+            lastWakeAtMs = 1_699_998_790_000L,
+            peerEpochs = 0,
+            epochOfferMessage = 2,
+            epochOfferBlocked = 3,
+            epochOfferBlockReason = "deferred",
+            epochImportRejected = 1,
+            epochImportReason = "rejected",
+            inboxPending = "?",
+            lastError = "-",
+            endpointReachable = true,
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        for (line in listOf(
+            "эпоха_своя: обычным_сообщением=2 через_ящик=0 не_ушла=3 (ящик отложил отправку)",
+            "эпоха_чужая: принято=0 отклонено=1 (доверие не совпало)",
+            "анонсы доходили, но не прошли проверку",
+        )) {
+            assertTrue("нет строки: $line", report.contains(line))
+        }
+    }
+
+    @Test fun anAcceptedWakeSaysWhenItWasAccepted() {
+        // «30 пробуждений» читалось и как «30 запросов ушло», и как «30 раз не
+        // смогли начать». Принятие заявки печатается отдельно и со временем.
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = true,
+            endpointConfigured = true,
+            registeredRoutes = 8,
+            phase = PushPhase.REGISTERED,
+            lastRegisterAtMs = 1_699_998_800_000L,
+            signalsReceived = 1,
+            signalsRejected = 0,
+            lastSignalAtMs = 1_699_999_000_000L,
+            wakeAttempts = 31,
+            lastWake = PushWakeOutcome.ACCEPTED,
+            lastWakeAtMs = 1_699_998_900_000L,
+            peerEpochs = 3,
+            endpointReachable = true,
+            endpointCheckedAtMs = 1_699_999_000_000L,
+            lastWakeAcceptedAtMs = 1_699_998_900_000L,
+            inboxPending = "0",
+            lastError = "-",
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        assertTrue(report.contains("последнее=accepted"))
+        assertTrue(report.contains("принято_службой="))
+        assertTrue(report.contains("принятие заявки — не доставка"))
+        assertTrue(report.contains("эпох_собеседников=3"))
+        // Своя регистрация есть и сигнал пришёл — подсказки «никто не будил» нет.
+        assertFalse(report.contains("его ещё никто не будил"))
+    }
+
+    @Test fun aTokenThatNeverArrivedSaysWhy() {
+        // Отчёт 514 с телефона Б: гейт открыт, приём on, а токена нет — и ни
+        // слова о причине. «нет» без причины не диагноз.
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = false,
+            endpointConfigured = true,
+            registeredRoutes = 0,
+            phase = PushPhase.NO_TARGETS,
+            lastRegisterAtMs = 1_700_000_000_000L,
+            signalsReceived = 0,
+            signalsRejected = 0,
+            lastSignalAtMs = 0L,
+            wakeAttempts = 0,
+            lastWake = PushWakeOutcome.NONE,
+            lastWakeAtMs = 0L,
+            tokenError = "SERVICE_NOT_AVAILABLE",
+            inboxPending = "0",
+            endpointReachable = true,
+            lastError = "-",
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        assertTrue(report.contains("причина_отказа_токена=SERVICE_NOT_AVAILABLE"))
+        assertTrue(report.contains("фаза=no_targets"))
+        // Пустая очередь регистрации объясняется словами, а не «failed».
+        assertTrue(report.contains("регистрировать некого"))
+    }
+
+    @Test fun aFailedRegistrationNamesTheStepInsteadOfThreeGuesses() {
+        // Отчёт 2026-11-16 с телефона: «фаза=failed · маршрутов=0», и подсказка
+        // под ним перечисляла сеть, отказ службы и неготовый ключ разом — то
+        // есть не отвечала ни на один вопрос. Причина обязана быть строкой.
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = false,
+            endpointConfigured = true,
+            registeredRoutes = 0,
+            phase = PushPhase.FAILED,
+            lastRegisterAtMs = 1_700_000_000_000L,
+            signalsReceived = 0,
+            signalsRejected = 0,
+            lastSignalAtMs = 0L,
+            wakeAttempts = 0,
+            lastWake = PushWakeOutcome.NONE,
+            lastWakeAtMs = 0L,
+            registrationReason = PushRegisterReason.PEER_NOT_READY,
+            inboxPending = "0",
+            endpointReachable = true,
+            lastError = "-",
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        assertTrue(report.contains("причина=peer_not_ready (пара не готова"))
+        // Маршрут, токен и идентификаторы по-прежнему не попадают в отчёт.
+        assertFalse(report.contains("capability="))
+        assertFalse(report.contains("signature="))
+    }
+
+    @Test fun noRecordedReasonPrintsNoReasonLine() {
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = true,
+            endpointConfigured = true,
+            registeredRoutes = 1,
+            phase = PushPhase.REGISTERED,
+            lastRegisterAtMs = 1_700_000_000_000L,
+            signalsReceived = 0,
+            signalsRejected = 0,
+            lastSignalAtMs = 0L,
+            wakeAttempts = 0,
+            lastWake = PushWakeOutcome.NONE,
+            lastWakeAtMs = 0L,
+            inboxPending = "0",
+            endpointReachable = true,
+            lastError = "-",
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        assertFalse(report.contains("причина="))
+    }
+
+    @Test fun aLiveEngineNudgeIsReportedSeparatelyFromTheWorker() {
+        // Сигнал, нашедший живой процесс, обязан быть виден: «разбудили на
+        // месте» и «ушли в фоновую задачу» — разные ответы на вопрос владельца.
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = true,
+            endpointConfigured = true,
+            registeredRoutes = 1,
+            phase = PushPhase.REGISTERED,
+            lastRegisterAtMs = 1_700_000_000_000L,
+            signalsReceived = 3,
+            signalsRejected = 0,
+            lastSignalAtMs = 1_700_000_500_000L,
+            wakeAttempts = 0,
+            lastWake = PushWakeOutcome.NONE,
+            lastWakeAtMs = 0L,
+            inProcessWakeAtMs = 1_700_000_500_000L,
+            workerWakeAtMs = 0L,
+            inboxPending = "0",
+            endpointReachable = true,
+            lastError = "-",
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        assertTrue(report.contains("разбудили_на_месте=да"))
+        // Фоновая задача не ставилась — строки о ней быть не должно.
+        assertFalse(report.contains("фоновая_задача_пробуждения="))
+    }
+
+    @Test fun aStalledOwnQueueIsNamedAsStalledNotAsSlow() {
+        // Владелец 2026-11-14: очередь стоит на пределе двое суток, и по отчёту
+        // нельзя было понять, разгружается она или застряла.
+        val stalled = facts(
+            relayQueueOwn = 1000,
+            relayQueueOwnLimit = 1000,
+            relayQueueOwnDrained = 0,
+        )
+        val report = DiagnosticsReport.render(stalled, emptyList(), emptyList())
+        assertTrue(report.contains("снято по подтверждению=0"))
+        assertTrue(report.contains("не разгружается"))
+
+        val moving = facts(relayQueueOwn = 1000, relayQueueOwnLimit = 1000, relayQueueOwnDrained = 7)
+        val live = DiagnosticsReport.render(moving, emptyList(), emptyList())
+        assertTrue(live.contains("снято по подтверждению=7"))
+        assertFalse(live.contains("не разгружается"))
+    }
+
+    @Test fun theQueueDrainFieldIsParsedOnlyFromTheCoresOwnSummary() {
+        assertEquals(5L, com.vladimir.messenger.data.diagnostics.relayQueueOwnDrained(
+            listOf("Relay-очередь: своих=1000 сигналов=37 чужих=3497 снято-по-ACK=5 предел-своих=1000"),
+        ))
+        // Строка без сводки очереди ничего не придумывает.
+        assertNull(com.vladimir.messenger.data.diagnostics.relayQueueOwnDrained(
+            listOf("MQTT: delivery ACK received for [id]"),
+        ))
+    }
+
+    @Test fun pushSectionSaysSoWhenItWasNotCollected() {
+        val report = DiagnosticsReport.render(facts(), emptyList(), emptyList())
+        assertTrue(report.contains("[push]"))
+        assertTrue(report.contains("нет данных"))
+    }
+
     @Test fun operationalMetricsAndSafeKeyReasonsReachReport() {
         val state = OperationalSnapshot(counters = mapOf(OperationalCounter.STORY_PACKET_DEFERRED to 3L))
         val report = DiagnosticsReport.render(facts().copy(operationalHealth = state,
@@ -1258,6 +1621,142 @@ class DiagnosticsReportTest {
         assertTrue(report.contains("[операционные метрики]"))
         assertTrue(report.contains("story_packet_deferred=3"))
         assertTrue(report.contains("signing_mode_reason=missing_wrap_key"))
+    }
+
+    @Test fun presenceSectionCountsObservationsAndNamesEveryDiscardReason() {
+        val report = DiagnosticsReport.render(
+            facts(
+                liveDirectSwarmPeers = 0,
+                counters = mapOf(
+                    PresenceReportStrings.PRESENCE_OBSERVED to 12L,
+                    PresenceReportStrings.PRESENCE_BECAME_ONLINE to 2L,
+                    PresenceReportStrings.PRESENCE_DISCARDED_STALE to 5L,
+                    PresenceReportStrings.PRESENCE_DISCARDED_CLOCK_SKEW to 1L,
+                    PresenceReportStrings.PRESENCE_RETIRED_EXPIRED to 4L,
+                    PresenceReportStrings.PRESENCE_LOST to 1L,
+                ),
+            ).copy(connectedPeers = 3L),
+            emptyList(),
+            emptyList(),
+        )
+        assertTrue(report.contains("[присутствие]"))
+        assertTrue(report.contains("режим маяка: обычный (известных соседей 3, широкий с 50)"))
+        assertTrue(report.contains("· подтверждённых прямых соседей 0"))
+        assertTrue(report.contains("наблюдений принято: 12 (впервые вышли в сеть: 2)"))
+        assertTrue(
+            report.contains(
+                "отброшено: 6 (без времени 0, устаревших 5, время впереди 1," +
+                    " повторов потерянного 0, предел списка 0)",
+            ),
+        )
+        assertTrue(report.contains("снято: молчанием свыше 200 с — 4, явным «пропал» — 1"))
+        // Счётчики присутствия живут в своём разделе и не печатаются второй
+        // раз сырым видом в [сессия].
+        assertFalse(report.contains("presence_observed="))
+        assertFalse(report.contains("presence_discarded_stale="))
+    }
+
+    @Test fun presenceSectionShowsHowManyPeersAreOnlineRightNow() {
+        // Владелец 2026-11-17: «не показывает, что друзья на связи», хотя
+        // сообщение дошло. Накопленный счётчик наблюдений этого не объясняет —
+        // нужен текущий итог и возраст последней уборки.
+        val now = 1_700_000_000_000L
+        val report = DiagnosticsReport.render(
+            facts(
+                counters = mapOf(
+                    PresenceReportStrings.PRESENCE_ONLINE_NOW to 2L,
+                    PresenceReportStrings.PRESENCE_TRACKED_PEERS to 5L,
+                    PresenceReportStrings.PRESENCE_LAST_SWEEP_AT_MS to now - 12_000L,
+                ),
+            ).copy(createdAtMs = now),
+            emptyList(),
+            emptyList(),
+        )
+        assertTrue(report.contains("сейчас «в сети»: 2 из 5 отслеживаемых · уборка 12 с назад"))
+        assertTrue(report.contains("(каждые 60 с, порог 200 с)"))
+        // Стрелки тоже не печатаются в [сессия] сырым видом.
+        assertFalse(report.contains("presence_online_now="))
+    }
+
+    @Test fun presenceSectionHidesDirectPeersWhenTheCoreNeverSignedThem() {
+        val report = DiagnosticsReport.render(
+            facts(liveDirectSwarmPeers = null, counters = emptyMap()).copy(connectedPeers = 120L),
+            emptyList(),
+            emptyList(),
+        )
+        assertTrue(report.contains("режим маяка: широкий (известных соседей 120, широкий с 50)"))
+        // Ядро не присылало подписанных соседей — строка молчит, а не выдумывает ноль.
+        assertFalse(report.contains("· подтверждённых прямых соседей"))
+        assertFalse(report.contains("null"))
+    }
+
+    @Test fun anAskedForEpochIsNotTheSameAsNeverWritten() {
+        // Владелец 2026-11-18: server67 не будился, и отчёт говорил только
+        // «эпох собеседников=0». Этого мало: «собеседник ещё не писал» чинится
+        // перепиской, а «эпоху просили, ответа нет» — обновлением того телефона.
+        // Третий случай — у пары нет строки чата, и обычный путь ядра (тот, что
+        // переживает заморозку) недоступен.
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = true,
+            endpointConfigured = true,
+            registeredRoutes = 8,
+            phase = PushPhase.REGISTERED,
+            lastRegisterAtMs = 1_699_998_800_000L,
+            signalsReceived = 2,
+            signalsRejected = 0,
+            lastSignalAtMs = 1_699_999_000_000L,
+            wakeAttempts = 3066,
+            lastWake = PushWakeOutcome.NO_PEER_EPOCH,
+            lastWakeAtMs = 1_699_998_900_000L,
+            lastWakeDetail = "epoch_missing_requested",
+            peerEpochs = 0,
+            endpointReachable = true,
+            endpointCheckedAtMs = 1_699_999_000_000L,
+            epochOfferNoChat = 4,
+            epochRequests = 2,
+            lastEpochRequestAtMs = 1_699_998_000_000L,
+            inboxPending = "?",
+            lastError = "-",
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        assertTrue(report.contains("собеседник не ответил"))
+        assertTrue(report.contains("просьб_об_эпохе=2"))
+        assertTrue(report.contains("не_ушла_без_чата=4"))
+    }
+
+    @Test fun aRepeatedEpochIsNotANewExchange() {
+        // Отчёт 536: «эпоха_чужая: принято=105» при пяти собеседниках. Считать
+        // повтор принятием значит показывать сотню обменов, которых не было, и
+        // прятать настоящий диагноз — собеседник жив, но нового адреса у него нет.
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = true,
+            endpointConfigured = true,
+            registeredRoutes = 8,
+            phase = PushPhase.REGISTERED,
+            lastRegisterAtMs = 1_699_998_800_000L,
+            signalsReceived = 10,
+            signalsRejected = 0,
+            lastSignalAtMs = 1_699_999_000_000L,
+            wakeAttempts = 3443,
+            lastWake = PushWakeOutcome.NO_PEER_EPOCH,
+            lastWakeAtMs = 1_699_998_900_000L,
+            peerEpochs = 5,
+            endpointReachable = true,
+            endpointCheckedAtMs = 1_699_999_000_000L,
+            epochImportApplied = 5,
+            epochImportDuplicate = 100,
+            epochImportRejected = 0,
+            inboxPending = "?",
+            lastError = "-",
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        assertTrue(report.contains("принято=5"))
+        assertTrue(report.contains("повтор=100"))
+        assertTrue(report.contains("та же эпоха, что уже сохранена"))
     }
 
 }

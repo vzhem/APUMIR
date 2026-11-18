@@ -46,6 +46,7 @@
 | [`CONVERSATION_WALLPAPERS.md`](CONVERSATION_WALLPAPERS.md) | Фон отдельного чата |
 | [`CONTACT_DIRECTORY_RESET.md`](CONTACT_DIRECTORY_RESET.md) | Однократная очистка справочника контактов |
 | [`CORE_ROADMAP.md`](CORE_ROADMAP.md) | План развития ядра |
+| [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md) | План развития проекта: маршрут выхода на бесплатные площадки, решения владельца, риски. Очередь работ, не состояние |
 | [`DUAL_STACK_IPV6.md`](DUAL_STACK_IPV6.md) | Dual-stack: IPv6 и IPv4 в прямом канале |
 | [`FLASH_BACKUP_RUNBOOK.md`](FLASH_BACKUP_RUNBOOK.md) | Памятка по копии на флешку |
 | [`GROUP_QUIET_HOURS.md`](GROUP_QUIET_HOURS.md) | Расписание запрета сообщений в группе |

@@ -16,6 +16,13 @@ import kotlinx.coroutines.CancellationException
  * arrives. This is a separate, slower fair scan: a backlog of these rows must
  * not block the primary PENDING/QUEUED_OFFLINE pump. Room remains the durable
  * source, retries keep the original ID, and terminal statuses are never reset.
+ *
+ * This is also the only place where a wake is requested for a message that was
+ * *accepted by the transport* and still nobody answered - and that is the normal
+ * case for a sleeping phone: the broker accepts a publish with no subscriber,
+ * the row stays SENT, and until now nothing ever asked the other side to look.
+ * A retry alone could never help there, because the message is not in the queue
+ * any more.
  */
 internal class UnconfirmedOutboxPump(
     private val messages: MessageDao,
@@ -25,6 +32,16 @@ internal class UnconfirmedOutboxPump(
 ) {
     // A single older retry per turn leaves room for fresh sends on the same peer.
     private val scan = FairOutboxScan<MessageEntity>(maxAttemptsPerCycle = 1)
+
+    /**
+     * A wake never delays the retry that carries the message itself: it is handed
+     * to the push hook, which is a no-op while the gate is closed and swallows its
+     * own failures. Fresh rows are skipped - a phone that answered a moment later
+     * needs no nudge.
+     */
+    private fun wakeIfStale(peer: String, messageTimestampMs: Long) {
+        com.vladimir.messenger.data.push.PushWakeHook.wakeIfMessageStale(peer, messageTimestampMs)
+    }
 
     suspend fun pump(pageSize: Int): OutboxProgress {
         // The active mirror partner owns network sends while it is present.
@@ -54,10 +71,17 @@ internal class UnconfirmedOutboxPump(
                     } else {
                         val peer = OutboxRecipient.forMessage(current, chats.getChatById(current.chatId)?.contactId)
                         if (!peer.startsWith("pk_") || mirrorIsActive()) false
-                        else send(
-                            current.id, current.chatId, peer,
-                            TextColorWire.wrap(current.content, current.textColor, current.senderNameColor),
-                        )
+                        else {
+                            // The row has been unconfirmed for at least one sweep:
+                            // the other phone is very likely asleep. Ask the push
+                            // service to wake it, then retry as before. The wake is
+                            // bounded per peer inside push and cannot change status.
+                            wakeIfStale(peer, current.timestamp)
+                            send(
+                                current.id, current.chatId, peer,
+                                TextColorWire.wrap(current.content, current.textColor, current.senderNameColor),
+                            )
+                        }
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled

@@ -7,13 +7,29 @@ import org.junit.Test
 class EphemeralControlTest {
     @Test fun typingAndCatalogHintsAreStableAcrossRetryButSeparateAcrossRecipients() {
         val reset = ContactResetWire.build(ContactResetWire.EPOCH, "pk_${"ab".repeat(32)}", "", ByteArray(32) { 1 }, ByteArray(32) { 2 })
-        for (text in listOf("APUTYP1|APUGAME1|signed-snapshot", "APUTYP1|1", "APUTYP1|0", "APUGRP1|typ|group|topic|1", "APUGRP1|avv1|an|owner|${"ab".repeat(32)}|42|1|0", "APUGRP1|avv1|rd|owner|${"ab".repeat(32)}", "APUGIF1|have|[]", "APUSTK1|thmb|opaque", reset)) {
+        for (text in listOf("APUTYP1|APUGAME1|signed-snapshot", "APUTYP1|1", "APUTYP1|0", "APUGRP1|typ|group|topic|1", "APUGRP1|avv1|an|owner|${"ab".repeat(32)}|42|1|0", "APUGRP1|avv1|rd|owner|${"ab".repeat(32)}", "APUGIF1|have|[]", "APUSTK1|thmb|opaque",
+            // Истории и отклики на них: пакет истории и реакция/комментарий.
+            "APUSTORY1:{\"id\":\"s1\",\"kind\":\"publish\",\"text\":\"hi\"}",
+            "APUSTORY1:FB1|react|c3Rhcnk|b3duZXI|d2hv|d2hvLW5hbWU|1700000000000|8J+RiQ|1|",
+            reset)) {
             val id = EphemeralControl.transportId("caller-id", "peer-a", text)
             assertTrue(id.startsWith("eph1-"))
             assertEquals(id, EphemeralControl.transportId("caller-id", "peer-a", text))
             assertNotEquals(id, EphemeralControl.transportId("caller-id", "peer-b", text))
         }
     }
+    @Test fun aMintedTransportIdIsRecognisedAndAPlainMessageIdIsNot() {
+        val text = "APUTYP1|APUGAME1|signed-snapshot"
+        val minted = EphemeralControl.transportId("caller-id", "peer-a", text)
+        assertTrue(EphemeralControl.isTransportId(minted))
+        // Обычная переписка и долгие контроли свой ID не меняют.
+        assertFalse(EphemeralControl.isTransportId("user-id"))
+        // Префикс без канонического UUID — не транспортный ID.
+        assertFalse(EphemeralControl.isTransportId("eph1-"))
+        assertFalse(EphemeralControl.isTransportId("eph1-not-a-uuid"))
+        assertFalse(EphemeralControl.isTransportId("eph1-" + "0".repeat(32)))
+    }
+
     @Test fun userMessagesMediaReferencesAndDurableControlsKeepTheirIds() {
         for (text in listOf("обычное письмо", "APUGIF1|ref|media", "APUSTK1|ref|media", "APUGRP1|delete|message", "APUTYP1|invalid", "APUGRP1|typ|g|t|2", "APUGRP1|hello|binding")) {
             assertFalse(EphemeralControl.isReplaceable(text))

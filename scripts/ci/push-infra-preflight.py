@@ -19,7 +19,10 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[2]
 REPO = "vzhem/APUMIR"
-BRANCH = "arena/1266946d-apumir"
+# The protected environment may be restricted to one branch. Both the branch
+# that created the disabled prototype and the current line are accepted, so the
+# check does not need to be weakened when the work continues elsewhere.
+BRANCHES = ("arena/1266946d-apumir", "arena/2d5de8a6-apumir")
 ENVIRONMENT = "apu-push-staging"
 OWNER_ID = 314380434
 MAX_BODY = 128 * 1024
@@ -163,6 +166,21 @@ def request_json(host, path, token):
         raise PreflightError("unavailable") from None
 
 
+def deployment_target(values):
+    """Return (account, deploy token) for a reviewed deployment of this branch.
+
+    Only fixed codes leave this function: no token, account, or provider text.
+    """
+    invocation(values)
+    account = values.get(CF_ACCOUNT_NAME, "")
+    token = values.get("APU_PUSH_CLOUDFLARE_DEPLOY_TOKEN", "")
+    if not isinstance(account, str) or not re.fullmatch(r"[0-9a-f]{32}", account):
+        raise PreflightError("cloudflare_account_invalid")
+    if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9._-]{16,512}", token):
+        raise PreflightError("cloudflare_token_invalid")
+    return account, token
+
+
 def check_environment(token, request=request_json):
     if not isinstance(token, str) or not token:
         raise PreflightError("environment")
@@ -190,12 +208,27 @@ def check_environment(token, request=request_json):
     if reviewer["reviewer"].get("id") != OWNER_ID:
         raise PreflightError("environment")
     status, body = request("api.github.com", prefix + "/deployment-branch-policies?per_page=100", token)
-    if status != 200 or not isinstance(body, dict) or body.get("total_count") != 1:
+    if status != 200 or not isinstance(body, dict):
         raise PreflightError("environment")
     policies = body.get("branch_policies")
-    if not isinstance(policies, list) or len(policies) != 1 or not isinstance(policies[0], dict):
+    if not isinstance(policies, list) or body.get("total_count") != len(policies):
         raise PreflightError("environment")
-    if policies[0].get("name") != BRANCH or policies[0].get("type") != "branch":
+    # The environment accumulates one rule per branch that a deployment may start
+    # from. Requiring exactly one made this check fail the moment a second rule
+    # was added, which is a legitimate protection change, not a missing one. What
+    # must hold is that every rule is a branch rule inside the reviewed set, and
+    # that an unknown rule can never widen the environment.
+    names = set()
+    for policy in policies:
+        if not isinstance(policy, dict) or policy.get("type") != "branch":
+            raise PreflightError("environment")
+        name = policy.get("name")
+        if not isinstance(name, str) or name not in BRANCHES:
+            raise PreflightError("environment")
+        names.add(name)
+    # A duplicate rule protects nothing extra and is not something GitHub creates
+    # on its own, so it stays a reason to stop.
+    if not names or len(names) != len(policies):
         raise PreflightError("environment")
 
 
@@ -218,7 +251,8 @@ def check_cloudflare(credentials, request=request_json):
 
 
 def invocation(values):
-    if values.get("GITHUB_ACTIONS") != "true" or values.get("GITHUB_REPOSITORY") != REPO or values.get("GITHUB_REF") != "refs/heads/" + BRANCH:
+    if values.get("GITHUB_ACTIONS") != "true" or values.get("GITHUB_REPOSITORY") != REPO or \
+            values.get("GITHUB_REF") not in {"refs/heads/" + branch for branch in BRANCHES}:
         raise PreflightError("invocation")
     debug_flags = ("APU_GITHUB_STEP_DEBUG", "APU_GITHUB_RUNNER_DEBUG")
     if values.get("RUNNER_DEBUG") == "1" or any(values.get(name, "").lower() == "true" for name in debug_flags):

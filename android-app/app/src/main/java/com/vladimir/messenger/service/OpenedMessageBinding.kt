@@ -12,7 +12,9 @@ import com.vladimir.messenger.data.file.FileTransferRouter
 internal suspend fun rememberOpenedMessageBinding(router: FileTransferRouter, senderId: String, wire: String) {
     when (router.rememberOpenedMessageBinding(senderId, wire)) {
         FileTransferRouter.OpenedMessageBindingResult.KEY_CHANGED -> {
-            TransferDiagnostics.notePeerKeyChanged()
+            TransferDiagnostics.notePeerKeyChanged(
+                TransferDiagnostics.KeyChangedPath.OPENED,
+            )
             Log.w("CoreServerService", "opened message binding differs from pinned peer binding")
         }
         FileTransferRouter.OpenedMessageBindingResult.PINNED_NEW -> {

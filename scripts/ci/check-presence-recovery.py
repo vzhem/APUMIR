@@ -5,6 +5,7 @@ The behavioral tests run on the actual Kotlin/Rust implementations. These
 checks catch integration regressions; they do not replace two-phone testing.
 """
 from pathlib import Path
+import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -38,6 +39,41 @@ class PresenceWiring(unittest.TestCase):
         self.assertIn("const val MAX_CLOCK_SKEW_MS = 60_000L", kotlin)
         self.assertIn("pub const MAX_FUTURE_SKEW_MS: i64 = 60_000", rust)
 
+    def test_every_discard_reason_and_retirement_is_counted_and_reachable(self):
+        """Отказ наблюдателя без причины — это молчаливый сбой.
+
+        Каждая дорожка в `PresenceRecovery` обязана звать счётчик из
+        `PresenceReportStrings`, иначе в отчёте приходит ноль наблюдений и
+        «ошибок 0» на телефоне, который соседей не видит.
+        """
+        kotlin = read(APP, "service/PresenceRecovery.kt")
+        for marker in (
+            "TransferDiagnostics.count(PresenceReportStrings.PRESENCE_DISCARDED_NO_TIMESTAMP)",
+            "TransferDiagnostics.count(PresenceReportStrings.PRESENCE_DISCARDED_STALE)",
+            "TransferDiagnostics.count(PresenceReportStrings.PRESENCE_DISCARDED_CLOCK_SKEW)",
+            "TransferDiagnostics.count(PresenceReportStrings.PRESENCE_DISCARDED_DUPLICATE)",
+            "TransferDiagnostics.count(PresenceReportStrings.PRESENCE_DISCARDED_LIMIT)",
+            "TransferDiagnostics.count(PresenceReportStrings.PRESENCE_OBSERVED)",
+            "TransferDiagnostics.count(PresenceReportStrings.PRESENCE_BECAME_ONLINE)",
+            "TransferDiagnostics.count(PresenceReportStrings.PRESENCE_RETIRED_EXPIRED)",
+            "TransferDiagnostics.count(PresenceReportStrings.PRESENCE_LOST)",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, kotlin)
+        strings = read(APP, "data/diagnostics/PresenceReportStrings.kt")
+        # Счётчики присутствия исключаются из [сессия]: иначе одно число
+        # печатается дважды и выглядит как два разных факта.
+        report = read(APP, "data/diagnostics/DiagnosticsReport.kt")
+        self.assertIn("it.key !in PresenceReportStrings.counterKeys", report)
+        declared = re.findall(r'const val (PRESENCE_[A-Z_]+) = "([a-z_]+)"', strings)
+        listed = strings.split("val counterKeys", 1)[1].split(")", 1)[0]
+        self.assertGreaterEqual(len(declared), 9, "every discard reason needs its own key")
+        for name, key in declared:
+            # counterKeys перечисляет имена констант: забыть одну — значит
+            # печатать одно число дважды в [сессия].
+            with self.subTest(counter=name):
+                self.assertIn(name, listed, "key declared but missing from counterKeys")
+
     def test_gossip_invite_and_old_broker_cache_are_not_online(self):
         core = read(RUST, "engine/core.rs")
         invite = section(core, "pub fn connect_via_invite", "fn replay_file_session_ingress")
@@ -48,6 +84,50 @@ class PresenceWiring(unittest.TestCase):
         observe = read(RUST, "network/presence_observation.rs")
         self.assertIn("if !live { return PresenceOutcome::Candidate; }", observe)
         self.assertIn("remember_locked(&mut map, book", observe)
+
+    def test_a_message_that_arrived_over_a_live_path_marks_the_sender_online(self):
+        """Владелец 2026-11-17: «не показывает, что друзья на связи», хотя
+        сообщение от них дошло.
+
+        Presence-кадр приходит раз в минуту и живёт 200 с: если он задержался
+        или ушёл раньше, интерфейс показывал «не в сети» при дошедшем
+        сообщении. Живой кадр (прямое соединение или публикация в нашу тему
+        прямо сейчас) — достаточное свидетельство.
+
+        Обратная сторона не менее важна: копия из чужой пересылки или из
+        кастодии может быть часами старой, и пометить по ней отправителя «в
+        сети» значило бы показать выключенный телефон онлайн.
+        """
+        observe = read(RUST, "network/presence_observation.rs")
+        self.assertIn("pub fn note_live_sender(", observe)
+        self.assertIn("network.observe_peer_at(peer_id, &name, now_ms)", observe)
+        core = read(RUST, "engine/core.rs")
+        # Прямой кадр: сообщение дошло по живому соединению.
+        direct = section(core, "fn handle_direct_frame", "async fn run_mdns_discovery")
+        self.assertIn("presence_observation::note_live_sender(", direct)
+        # Публикация в нашу тему в брокере — тоже живьём.
+        mqtt = section(core, 'evt.topic.starts_with("p2pm2/msg/")', "if cadence.take_presence(")
+        self.assertIn("presence_observation::note_live_sender(", mqtt)
+        # Отложенные пути присутствие не выдают: копия из меша могла пролежать
+        # часы, и «в сети» по ней показывал бы выключенный телефон онлайн.
+        relay_delivery = core.split("super::mesh_delivery::Admission::Dispatch => {", 1)[1] \
+            .split("super::mesh_delivery::Admission::Suppress", 1)[0]
+        self.assertNotIn("note_live_sender", relay_delivery)
+        custody = section(core, "if payload.starts_with(CUSTODY_DELIVER_PREFIX.as_bytes())",
+                          "if payload.starts_with(CUSTODY_DROP_PREFIX.as_bytes())")
+        self.assertNotIn("note_live_sender", custody)
+
+        # Текущее состояние видно в отчёте: сколько соседей телефон считает
+        # в сети прямо сейчас, а не только накопленные счётчики.
+        strings = read(APP, "data/diagnostics/PresenceReportStrings.kt")
+        for marker in ('PRESENCE_ONLINE_NOW = "presence_online_now"',
+                       'PRESENCE_TRACKED_PEERS = "presence_tracked_peers"',
+                       'PRESENCE_LAST_SWEEP_AT_MS = "presence_last_sweep_at_ms"'):
+            self.assertIn(marker, strings)
+        recovery = read(APP, "service/PresenceRecovery.kt")
+        self.assertIn("TransferDiagnostics.gauge(PresenceReportStrings.PRESENCE_ONLINE_NOW", recovery)
+        self.assertIn("TransferDiagnostics.gauge(PresenceReportStrings.PRESENCE_LAST_SWEEP_AT_MS, now)", recovery)
+        self.assertIn("presence_online_now", read(APP, "data/diagnostics/TransferDiagnostics.kt") + strings)
 
     def test_audience_tracks_fingerprints_and_failed_seed_retries(self):
         service = read(APP, "service/CoreServerService.kt")
