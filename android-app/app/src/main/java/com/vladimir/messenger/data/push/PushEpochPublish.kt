@@ -43,8 +43,15 @@ internal object PushEpochPublish {
     /** id-подсказка ядру: анонс эпохи — пробуждение и адрес (высший класс). */
     private const val PUSH_WAKE_ID_PREFIX = "push1-"
 
+    /** Bounded per-pass quotas so large channels never flood the durable relay queue. */
+    private const val MAX_UNANNOUNCED_OFFERS_PER_PASS = 48
+    private const val MAX_REFRESH_OFFERS_PER_PASS = 16
+
     /** Process-lifetime throttle per peer; a restart may re-offer once. */
     private val lastOfferAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** Shared background scope for non-blocking correspondent announcements. */
+    private val publishScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /**
      * Offers our current registered epoch to [peerId] if, and only if, this peer
@@ -83,6 +90,14 @@ internal object PushEpochPublish {
                     // reachable, and it is fresher than the startup probe that
                     // kept reading as an outage in the report.
                     PushDiagnostics.noteEndpoint(true)
+                }
+                if (byMailbox || byMessage) {
+                    shared.journals.registrations.announced(
+                        PushRegistrationStore.Participants(
+                            pass.localId, pass.peerId, pass.localBinding, pass.pinnedPeerBinding,
+                        ),
+                        state.generation,
+                    )
                 }
                 PushDiagnostics.noteEpochOffer(
                     overMessage = byMessage,
@@ -123,8 +138,14 @@ internal object PushEpochPublish {
         // The text goes in UNSEALED: `RustBridge.sendMessage` seals it itself and
         // a second envelope would reach the peer as sealed-sealed, fail the
         // reserved-family check and land in the chat as a broken message.
-        val chatId = chatFor(app, peerId)
-        if (chatId != null) {
+        // Group and channel members rarely share a 1:1 chat row, yet they still
+        // need durable relay custody for sealed `APUPUSH1` offers when offline.
+        // The wire `chat_id` slot is opaque to the core and quarantined before
+        // any chat lookup on the receiver, so [peerId] (like `File HELLO`) is a
+        // safe pipe-free fallback whenever no direct chat exists.
+        val effectiveChatId = chatFor(app, peerId)
+            ?: peerId.takeIf { com.vladimir.messenger.util.NodeIds.isNodeId(it) }
+        if (effectiveChatId != null) {
             val accepted = try {
                 com.vladimir.messenger.data.RustBridge.sendMessage(
                     // Подсказка ядру: это пробуждение и адрес, самый важный
@@ -132,7 +153,7 @@ internal object PushEpochPublish {
                     // Анонс запечатан, по телу его не отличить, поэтому класс
                     // передаётся в id; получателю и ACK id безразличен.
                     PUSH_WAKE_ID_PREFIX + java.util.UUID.randomUUID(),
-                    chatId,
+                    effectiveChatId,
                     peerId,
                     text,
                 )
@@ -197,7 +218,29 @@ internal object PushEpochPublish {
         try {
             val (outcome, peers) = PushServiceLocator.targets(app)()
             if (outcome != PushTargets.Outcome.COMPLETED) return
-            for (peer in peers) noteCorrespondent(app, peer.peerId)
+            // Newly registered or rotated peers (`announcedGeneration < generation`)
+            // always go first so group/channel members learn our address right away,
+            // while periodic startup refreshes stay bounded on large rosters.
+            val unannounced = ArrayList<String>()
+            val announced = ArrayList<String>()
+            val shared = PushServiceLocator.shared(app)
+            for (peer in peers) {
+                if (peer.peerId.isBlank()) continue
+                val needsFirstOffer = shared.resolver.resolveForRegistration(peer.peerId)?.use { pass ->
+                    val state = pass.registration
+                    state != null &&
+                        state.phase == PushRegistrationState.Phase.ACTIVE &&
+                        state.registeredAtMs > 0 &&
+                        state.announcedGeneration < state.generation
+                } ?: false
+                if (needsFirstOffer) unannounced.add(peer.peerId) else announced.add(peer.peerId)
+            }
+            for (peerId in unannounced.take(MAX_UNANNOUNCED_OFFERS_PER_PASS)) {
+                noteCorrespondent(app, peerId)
+            }
+            for (peerId in announced.take(MAX_REFRESH_OFFERS_PER_PASS)) {
+                noteCorrespondent(app, peerId)
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -251,7 +294,7 @@ internal object PushEpochPublish {
         if (peerId.isBlank()) return
         val app = context.applicationContext
         if (!PushServiceLocator.enabled(app)) return
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+        publishScope.launch {
             noteCorrespondent(app, peerId)
         }
     }

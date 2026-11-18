@@ -7,7 +7,6 @@ import com.vladimir.messenger.ui.components.ApuBackButton
 // =============================================================================
 
 import com.vladimir.messenger.ui.components.ApuPremiumSpinner
-import android.content.Context
 import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.ui.components.ApuAction
@@ -26,6 +25,7 @@ import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuSearchField
 import com.vladimir.messenger.ui.components.apuBubbleSurface
+import com.vladimir.messenger.ui.components.apuRowPress
 import com.vladimir.messenger.ui.components.apuPremiumGloss
 import com.vladimir.messenger.ui.components.apuPremiumLift
 import com.vladimir.messenger.ui.components.apuPremiumThread
@@ -46,9 +46,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import com.vladimir.messenger.ui.components.ApuPremiumIconTile
 import com.vladimir.messenger.ui.components.ApuSettingsCard
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DoneAll
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.foundation.selection.selectable
@@ -59,7 +56,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
 import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -767,6 +763,8 @@ private fun GroupRow(
     /** Пункты меню «⋮» справа. Пустой список - кнопки нет (каталог сети). */
     menuActions: List<BubbleMenuAction> = emptyList(),
 ) {
+    // Владелец 2026-11-18: удержание на группе или канале открывает меню.
+    var showMenu by remember { mutableStateOf(false) }
     // Раунд 264: фирменный пузырь главного экрана - светлая полупрозрачная
     // подложка с золотой рамкой поверх обоев. Списки выглядят одинаково.
     Row(
@@ -780,7 +778,11 @@ private fun GroupRow(
             .apuBubbleSurface()
             .apuPremiumThread(inset = 16.dp)
             .apuPremiumGloss(intensity = 0.45f, topFraction = 0.55f)
-            .clickable(onClick = onClick)
+            .apuRowPress(
+                onClick = onClick,
+                menuActions = menuActions,
+                onMenuRequest = { showMenu = true },
+            )
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -865,7 +867,11 @@ private fun GroupRow(
         ApuNotificationBadge(group.unreadCount)
         // Меню «⋮» - как в пузырях главного экрана: списки должны
         // выглядеть и вести себя одинаково.
-        BubbleOverflowMenu(actions = menuActions)
+        BubbleOverflowMenu(
+            actions = menuActions,
+            expanded = showMenu,
+            onExpandedChange = { showMenu = it },
+        )
     }
 }
 
@@ -1370,75 +1376,6 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
             },
         )
     }
-}
-
-/**
- * Пункты меню «⋮» в пузыре группы или канала.
- *
- * Набор тот же, что на главном экране: списки обязаны вести себя одинаково,
- * иначе владелец ищет привычное действие и не находит.
- */
-private fun groupMenuActions(
-    context: Context,
-    group: GroupSummary,
-    onOpen: () -> Unit,
-    onAdmin: () -> Unit,
-    onInvite: () -> Unit,
-    onMute: () -> Unit,
-    onMarkRead: () -> Unit,
-    onLeaveOrDelete: () -> Unit,
-): List<BubbleMenuAction> = buildList {
-    add(
-        BubbleMenuAction(
-            title = if (group.isChannel) context.getString(R.string.menu_open_channel) else context.getString(R.string.menu_open_group),
-            icon = Icons.Filled.Forum,
-            onClick = onOpen,
-        )
-    )
-    add(
-        BubbleMenuAction(
-            title = if (group.isChannel) context.getString(R.string.menu_invite_channel) else context.getString(R.string.menu_invite_group),
-            icon = Icons.Filled.PersonAdd,
-            onClick = onInvite,
-        )
-    )
-    val muted = group.mutedUntilMs > System.currentTimeMillis()
-    add(
-        BubbleMenuAction(
-            title = if (muted) context.getString(R.string.menu_unmute) else context.getString(R.string.menu_mute),
-            icon = if (muted) Icons.Filled.NotificationsActive else Icons.Filled.NotificationsOff,
-            onClick = onMute,
-        )
-    )
-    if (GroupRole.isAdminOrOwner(group.myRole)) {
-        add(
-            BubbleMenuAction(
-                title = context.getString(R.string.menu_manage),
-                icon = Icons.Filled.Settings,
-                onClick = onAdmin,
-            )
-        )
-    }
-    add(
-        BubbleMenuAction(
-            title = context.getString(R.string.menu_mark_read),
-            icon = Icons.Filled.DoneAll,
-            onClick = onMarkRead,
-        )
-    )
-    add(
-        BubbleMenuAction(
-            title = when {
-                group.myRole == GroupRole.OWNER ->
-                    if (group.isChannel) context.getString(R.string.menu_delete_channel) else context.getString(R.string.menu_delete_group)
-                group.isChannel -> context.getString(R.string.menu_unsubscribe)
-                else -> context.getString(R.string.action_logout)
-            },
-            icon = Icons.Filled.Delete,
-            destructive = true,
-            onClick = onLeaveOrDelete,
-        )
-    )
 }
 
 /** Строка входа в «Мои заявки»: карточка с иконкой и стрелкой, как у других разделов списка. */

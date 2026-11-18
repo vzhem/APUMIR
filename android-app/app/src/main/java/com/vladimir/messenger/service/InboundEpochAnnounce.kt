@@ -42,3 +42,16 @@ internal fun announceOwnEpoch(context: Context, peerId: String) {
     if (peerId.length < 16 || peerId.startsWith("CUSTD") || peerId.startsWith("relay")) return
     com.vladimir.messenger.data.push.PushEpochPublish.noteCorrespondentIfEnabled(context, peerId)
 }
+
+/**
+ * Входящий пакет участника нашей группы или канала (не общесетевой gossip).
+ *
+ * Подписчик канала и молчащий участник группы сами могут ничего не писать:
+ * без ответного анона эпохи автору канала и согруппникам нечем их разбудить.
+ * Вызывается только после проверки, что `groupId` — наша локальная группа/канал
+ * и пакет относится к ней, а не к `dir`/`nick`/`avat`/`who`/`up*`/`fp*`.
+ */
+internal fun announceGroupCorrespondent(context: Context, senderId: String) {
+    if (!com.vladimir.messenger.util.NodeIds.isNodeId(senderId)) return
+    com.vladimir.messenger.data.push.PushEpochPublish.noteCorrespondentIfEnabled(context, senderId)
+}

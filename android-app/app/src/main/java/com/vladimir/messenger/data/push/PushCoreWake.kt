@@ -31,6 +31,9 @@ internal object PushCoreWake {
     fun nudge(context: Context): Boolean {
         return try {
             if (!RustBridge.isRunning()) return false
+            // Shorten event-poll cadence immediately so arriving personal, group
+            // and channel packets drain without waiting for idle sleep.
+            com.vladimir.messenger.service.DeliveryCadence.touch()
             // Order matters: discovery first, so the presence pass that follows
             // has fresh endpoints to work with.
             val discovery = RustBridge.triggerGossipDiscovery()

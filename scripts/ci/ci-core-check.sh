@@ -122,11 +122,34 @@ comment_to_pr() {
     local text_file=/tmp/apu-ci-report.md
     {
         echo "Проверка ядра не прошла (шаг: ${FAILED_STEP:-compile}, прогон ${GITHUB_RUN_ID:-локально})."
+        if grep -q -E 'NETWORK FAILURE|НЕ УДАЛОСЬ скачать' "$LOG"; then
+            echo
+            echo "**Причина: сеть (Maven Central), код не при чём. Перезапустите шаг.**"
+        fi
         echo
         echo "Строки с ошибками компилятора:"
         echo
         echo '```'
         grep -n -m 3 -A 14 -E '^error(\[|:| )|^e: ' "$LOG" || echo '(строк с ошибками компилятора в выводе нет)'
+        echo '```'
+        # Внутренние ошибки (например, exit 2 у K2JVMCompiler) печатают не
+        # «e: …», а исключение Java: без этой выжимки в отчёте остаётся только
+        # хвост лога, где причины нет.
+        # Сетевой сбой (Maven 404/таймаут) — не ошибка кода: если его не назвать
+        # отдельно, отчёт выглядит как поломка компиляции и провоцирует
+        # «исправление» того, что не ломалось (18.11.2026: curl 404 на первом jar).
+        if grep -q -E 'NETWORK FAILURE|не удалось скачать|НЕ УДАЛОСЬ скачать' "$LOG"; then
+            echo "Это сетевой сбой, а не ошибка кода — шаг нужно перезапустить:"
+            echo
+            echo '```'
+            grep -m 8 -E 'NETWORK FAILURE|fetch: ' "$LOG" || true
+            echo '```'
+        fi
+        echo "Исключения и отказы инструментов:"
+        echo
+        echo '```'
+        grep -n -m 6 -E 'Exception|UnsupportedClassVersion|Could not (find|load|resolve)|NoClassDefFound|Unable to' "$LOG" \
+            || echo '(исключений в выводе нет)'
         echo '```'
         if [ -s "$TESTS_DIGEST" ]; then
             echo "Упавшие тесты и причины:"
@@ -174,6 +197,24 @@ rustc --version 2>&1 | tee -a "$LOG"
 cargo --version 2>&1 | tee -a "$LOG"
 say "processors: $(nproc 2>/dev/null || echo '?')"
 
+# ── JDK ────────────────────────────────────────────────────────────────────
+# `check-chat-history.sh` компилирует чистый Kotlin ниже в этой же цепочке, а
+# воркфлоу этого шага JDK не ставит (в отличие от шага компиляции приложения).
+# Без JAVA_HOME скрипт честно выходил «Java 17+ is required», и вся проверка
+# была красной независимо от правок - так и случилось в прогонах 44279039119
+# и 44334808231. Окружение берём из общего шага (android-env.sh), чтобы версия
+# Java была одна на оба шага.
+if [ ! -x "${JAVA_HOME:-}/bin/java" ] && ! command -v java >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    source "$REPO_ROOT/scripts/ci/android-env.sh" >>"$LOG" 2>&1 || true
+    if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+        export PATH="$JAVA_HOME/bin:$PATH"
+        say "JDK: $("$JAVA_HOME/bin/java" -version 2>&1 | head -1)"
+    else
+        say "::warning::JDK не найден - шаг с чистым Kotlin ниже будет пропущен"
+    fi
+fi
+
 # ── имена Kotlin: что вызывается, но нигде не объявлено и не импортировано ──
 # Работает без JDK, поэтому стоит ПЕРЕД проверками, которым нужна Java: грабли
 # v11.74.171 (первые две сборки тега упали на `:app:compileReleaseKotlin` из-за
@@ -202,6 +243,8 @@ if python3 scripts/ci/check-chat-startup.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-settings-style.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-online-helper.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-saved-input.py >>"$LOG" 2>&1 && \
+   python3 scripts/ci/check-chat-longpress.py >>"$LOG" 2>&1 && \
+   python3 scripts/ci/check-bubble-ink.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-peer-rank.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-rank-entitlements.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-feature-packs.py >>"$LOG" 2>&1 && \
@@ -240,7 +283,8 @@ if python3 scripts/ci/check-chat-startup.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-release-abi.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-silent-catch.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-dual-stack.py >>"$LOG" 2>&1 && \
-   bash scripts/ci/check-chat-history.sh >>"$LOG" 2>&1; then
+   ( command -v java >/dev/null 2>&1 || [ -x "${JAVA_HOME:-}/bin/java" ] \
+       && bash scripts/ci/check-chat-history.sh >>"$LOG" 2>&1 ) ; then
     say "local-first chat history: OK"
 else
     FAILED=1

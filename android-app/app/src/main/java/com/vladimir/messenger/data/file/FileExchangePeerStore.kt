@@ -18,9 +18,13 @@ class FileExchangePeerStore @Inject constructor(
     suspend fun pinFirstSeen(binding: ByteArray, nowMs: Long = System.currentTimeMillis()): PinResult {
         require(binding.isNotEmpty() && binding.size <= MAX_BINDING_BYTES)
         val snapshot = binding.copyOf()
-        return try {
+        val result = try {
             PeerPinSerialization.serialized { pinFirstSeenLocked(snapshot, nowMs) }
         } finally { snapshot.fill(0) }
+        if (result.newlyPinned) {
+            com.vladimir.messenger.data.push.PushPeerBootstrap.onPeerPinned()
+        }
+        return result
     }
 
     private suspend fun pinFirstSeenLocked(binding: ByteArray, nowMs: Long): PinResult {

@@ -83,9 +83,9 @@ internal class PushTokenRegistrar(
                         when (coordinator({ issued -> registerAll(issued) }, { false }).onToken(provider.value, nowMs())) {
                             PushRuntimeCoordinator.TokenOutcome.Disabled -> Outcome.Disabled
                             PushRuntimeCoordinator.TokenOutcome.AlreadyCurrent ->
-                                // Nothing was re-sent, so the previous registration
-                                // still stands; an empty peer set never reaches here.
-                                Outcome.AlreadyCurrent
+                                // Token did not rotate, so indexed peers need zero network calls;
+                                // only newly pinned seeds (contacts, group or channel members) run.
+                                registerUnindexedSeeds(provider.value)
                             is PushRuntimeCoordinator.TokenOutcome.Registered -> Outcome.Registered
                             PushRuntimeCoordinator.TokenOutcome.Failed -> {
                                 // Whoever stopped already wrote its own step
@@ -187,6 +187,51 @@ internal class PushTokenRegistrar(
         return registered > 0
     }
 
+    /**
+     * Incremental bootstrap for peers pinned after the current token was already
+     * confirmed (for example after joining a group or channel). Indexed routes
+     * (`generation > 0`) are untouched; when no seed exists no network call runs.
+     */
+    private suspend fun registerUnindexedSeeds(token: String): Outcome {
+        val (state, list) = try {
+            peers()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            diag()
+            reason(PushRegisterReason.TARGETS_UNREADABLE)
+            return Outcome.Failed
+        }
+        if (state != PushTargets.Outcome.COMPLETED) {
+            reason(PushRegisterReason.TARGETS_UNREADABLE)
+            return Outcome.Failed
+        }
+        val seeds = list.filter { it.generation == 0L }
+        if (seeds.isEmpty()) return Outcome.AlreadyCurrent
+        val batch = seeds.take(MAX_SEED_REGISTRATIONS_PER_PASS)
+        var registered = 0
+        for (peer in batch) {
+            when (register(peer.peerId, token)) {
+                PushRegistrationRunner.Outcome.Registered -> registered++
+                PushRegistrationRunner.Outcome.NotReady -> Unit
+                PushRegistrationRunner.Outcome.Failed -> {
+                    diag()
+                    reasonSink?.let { sink -> lastReason = sink() }
+                    if (lastReason != PushRegisterReason.NONE) reason(lastReason)
+                    return if (registered > 0) Outcome.Partial else Outcome.Failed
+                }
+            }
+            reasonSink?.let { sink -> lastReason = sink() }
+        }
+        if (registered == 0) {
+            diag()
+            if (lastReason != PushRegisterReason.NONE) reason(lastReason)
+            return Outcome.Failed
+        }
+        reason(PushRegisterReason.REGISTERED)
+        return if (seeds.size > batch.size) Outcome.Partial else Outcome.Registered
+    }
+
     /** Out of the app: forget the token and revoke every live route locally. */
     suspend fun forget(): Boolean {
         val (state, list) = try {
@@ -231,5 +276,10 @@ internal class PushTokenRegistrar(
         } catch (_: Exception) {
             Logger.getLogger("PushTokenRegistrar").warning("Registration diagnostics unavailable")
         }
+    }
+
+    companion object {
+        /** Keeps large channel bootstrap well below the Worker hourly IP budget (240/hr). */
+        internal const val MAX_SEED_REGISTRATIONS_PER_PASS = 64
     }
 }

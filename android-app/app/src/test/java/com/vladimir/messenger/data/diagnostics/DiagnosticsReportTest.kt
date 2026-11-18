@@ -1759,4 +1759,31 @@ class DiagnosticsReportTest {
         assertTrue(report.contains("та же эпоха, что уже сохранена"))
     }
 
+    @Test fun groupAndChannelPushWakesAreReportedWithoutIds() {
+        val snapshot = PushSnapshot(
+            gateOpen = true,
+            receiveEnabled = true,
+            tokenRecorded = true,
+            endpointConfigured = true,
+            registeredRoutes = 12,
+            phase = PushPhase.REGISTERED,
+            lastRegisterAtMs = 1_699_998_800_000L,
+            signalsReceived = 3,
+            signalsRejected = 0,
+            lastSignalAtMs = 1_699_999_000_000L,
+            wakeAttempts = 7,
+            lastWake = PushWakeOutcome.ACCEPTED,
+            lastWakeAtMs = 1_699_998_900_000L,
+            peerEpochs = 9,
+            endpointReachable = true,
+            endpointCheckedAtMs = 1_699_999_000_000L,
+            inboxPending = "0",
+            lastError = "-",
+            groupWakeAttempts = 5,
+            groupWakeAccepted = 4,
+        )
+        val report = DiagnosticsReport.render(facts().copy(push = snapshot), emptyList(), emptyList())
+        assertTrue(report.contains("пробуждения_групп=5 · принято=4"))
+    }
+
 }

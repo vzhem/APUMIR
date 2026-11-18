@@ -137,6 +137,10 @@ data class PushSnapshot(
     val lastEpochRequestAtMs: Long = 0L,
     /** Почему доверие к собеседнику не сложилось в последней попытке побудки. */
     val lastWakeDetail: String = "-",
+    /** Исходящие попытки разбудить недоступных участников групп и каналов. */
+    val groupWakeAttempts: Long = 0L,
+    /** Сколько из них принято службой (202 Accepted; не равно доставке). */
+    val groupWakeAccepted: Long = 0L,
 )
 
 /**
@@ -217,6 +221,11 @@ internal fun StringBuilder.appendPush(facts: DiagnosticsFacts) {
         "принято_службой=${agoOrNever(facts.createdAtMs, push.lastWakeAcceptedAtMs)} " +
             "(принятие заявки — не доставка)",
     )
+    if (push.groupWakeAttempts > 0L) {
+        appendLine(
+            "пробуждения_групп=${push.groupWakeAttempts} · принято=${push.groupWakeAccepted}",
+        )
+    }
     val serviceState = when (push.endpointReachable) {
         true -> "отвечала"
         // Недоступность отсюда больше не выводится: отдельная проба /health шла

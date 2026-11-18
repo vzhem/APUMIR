@@ -335,6 +335,7 @@ class GroupRepository(
             commentNeighbours = COMMENT_NEIGHBOURS,
             backfillGapMs = BACKFILL_PACKET_GAP_MS,
             maxTrackedTopics = MAX_TRACKED_TOPICS,
+            deliverWakeable = { groupId, envelope, targets, wake -> delivery.deliver(groupId, envelope, targets, wake) },
         )
     }
 
@@ -1465,6 +1466,7 @@ class GroupRepository(
                         senderNameColor = effectiveNameColor,
                     ),
                     fullRecipients,
+                    wakeOnUnreachable = GroupPushWakePolicy.shouldWakeForMessageText(body),
                 )
             }.onSuccess { report ->
                 Log.i(TAG, "group message id=$messageId fanout=${report.delivered}/${report.attempted}")
@@ -2756,6 +2758,7 @@ class GroupRepository(
                     senderNameColor = head.senderNameColor,
                 ),
                 targets,
+                wakeOnUnreachable = GroupPushWakePolicy.shouldWakeForMessageText(head.content),
             )
         }
         Log.i(TAG, "manifest relayed post=${manifest.messageId} to=${targets.size} known=${top.size + moreKnown.size}")
@@ -3117,6 +3120,7 @@ class GroupRepository(
                     messageDao.deleteByIdChatAndSender(localId, packet.groupId, authorId)
                     return
                 }
+                GroupPushWake.onMessageCommitted(appContext, com.vladimir.messenger.data.notification.NotificationArrivalPolicy.groupMessage(isMine, isPart, relayed, swarmGroup, sentAt, now, FRESH_POST_MS))
                 // р250: цитата ответа могла приехать раньше самого сообщения -
                 // забираем её из буфера (как куски поста ждут манифест).
                 groupReplies.parentInserted(packet.groupId, localId)
@@ -3185,6 +3189,10 @@ class GroupRepository(
                 // Своё сообщение, вернувшееся от соседа (например, добранное
                 // после переустановки), непрочитанным не считаем.
                 val topic = groupDao.getTopicById(packet.topicId)
+                    ?: if (group.isChannel && !isPart && !isComment) {
+                        GroupTopicEntity(packet.topicId, packet.groupId, postTitle(packet.text), authorId, packet.senderName, createdAtMs = sentAt)
+                            .also { groupDao.insertTopic(it) }
+                    } else null
                 if (topic != null) {
                     groupDao.registerTopicMessage(topic.id, preview(packet.text), now)
                     if (!isMine) groupDao.incrementTopicUnread(topic.id)
@@ -5294,44 +5302,34 @@ class GroupRepository(
      */
     suspend fun resyncMembers(groupId: String): Result<Int> = infoResync.resyncAll(groupId)
 
-    private suspend fun broadcast(groupId: String, envelope: String, excludeSelf: Boolean): DeliveryReport {
+    private suspend fun broadcast(
+        groupId: String,
+        envelope: String,
+        excludeSelf: Boolean,
+        wakeOnUnreachable: Boolean = false,
+    ): DeliveryReport {
         val me = myId().orEmpty()
-        // р229: пока применяется зеркальный кадр, тень не рассылает ничего -
-        // иначе ответ на принятое событие уходил бы обратно активному и
-        // возвращался: получилась бы петля. Сети у тени всё равно нет.
+        // р229: тень не рассылает (защита от петли) и отдаёт исходящий конверт активному устройству.
         if (com.vladimir.messenger.data.mirror.MirrorHub.isApplyingFrame() &&
             !com.vladimir.messenger.data.mirror.MirrorHub.isActiveDevice()
-        ) {
-            return DeliveryReport(attempted = 0, delivered = 0, failed = emptyList())
-        }
-        // р229: устройство-зеркало своей сессии не имеет - конверт несёт
-        // активное. Возвращаем успех: дальше им занимается партнёр, а своя
-        // база уже обновлена вызывающим кодом.
+        ) return DeliveryReport(attempted = 0, delivered = 0, failed = emptyList())
         if (com.vladimir.messenger.data.mirror.MirrorHub.deliverGroupEnvelope(groupId, envelope)) {
             Log.i(TAG, "group envelope via mirror (тень): " + envelope.take(16))
             return DeliveryReport(attempted = 1, delivered = 1, failed = emptyList())
         }
-        // р229: и наоборот - конверт, сделанный ЗДЕСЬ, должен доехать до
-        // второго устройства личности (получатели в сети его не видят).
-        com.vladimir.messenger.data.mirror.MirrorHub.publishEnvelope(
-            senderId = me,
-            chatId = groupId,
-            messageId = "",
-            text = envelope,
-        )
+        // р229: синхронизируем собственный конверт со вторым устройством личности.
+        com.vladimir.messenger.data.mirror.MirrorHub.publishEnvelope(me, groupId, "", envelope)
         val recipients = groupDao.getMembers(groupId)
-            .filter { !it.isBanned }
-            .map { it.nodeId }
-            .filter { !excludeSelf || it != me }
-        return delivery.deliver(groupId, envelope, recipients)
+            .filter { !it.isBanned }.map { it.nodeId }.filter { !excludeSelf || it != me }
+        return delivery.deliver(groupId, envelope, recipients, wakeOnUnreachable = wakeOnUnreachable)
     }
 
-    /**
-     * р229: разослать групповой конверт участникам (для конверта, пришедшего
-     * с партнёрского устройства личности - сеть ведёт активный).
-     */
+    /** р229: разослать групповой конверт, пришедший с партнёрского устройства личности. */
     suspend fun fanoutEnvelope(groupId: String, envelope: String): DeliveryReport =
-        broadcast(groupId, envelope, excludeSelf = true)
+        broadcast(groupId, envelope, excludeSelf = true, wakeOnUnreachable = GroupPushWakePolicy.shouldWakeForEnvelope(envelope))
+
+    internal suspend fun noteIncomingCorrespondent(senderId: String, packet: GroupWire.Packet) =
+        GroupPushWake.onSharedIncoming(appContext, groupDao, myId().orEmpty(), senderId, packet)
 
     /**
      * Запоминает автора сообщения, чтобы в ленте было имя, а не обрывок

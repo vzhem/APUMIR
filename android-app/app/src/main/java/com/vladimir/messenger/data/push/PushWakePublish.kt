@@ -265,6 +265,55 @@ internal object PushWakePublish {
         installed = context.applicationContext
     }
 
+    /** Lightweight local state used by bounded group/channel fanout planners. */
+    internal enum class PeerReadiness {
+        /** Live pin and valid OFFER epoch on disk: a wake can address this peer now. */
+        EPOCH_READY,
+        /** Live pin exists, but the peer has not announced an active epoch yet. */
+        PINNED_NO_EPOCH,
+        /** Pinned without epoch and already requested within the cooldown window. */
+        EPOCH_COOLDOWN,
+        /** No live pin or local trust unavailable: needs a File HELLO first. */
+        UNPINNED_OR_NOT_READY,
+    }
+
+    /** Clears the missing-epoch cooldown as soon as a peer announces a fresh epoch. */
+    internal fun notePeerEpochLearned(peerId: String) {
+        if (peerId.isBlank()) return
+        noEpochUntilMs.remove(peerId)
+        lastAttemptAtMs.remove(peerId)
+    }
+
+    /** Classifies [peerId] using local journals only (no network I/O, no counters). */
+    internal suspend fun peerReadiness(context: Context, peerId: String): PeerReadiness {
+        if (peerId.isBlank()) return PeerReadiness.UNPINNED_OR_NOT_READY
+        val app = context.applicationContext
+        if (!PushServiceLocator.enabled(app)) return PeerReadiness.UNPINNED_OR_NOT_READY
+        return try {
+            val shared = PushServiceLocator.shared(app)
+            val pass = shared.resolver.resolveForRegistration(peerId)
+                ?: return PeerReadiness.UNPINNED_OR_NOT_READY
+            pass.use {
+                when (epochLookup(shared, pass)) {
+                    is EpochLookup.Found -> PeerReadiness.EPOCH_READY
+                    else -> {
+                        val until = noEpochUntilMs[peerId]
+                        if (until != null && until > System.currentTimeMillis()) {
+                            PeerReadiness.EPOCH_COOLDOWN
+                        } else {
+                            PeerReadiness.PINNED_NO_EPOCH
+                        }
+                    }
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            diag("Peer readiness lookup failed")
+            PeerReadiness.UNPINNED_OR_NOT_READY
+        }
+    }
+
     /** Wake through the installed context; a no-op before startup ran. */
     suspend fun wakeInstalled(peerId: String): Outcome {
         val app = installed ?: return Outcome.Skipped

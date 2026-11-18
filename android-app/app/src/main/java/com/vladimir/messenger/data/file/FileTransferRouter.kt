@@ -42,6 +42,7 @@ class FileTransferRouter @Inject constructor(
     private val mirrorFileMetaApplier: MirrorFileMetaApplier,
     private val clearSenderGuard: com.vladimir.messenger.data.chatclear.ChatClearSenderGuard,
     private val contactDao: com.vladimir.messenger.data.local.dao.ContactDao,
+    private val groupDao: com.vladimir.messenger.data.local.dao.GroupDao,
     /**
      * Файлы группы роем (этап 9). Через Provider: рой сам зависит от этого
      * маршрутизатора (готовит и качает передачи), а Dagger кольцо напрямую не
@@ -1719,8 +1720,8 @@ class FileTransferRouter @Inject constructor(
     }
 
     /** Когда последний раз проверяли, со всеми ли обменялись ключами. */
-    @Volatile
-    private var lastHelloSweepAt = 0L
+    @Volatile private var lastHelloSweepAt = 0L
+    fun scheduleHelloSweep() { lastHelloSweepAt = 0L }
 
     private suspend fun sendHelloHandshakes() {
         val now = System.currentTimeMillis()
@@ -1735,19 +1736,17 @@ class FileTransferRouter @Inject constructor(
         lastHelloSweepAt = now
 
         val myBinding = FileExchangeKeyStore.publicBinding(appContext) ?: return
-        // Раунд 81: раньше брались только собеседники, у которых УЖЕ есть чат.
-        // Контакт, добавленный по QR, чата ещё не имеет, поэтому ключами с ним
-        // никто не обменивался: первое личное сообщение уходило незашифрованным,
-        // а имя не приходило вовсе. Берём объединение чатов и контактов.
-        val fromChats = runCatching { chatRepository.getAllContactIds() }.getOrDefault(emptyList())
-        val fromContacts = runCatching { contactDao.observeAllContactsOnce().map { it.id } }
-            .getOrDefault(emptyList())
-        val contacts = (fromChats + fromContacts).distinct()
-        for (contactId in contacts) {
-            if (!contactId.startsWith("pk_")) continue
-            val pinned = runCatching { peerStore.bindingFor(contactId) != null }.getOrDefault(true)
-            if (!pinned) sendHello(contactId, force = false, now = now, binding = myBinding)
-        }
+        val targets = FileHandshakeCandidates.collectUnpinned(
+            RustBridge.nodeId(), chatRepository, contactDao, groupDao, peerStore,
+        )
+        for (peerId in targets) sendHello(peerId, force = false, now = now, binding = myBinding)
+    }
+
+    /** Отправить разовый HELLO участнику группы/канала, если привязки ещё нет (с 60-с лимитом). */
+    suspend fun requestHelloIfUnpinned(peerId: String) {
+        if (!com.vladimir.messenger.util.NodeIds.isNodeId(peerId) || peerId == RustBridge.nodeId()) return
+        if (runCatching { peerStore.bindingFor(peerId) != null }.getOrDefault(true)) return
+        sendHello(peerId, force = false)
     }
 
     private suspend fun sendHello(

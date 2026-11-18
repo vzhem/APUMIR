@@ -5,9 +5,9 @@
     "android-app/app/src/main/java/com/vladimir/messenger/data/call/CallManager.kt": 1893,
     "android-app/app/src/main/java/com/vladimir/messenger/data/diagnostics/DiagnosticsReport.kt": 1477,
     "android-app/app/src/main/java/com/vladimir/messenger/data/file/FileTransferReceiver.kt": 2444,
-    "android-app/app/src/main/java/com/vladimir/messenger/data/file/FileTransferRouter.kt": 1812,
+    "android-app/app/src/main/java/com/vladimir/messenger/data/file/FileTransferRouter.kt": 1811,
     "android-app/app/src/main/java/com/vladimir/messenger/data/group/GroupFileSwarm.kt": 1207,
-    "android-app/app/src/main/java/com/vladimir/messenger/data/group/GroupRepository.kt": 5765,
+    "android-app/app/src/main/java/com/vladimir/messenger/data/group/GroupRepository.kt": 5763,
     "android-app/app/src/main/java/com/vladimir/messenger/data/group/GroupWire.kt": 2730,
     "android-app/app/src/main/java/com/vladimir/messenger/data/mirror/MirrorSync.kt": 3780,
     "android-app/app/src/main/java/com/vladimir/messenger/data/repository/ChatRepository.kt": 1291,
@@ -18,11 +18,11 @@
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/channels/ChannelScreen.kt": 1628,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/chat/ChatDetailScreen.kt": 1295,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/chat/ChatDetailViewModel.kt": 1750,
-    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/chat/ChatListScreen.kt": 1773,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/chat/ChatListScreen.kt": 1765,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupAdminScreen.kt": 1367,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupChatScreen.kt": 2957,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupChatViewModel.kt": 1988,
-    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupsScreen.kt": 1470,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupsScreen.kt": 1407,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/SettingsScreen.kt": 2606
   }
 }

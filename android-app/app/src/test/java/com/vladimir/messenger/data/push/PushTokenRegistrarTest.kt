@@ -247,4 +247,32 @@ class PushTokenRegistrarTest {
             harness.reasons.lastOrNull(),
         )
     }
+
+    @Test fun anUnchangedTokenRegistersOnlyNewlyPinnedGroupOrChannelSeeds() = runBlocking {
+        val local = "pk_" + "1".repeat(32)
+        val groupSeed = "pk_" + "4".repeat(32)
+        val incremental = Harness(
+            journal = FcmTokenJournal.State.Unchanged,
+            targets = PushTargets.Outcome.COMPLETED to listOf(
+                peer(peerA),
+                PushTargets.seed(groupSeed, local),
+            ),
+        )
+        assertEquals(PushTokenRegistrar.Outcome.Registered, incremental.build().run())
+        assertEquals(listOf("journal", "register:4444:31"), incremental.calls)
+        assertEquals(listOf(PushRegisterReason.REGISTERED), incremental.reasons)
+
+        val largeChannelSeeds = (1..70).map { idx ->
+            PushTargets.seed("pk_" + "%032x".format(idx + 100), local)
+        }
+        val batched = Harness(
+            journal = FcmTokenJournal.State.Unchanged,
+            targets = PushTargets.Outcome.COMPLETED to (listOf(peer(peerA)) + largeChannelSeeds),
+        )
+        assertEquals(PushTokenRegistrar.Outcome.Partial, batched.build().run())
+        assertEquals(
+            PushTokenRegistrar.MAX_SEED_REGISTRATIONS_PER_PASS,
+            batched.calls.count { it.startsWith("register:") },
+        )
+    }
 }

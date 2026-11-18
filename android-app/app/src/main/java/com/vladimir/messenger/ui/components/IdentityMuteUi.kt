@@ -104,7 +104,7 @@ fun IdentityMuteRow(
                         Spacer(Modifier.width(10.dp))
                         Text(
                             title,
-                            color = MaterialTheme.colorScheme.onSurface,
+                            color = ApuBubbleTextColor,
                             fontWeight = FontWeight.SemiBold,
                             style = MaterialTheme.typography.titleSmall,
                         )
@@ -112,7 +112,7 @@ fun IdentityMuteRow(
                     Spacer(Modifier.size(6.dp))
                     Text(
                         body,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = ApuBubbleMutedColor,
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Spacer(Modifier.size(6.dp))

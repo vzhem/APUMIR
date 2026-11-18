@@ -13,6 +13,8 @@ import com.vladimir.messenger.R
 // действие (удалить) — красным.
 // =============================================================================
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
@@ -22,11 +24,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -60,11 +60,17 @@ data class BubbleMenuAction(
 fun BubbleOverflowMenu(
     actions: List<BubbleMenuAction>,
     modifier: Modifier = Modifier,
+    /**
+     * Открытость меню задаёт строка списка, а не сама кнопка: то же меню должно
+     * открываться и долгим нажатием, а второе состояние Expandable развело бы
+     * два якоря на одном пузыре.
+     */
+    expanded: Boolean = false,
+    onExpandedChange: (Boolean) -> Unit = {},
 ) {
     if (actions.isEmpty()) return
-    var expanded by remember { mutableStateOf(false) }
     IconButton(
-        onClick = { expanded = true },
+        onClick = { onExpandedChange(true) },
         modifier = modifier.size(32.dp),
     ) {
         Icon(
@@ -76,7 +82,7 @@ fun BubbleOverflowMenu(
     }
     DropdownMenu(
         expanded = expanded,
-        onDismissRequest = { expanded = false },
+        onDismissRequest = { onExpandedChange(false) },
         // A title from a server or a contact must not make an overflow menu
         // wider than the viewport.
         modifier = Modifier.widthIn(min = 220.dp, max = 320.dp),
@@ -116,10 +122,42 @@ fun BubbleOverflowMenu(
                     }
                 },
                 onClick = {
-                    expanded = false
+                    onExpandedChange(false)
                     action.onClick()
                 },
             )
         }
     }
+}
+
+/**
+ * Клик по строке списка и долгое удержание с тем же меню, что у «⋮».
+ *
+ * Владелец 2026-11-18: «Нужно когда удерживаешь на чате или группе или канале
+ * то высвечивалось бы меню». Модификатор общий: жест, тактильный отклик и
+ * правило «пустое меню — нет удержания» живут в одном месте, поэтому строки
+ * личных чатов, групп и каналов ведут себя одинаково на всех экранах.
+ *
+ * Когда действий нет (каталог сети, карточка «Избранного»), остаётся обычный
+ * клик: удержание без меню выглядело бы сломанным.
+ */
+// combinedClickable в foundation 1.7 ещё экспериментальный — тот же opt-in
+// стоит у строк файлов (components/GroupFileCard.kt).
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun Modifier.apuRowPress(
+    onClick: () -> Unit,
+    menuActions: List<BubbleMenuAction>,
+    onMenuRequest: () -> Unit,
+): Modifier {
+    if (menuActions.isEmpty()) return this.clickable(onClick = onClick)
+    val haptics = LocalHapticFeedback.current
+    return this.combinedClickable(
+        onClick = onClick,
+        onLongClick = {
+            // Тот же отклик, что у долгого нажатия сообщения в чате.
+            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            onMenuRequest()
+        },
+    )
 }

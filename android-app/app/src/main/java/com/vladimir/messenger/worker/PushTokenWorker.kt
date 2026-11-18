@@ -14,6 +14,8 @@ import com.vladimir.messenger.data.push.PushServiceLocator
 import com.vladimir.messenger.data.push.PushTokenRegistrar
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -40,7 +42,7 @@ class PushTokenWorker(
         com.vladimir.messenger.data.push.PushDiagnostics.install(app)
         val registrar = PushServiceLocator.registrar(app) ?: return@withContext Result.success()
         try {
-            val outcome = registrar.run()
+            val outcome = runMutex.withLock { registrar.run() }
             com.vladimir.messenger.data.push.PushDiagnostics.noteRegistration(
                 when (outcome) {
                     PushTokenRegistrar.Outcome.Disabled ->
@@ -80,7 +82,11 @@ class PushTokenWorker(
                     com.vladimir.messenger.data.push.PushServiceLocator.probeEndpoint(app)
                     Result.success()
                 }
-                PushTokenRegistrar.Outcome.Partial,
+                PushTokenRegistrar.Outcome.Partial -> {
+                    // Announce the batch that succeeded now while backoff retries the rest.
+                    com.vladimir.messenger.data.push.PushEpochPublish.noteAllRegistered(app)
+                    Result.retry()
+                }
                 PushTokenRegistrar.Outcome.Failed -> Result.retry()
             }
         } catch (error: Exception) {
@@ -94,6 +100,9 @@ class PushTokenWorker(
     companion object {
         private const val TAG = "PushTokenWorker"
         internal const val UNIQUE_NAME = "apu_push_token_registration_v1"
+        internal const val UNIQUE_PEER_NAME = "apu_push_peer_registration_v1"
+        private const val PEER_DEBOUNCE_SECONDS = 3L
+        private val runMutex = Mutex()
 
         /**
          * Unique work: repeated provider callbacks must coalesce into one
@@ -110,6 +119,26 @@ class PushTokenWorker(
             } catch (error: Exception) {
                 if (error is kotlinx.coroutines.CancellationException) throw error
                 Log.w(TAG, "registration request not scheduled")
+            }
+        }
+
+        /**
+         * Debounced pass for newly pinned peers (direct, group or channel).
+         * Separate unique slot from [enqueue] so a burst of TOFU pins never
+         * cancels a provider token rotation, and serialized via [runMutex].
+         */
+        fun enqueueIncremental(context: Context) {
+            try {
+                val request = OneTimeWorkRequest.Builder(PushTokenWorker::class.java)
+                    .setInitialDelay(PEER_DEBOUNCE_SECONDS, TimeUnit.SECONDS)
+                    .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                    .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+                    .build()
+                WorkManager.getInstance(context.applicationContext)
+                    .enqueueUniqueWork(UNIQUE_PEER_NAME, ExistingWorkPolicy.REPLACE, request)
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                Log.w(TAG, "incremental registration not scheduled")
             }
         }
     }

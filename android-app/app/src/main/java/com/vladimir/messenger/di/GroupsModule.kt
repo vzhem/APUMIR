@@ -81,6 +81,7 @@ object GroupsModule {
         @ApplicationContext context: Context,
         directory: SwarmPeerDirectory,
         budget: SwarmBudget,
+        fileTransferRouter: javax.inject.Provider<com.vladimir.messenger.data.file.FileTransferRouter>,
     ): GroupDelivery = PerMemberFanoutDelivery(
         // Всегда в IO. Вызов ядра блокирующий: прямой QUIC ждёт до 5 с на
         // соединение и до 5 с на запись, а веер зовут из viewModelScope, то
@@ -100,6 +101,16 @@ object GroupsModule {
         // Ширина веера и темп - из действующих пределов (режим + обстановка).
         concurrency = { SwarmSettings.limits(context.applicationContext).maxConcurrentSends },
         gate = { budget.acquire(SwarmLane.CONTENT) },
+        afterDelivery = { _, envelope, ordered, report, wakeOnUnreachable ->
+            com.vladimir.messenger.data.group.GroupPushWake.onFanoutComplete(
+                context = context.applicationContext,
+                envelope = envelope,
+                orderedRecipients = ordered,
+                report = report,
+                wakeOnUnreachable = wakeOnUnreachable,
+                fileRouter = { fileTransferRouter.get() },
+            )
+        },
     )
 
     @Provides

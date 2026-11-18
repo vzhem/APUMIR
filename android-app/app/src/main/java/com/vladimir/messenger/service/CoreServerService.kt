@@ -1192,7 +1192,7 @@ class CoreServerService : Service() {
                                 // The reserved push-control family stays quarantined here; the
                                 // only honest exception is a sealed epoch packet from the
                                 // pinned peer, which the push feature may import.
-                                if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, cfContent, senderId, parsed.content)) return@launch
+                                if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, cfContent, senderId, parsed.content.takeIf { SealedWire.isSealed(it) }) { acknowledgeEpochViaCf(serviceScope, cloudflareRelay, messageId, senderId) }) return@launch
                                 var acknowledge = false // Only a stored text or an explicitly handled service packet.
                                 // Дедупликация: сообщение уже в БД
                                 val existingMsg = chatRepository.getMessageById(messageId)
@@ -1307,7 +1307,7 @@ class CoreServerService : Service() {
                             }
 
                             is RelayEnvelope.Parsed.Other -> {
-                                if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, if (SealedWire.isSealed(parsed.raw)) MessageSealer.open(applicationContext, parsed.raw) else parsed.raw, senderId, parsed.raw)) return@launch
+                                if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, if (SealedWire.isSealed(parsed.raw)) MessageSealer.open(applicationContext, parsed.raw) else parsed.raw, senderId, parsed.raw.takeIf { SealedWire.isSealed(it) })) return@launch
                                 // Legacy plain-text payload (не envelope) — сохраняем как раньше.
                                 // Раунд 140: но только не служебный конверт - он
                                 // разбирается стражем, в чат ему дороги нет.
@@ -2249,7 +2249,7 @@ class CoreServerService : Service() {
                 val chatId = event.chatId ?: return
                 val messageId = event.messageId ?: return
                 val rawText = event.text ?: return
-                if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, rawText, senderId, rawText)) return acknowledgeEpochPacket(serviceScope, messageId, senderId)
+                if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, rawText, senderId, null)) return
                 val timestamp = ts
 
                 // Отправитель обязан быть узлом (pk_…): ядро не проверяет первое поле, и
@@ -2310,7 +2310,7 @@ class CoreServerService : Service() {
                 // ядро на каждом входящем тормозил разбор очереди.
                 val sealed = SealedWire.isSealed(rawText)
                 val preopened = if (sealed) MessageSealer.open(applicationContext, rawText) else rawText
-                if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, preopened, senderId, rawText)) return
+                if (PushControlIngress.reservedUnlessEpochAvailable(applicationContext, preopened, senderId, rawText.takeIf { sealed }) { acknowledgeEpochPacket(serviceScope, messageId, senderId) }) return
                 val myNodeId = com.vladimir.messenger.data.mirror.MirrorHub.nodeIdCached()
                 if (myNodeId.isNotBlank() && senderId == myNodeId) {
                     Log.w(TAG, "self-addressed packet ignored msgId=$messageId text=" + rawText.take(24))

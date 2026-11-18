@@ -28,3 +28,22 @@ internal fun acknowledgeEpochPacket(scope: CoroutineScope, messageId: String, se
             .onFailure { Log.w("EpochInboundAck", "epoch ack failed: ${it.message}") }
     }
 }
+
+/** CF-реле вариант: подтверждает принятый запечатанный кадр эпохи без записи в чат. */
+internal fun acknowledgeEpochViaCf(
+    scope: CoroutineScope,
+    relay: CloudflareRelay?,
+    messageId: String,
+    senderId: String,
+) {
+    if (relay == null || messageId.isBlank() || senderId.isBlank()) return
+    scope.launch {
+        runCatching {
+            val ack = com.vladimir.messenger.data.relay.RelayEnvelope.buildAck(
+                messageId,
+                RustBridge.nodeId() ?: "",
+            )
+            relay.sendMessage(senderId, ack)
+        }.onFailure { Log.w("EpochInboundAck", "cf epoch ack failed: ${it.message}") }
+    }
+}

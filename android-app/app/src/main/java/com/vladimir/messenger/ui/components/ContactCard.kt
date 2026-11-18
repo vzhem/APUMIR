@@ -19,11 +19,12 @@ import com.vladimir.messenger.R
 // =============================================================================
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -86,6 +87,9 @@ fun ContactCard(
     val draftText = drafts[
         com.vladimir.messenger.data.draft.DraftStore.dmKey(chat.contactId)
     ].orEmpty()
+    // Владелец 2026-11-18: удержание на чате открывает то же меню, что «⋮».
+    // Состояние одно на строку: кнопка и жест открывают один и тот же список.
+    var showMenu by remember { mutableStateOf(false) }
 
     Row(
         modifier = modifier
@@ -99,7 +103,11 @@ fun ContactCard(
             .apuBubbleSurface()
             .apuPremiumThread(inset = 16.dp)
             .apuPremiumGloss(intensity = 0.45f, topFraction = 0.55f)
-            .clickable(onClick = onClick)
+            .apuRowPress(
+                onClick = onClick,
+                menuActions = menuActions,
+                onMenuRequest = { showMenu = true },
+            )
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -261,7 +269,11 @@ fun ContactCard(
         }
 
         // Меню «три вертикальные точки» — крайним справа в пузыре.
-        BubbleOverflowMenu(actions = menuActions)
+        BubbleOverflowMenu(
+            actions = menuActions,
+            expanded = showMenu,
+            onExpandedChange = { showMenu = it },
+        )
     }
 }
 

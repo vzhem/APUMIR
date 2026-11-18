@@ -6,7 +6,11 @@
 set -euo pipefail
 # Логи Actions из песочницы не выкачиваются: без этой строки при падении
 # видно только хвост вывода, а не команду, на которой всё встало.
-trap 'status=$?; echo "chat-history: FAILED at line $LINENO: $BASH_COMMAND (exit $status)" >&2' ERR
+# Команду печатаем укороченной: у вызова K2JVMCompiler она длиной в 4000
+# символов и в хвосте лога занимала ВСЁ место, из-за чего отчёт CI показывал
+# только её, а настоящая причина падения (исключение компилятора) не
+# помещалась. Полный текст остаётся в логе шага.
+trap 'status=$?; echo "chat-history: FAILED at line $LINENO: ${BASH_COMMAND:0:160} (exit $status)" >&2' ERR
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 python3 "$ROOT/scripts/ci/check-deferred-cancel.py"
 python3 "$ROOT/scripts/ci/check-delete-read.py"
@@ -26,34 +30,94 @@ print(*(re.search(r'^' + name + r'\s*=\s*"([^"]+)"', text, re.M).group(1)
         for name in ('kotlin', 'coroutines', 'junit')))
 PY
 )
-JAVA="${JAVA_HOME:+$JAVA_HOME/bin/}java"
-command -v "$JAVA" >/dev/null || { echo 'Java 17+ is required for the chat history tests'; exit 1; }
-MAVEN=https://repo.maven.apache.org/maven2
+# ---- выбор JDK -----------------------------------------------------------
+# Компилятор Kotlin 2.0.21 не умеет читать номер версии Java новее 21: на
+# раннере с JDK 25 он падает не ошибкой кода, а исключением
+# `java.lang.IllegalArgumentException: 25.0.5` (JavaVersion.parse) — то есть
+# красным становился шаг, где виноват не наш Kotlin. Поэтому JDK выбираем
+# здесь: JAVA_HOME, если он подходит, иначе первый подходящий из /usr/lib/jvm.
+# Требуем 17..21 (minSdk/toolchain проекта и максимум компилятора).
+supported_java() {
+    local candidate="$1" major
+    [ -n "$candidate" ] && [ -x "$candidate" ] || return 1
+    major="$("$candidate" -version 2>&1 | sed -n 's/.*version "\([0-9][0-9]*\).*/\1/p' | head -1)"
+    [ -n "$major" ] && [ "$major" -ge 17 ] && [ "$major" -le 21 ]
+}
+JAVA=""
+for candidate in "${JAVA_HOME:+$JAVA_HOME/bin/java}" \
+                 /usr/lib/jvm/temurin-21-jdk-*/bin/java \
+                 /usr/lib/jvm/java-21-openjdk-*/bin/java \
+                 /usr/lib/jvm/temurin-17-jdk-*/bin/java \
+                 /usr/lib/jvm/java-17-openjdk-*/bin/java \
+                 /usr/lib/jvm/temurin-21-jdk/bin/java \
+                 /usr/lib/jvm/java-21-openjdk-amd64/bin/java \
+                 "$(command -v java 2>/dev/null || true)"; do
+    if supported_java "$candidate"; then JAVA="$candidate"; break; fi
+done
+[ -n "$JAVA" ] || { echo 'Java 17..21 is required for the chat history tests'; exit 1; }
+# Версия JDK — первой строкой: внутренние ошибки компилятора (exit 2) почти
+# всегда про несовпадение JDK и компилятора, и без версии это гадание.
+"$JAVA" -version 2>&1 | head -3
+# Сеть до Maven Central иногда отдаёт 404 на существующий файл (18.11.2026:
+# `curl: (22) The requested URL returned error: 404` на первом же jar, шаг
+# падал без единой строки о том, ЧТО качали). Поэтому пробуем три зеркала и
+# печатаем координаты артефакта: без них отчёт CI не подсказывает причину.
+MAVEN_MIRRORS=(
+    "https://repo.maven.apache.org/maven2"
+    "https://repo1.maven.org/maven2"
+    "https://maven-central.storage-download.googleapis.com/maven2"
+)
 fetch() {
     local group="$1" name="$2" version="$3" directory="$4"
     local path="${group//.//}/$name/$version/$name-$version.jar"
     local dest="$OUT/$directory/$name-$version.jar"
-    if [ ! -s "$dest" ]; then
-        curl --fail --location --retry 2 --connect-timeout 15 --max-time 120 \
-            --silent --show-error "$MAVEN/$path" -o "$dest.tmp"
-        mv "$dest.tmp" "$dest"
-    fi
+    local mirror attempt
+    [ -s "$dest" ] && return 0
+    attempt=0
+    for mirror in "${MAVEN_MIRRORS[@]}"; do
+        attempt=$((attempt + 1))
+        if curl --fail --location --retry 3 --retry-all-errors --retry-delay 2 \
+                --connect-timeout 15 --max-time 180 \
+                --silent --show-error "$mirror/$path" -o "$dest.tmp" 2>/dev/null; then
+            mv "$dest.tmp" "$dest"
+            return 0
+        fi
+        echo "fetch: $group:$name:$version не скачался с зеркала #$attempt" >&2
+    done
+    echo "fetch: НЕ УДАЛОСЬ скачать $group:$name:$version ($path)" >&2
+    return 1
 }
-fetch org.jetbrains.kotlin kotlin-compiler-embeddable "$KOTLIN" compiler
-fetch org.jetbrains.kotlin kotlin-daemon-embeddable "$KOTLIN" compiler
-fetch org.jetbrains.kotlin kotlin-script-runtime "$KOTLIN" compiler
-fetch org.jetbrains.kotlin kotlin-reflect 1.6.10 compiler
-fetch org.jetbrains.intellij.deps trove4j 1.0.20200330 compiler
-fetch org.jetbrains.kotlinx kotlinx-coroutines-core-jvm 1.6.4 compiler
-fetch org.jetbrains annotations 13.0 compiler
-fetch org.jetbrains.kotlin kotlin-stdlib "$KOTLIN" runtime
-fetch org.jetbrains.kotlinx kotlinx-coroutines-core-jvm "$COROUTINES" runtime
-fetch org.jetbrains.kotlinx kotlinx-coroutines-test-jvm "$COROUTINES" runtime
-fetch junit junit "$JUNIT" runtime
-fetch org.hamcrest hamcrest-core 1.3 runtime
-# Ed25519 постов (net.i2p.crypto:eddsa) нужен мосту манифестов, на который
-# ссылается групповой конверт GroupWire. Версия - та же, что в libs.versions.toml.
-fetch net.i2p.crypto eddsa 0.3.0 runtime
+# Координаты артефактов собраны заранее: если загрузка всё же не удалась,
+# отчёт CI обязан назвать виновника, а не только "шаг упал".
+ARTIFACTS=(
+    "org.jetbrains.kotlin kotlin-compiler-embeddable $KOTLIN compiler"
+    "org.jetbrains.kotlin kotlin-daemon-embeddable $KOTLIN compiler"
+    "org.jetbrains.kotlin kotlin-script-runtime $KOTLIN compiler"
+    "org.jetbrains.kotlin kotlin-reflect 1.6.10 compiler"
+    "org.jetbrains.intellij.deps trove4j 1.0.20200330 compiler"
+    "org.jetbrains.kotlinx kotlinx-coroutines-core-jvm 1.6.4 compiler"
+    "org.jetbrains annotations 13.0 compiler"
+    "org.jetbrains.kotlin kotlin-stdlib $KOTLIN runtime"
+    "org.jetbrains.kotlinx kotlinx-coroutines-core-jvm $COROUTINES runtime"
+    "org.jetbrains.kotlinx kotlinx-coroutines-test-jvm $COROUTINES runtime"
+    "junit junit $JUNIT runtime"
+    "org.hamcrest hamcrest-core 1.3 runtime"
+    # Ed25519 постов (net.i2p.crypto:eddsa) нужен мосту манифестов, на который
+    # ссылается групповой конверт GroupWire. Версия - та же, что в libs.versions.toml.
+    "net.i2p.crypto eddsa 0.3.0 runtime"
+)
+FETCH_FAILURES=()
+# shellcheck disable=SC2086
+for artifact in "${ARTIFACTS[@]}"; do
+    # shellcheck disable=SC2086
+    set -- $artifact
+    fetch "$1" "$2" "$3" "$4" || FETCH_FAILURES+=("$1:$2:$3")
+done
+if [ "${#FETCH_FAILURES[@]}" -gt 0 ]; then
+    echo "chat-history: NETWORK FAILURE - не скачались артефакты: ${FETCH_FAILURES[*]}" >&2
+    echo "chat-history: это не ошибка кода; перезапуск шага обычно помогает" >&2
+    exit 75
+fi
 CP="$(printf '%s:' "$OUT"/runtime/*.jar)${OUT}/compiler/annotations-13.0.jar"
 BASE="$ROOT/android-app/app/src"
 MODEL="$BASE/main/java/com/vladimir/messenger/domain/model"
@@ -92,6 +156,20 @@ GROUP_WIRE_UPDATE_TEST="$BASE/test/java/com/vladimir/messenger/data/group/GroupW
 # компилируются и проверяются на runner, то есть формат отчёта ловится до
 # выпуска, а не по скриншоту с телефона владельца (2026-10-06).
 DIAG_REPORT="$BASE/main/java/com/vladimir/messenger/data/diagnostics/DiagnosticsReport.kt"
+# «Логи» с 2026-11-17 берут строки присутствия из отдельного файла, а с
+# v11.74.541 тест проверяет ещё и раздел push. Без этих трёх файлов тест не
+# компилируется (unresolved reference PushSnapshot/PushPhase), и шаг был
+# красным независимо от правок ветки.
+PRESENCE_STRINGS="$BASE/main/java/com/vladimir/messenger/data/diagnostics/PresenceReportStrings.kt"
+PUSH_DIAG_REPORT="$BASE/main/java/com/vladimir/messenger/data/diagnostics/PushDiagnosticsReport.kt"
+# PushDiagnosticsReport держит тип причины регистрации (PushRegisterReason);
+# харнесс check-chat-history-harness.py следит, чтобы список не отставал.
+PUSH_REGISTER_REASON="$BASE/main/java/com/vladimir/messenger/data/diagnostics/PushRegisterReason.kt"
+# Раздел «несовпадение ключа» родился отдельным файлом (DiagnosticsReport.kt на
+# потолке god-файла), поэтому харнесс его не видел, а kotlinc падал на
+# `unresolved reference 'appendKeyMismatch'`. Проверка ниже (harness) теперь
+# ловит и такие функции, а не только классы.
+KEY_MISMATCH_REPORT="$BASE/main/java/com/vladimir/messenger/data/diagnostics/KeyMismatchReport.kt"
 CORE_DIAG_STAGE="$BASE/main/java/com/vladimir/messenger/data/diagnostics/CoreDiagnosticStage.kt"
 STARTUP_PROGRESS="$BASE/main/java/com/vladimir/messenger/data/diagnostics/ServiceStartupProgress.kt"
 STARTUP_PROGRESS_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/ServiceStartupProgressTest.kt"
@@ -237,7 +315,7 @@ PYGEN
     -no-stdlib -no-reflect -jvm-target 17 -classpath "$CP" -d "$OUT/classes" \
     "$STORY_VIDEO_DRAFT" "$STORY_VIDEO_DRAFT_TEST" "$VIDEO_AVATAR_POLICY" "$VIDEO_AVATAR_POLICY_TEST" "$AVATAR_VIDEO_WIRE" "$AVATAR_VIDEO_WIRE_TEST" "$MODEL/Message.kt" "$MODEL/MessageStatus.kt" "$MODEL/MessageChannel.kt" "$OBSERVER" "$TEST" "$PIN_POLICY" "$PIN_TEST" "$SPLASH_MATH" "$SPLASH_TEST" "$SETTINGS_LAYOUT" "$SETTINGS_TEST" "$HEART_WIRE" "$HEART_TEST" "$GROUP_PERMS" "$GROUP_PERMS_TEST" \
     "$SLOW_MODE" "$SLOW_MODE_TEST" "$QUIET_HOURS" "$QUIET_HOURS_TEST" "$POST_MANIFEST" "$BASE/main/java/com/vladimir/messenger/data/group/GroupWallpaper.kt" "$BASE/test/java/com/vladimir/messenger/data/group/GroupWallpaperTest.kt" "$GROUP_WIRE" "$GROUP_SOS" "$SOS_MESSAGE" "$TEXT_COLOR_WIRE" "$STUB_DIR/TextColorPalette.kt" "$GROUP_WIRE_TEST" "$GROUP_WIRE_UPDATE_TEST" \
-    "$OP_HEALTH" "$OP_BOUNDED_READ" "$OP_CLEANUP" "$OP_HEALTH_TEST" "$STORY_QUEUE" "$STORY_QUEUE_TEST" "$RUNTIME_HEALTH" "$RUNTIME_HEALTH_TEST" "$DIAG_REPORT" "$CORE_DIAG_STAGE" "$STARTUP_PROGRESS" "$STARTUP_PROGRESS_TEST" "$APP_STARTUP_PROGRESS" "$APP_STARTUP_PROGRESS_TEST" "$RELAY_WAKE_YIELD" "$RELAY_WAKE_YIELD_TEST" "$CORE_LIFECYCLE_QUEUE" "$CORE_LIFECYCLE_QUEUE_TEST" "$CORE_ENGINE_SLOT" "$CORE_ENGINE_SLOT_TEST" "$PUSH_SCHEDULE_GATE" "$PUSH_SCHEDULE_GATE_TEST" "$CORE_SERVICE_GATE" "$CORE_SERVICE_GATE_TEST" "$PROCESS_HEARTBEAT" "$PROCESS_HEARTBEAT_TEST" "$DELIVERY_WAKE_POLICY" "$DELIVERY_WAKE_POLICY_TEST" "$UPDATE_DIAG_REPORT" "$RELAY_STORAGE" "$RELAY_STORAGE_TEST" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
+    "$OP_HEALTH" "$OP_BOUNDED_READ" "$OP_CLEANUP" "$OP_HEALTH_TEST" "$STORY_QUEUE" "$STORY_QUEUE_TEST" "$RUNTIME_HEALTH" "$RUNTIME_HEALTH_TEST" "$DIAG_REPORT" "$PRESENCE_STRINGS" "$PUSH_DIAG_REPORT" "$PUSH_REGISTER_REASON" "$KEY_MISMATCH_REPORT" "$CORE_DIAG_STAGE" "$STARTUP_PROGRESS" "$STARTUP_PROGRESS_TEST" "$APP_STARTUP_PROGRESS" "$APP_STARTUP_PROGRESS_TEST" "$RELAY_WAKE_YIELD" "$RELAY_WAKE_YIELD_TEST" "$CORE_LIFECYCLE_QUEUE" "$CORE_LIFECYCLE_QUEUE_TEST" "$CORE_ENGINE_SLOT" "$CORE_ENGINE_SLOT_TEST" "$PUSH_SCHEDULE_GATE" "$PUSH_SCHEDULE_GATE_TEST" "$CORE_SERVICE_GATE" "$CORE_SERVICE_GATE_TEST" "$PROCESS_HEARTBEAT" "$PROCESS_HEARTBEAT_TEST" "$DELIVERY_WAKE_POLICY" "$DELIVERY_WAKE_POLICY_TEST" "$UPDATE_DIAG_REPORT" "$RELAY_STORAGE" "$RELAY_STORAGE_TEST" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
     "$PUSH_INBOX_MODEL" "$PUSH_SOURCE/PushWakeQueue.kt" "$PUSH_SOURCE/PushWakeDrain.kt" "$PUSH_TESTS/PushWakeDrainTest.kt" \
     "$PUSH_SOURCE/PushEpochProtocol.kt" "$PUSH_SOURCE/PushRegistrationState.kt" "$PUSH_SOURCE/PushWakeAdmission.kt" "$PUSH_TESTS/PushWakeAdmissionTest.kt" \
     "$PUSH_SOURCE/PushWakeIntake.kt" "$PUSH_TESTS/PushWakeIntakeTest.kt" "$PUSH_SOURCE/PushWakeDispatcher.kt" "$PUSH_TESTS/PushWakeDispatcherTest.kt" \

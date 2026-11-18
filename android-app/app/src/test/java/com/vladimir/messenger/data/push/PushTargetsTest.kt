@@ -104,4 +104,27 @@ class PushTargetsTest {
         )
         assertEquals(PushTargets.Outcome.RETRY, outOfRange.enumerate().first)
     }
+
+    @Test fun largeGroupAndChannelRostersFitDefaultEnumerationBudget() {
+        val total = 300
+        val routes = (1..total).map(::route)
+        val byRoute = routes.mapIndexed { idx, r -> r to peer(idx + 10) }.toMap()
+        val targets = PushTargets(
+            page = { after, limit ->
+                val start = if (after == null) 0 else (routes.indexOf(after) + 1)
+                val slice = routes.drop(start).take(limit)
+                val next = if (start + slice.size < routes.size) slice.lastOrNull() else null
+                PushRegistrationStore.RecoveryPage.Ready(slice, next)
+            },
+            find = { hint ->
+                val p = byRoute[hint]
+                if (p == null) PushRegistrationStore.RouteResult.Missing
+                else PushRegistrationStore.RouteResult.Found(local(), p, 1)
+            },
+            maxPages = PushTargets.MAX_PAGES,
+        )
+        val (state, peers) = targets.enumerate()
+        assertEquals(PushTargets.Outcome.COMPLETED, state)
+        assertEquals(total, peers.size)
+    }
 }
