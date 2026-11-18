@@ -30,8 +30,31 @@ print(*(re.search(r'^' + name + r'\s*=\s*"([^"]+)"', text, re.M).group(1)
         for name in ('kotlin', 'coroutines', 'junit')))
 PY
 )
-JAVA="${JAVA_HOME:+$JAVA_HOME/bin/}java"
-command -v "$JAVA" >/dev/null || { echo 'Java 17+ is required for the chat history tests'; exit 1; }
+# ---- выбор JDK -----------------------------------------------------------
+# Компилятор Kotlin 2.0.21 не умеет читать номер версии Java новее 21: на
+# раннере с JDK 25 он падает не ошибкой кода, а исключением
+# `java.lang.IllegalArgumentException: 25.0.5` (JavaVersion.parse) — то есть
+# красным становился шаг, где виноват не наш Kotlin. Поэтому JDK выбираем
+# здесь: JAVA_HOME, если он подходит, иначе первый подходящий из /usr/lib/jvm.
+# Требуем 17..21 (minSdk/toolchain проекта и максимум компилятора).
+supported_java() {
+    local candidate="$1" major
+    [ -n "$candidate" ] && [ -x "$candidate" ] || return 1
+    major="$("$candidate" -version 2>&1 | sed -n 's/.*version "\([0-9][0-9]*\).*/\1/p' | head -1)"
+    [ -n "$major" ] && [ "$major" -ge 17 ] && [ "$major" -le 21 ]
+}
+JAVA=""
+for candidate in "${JAVA_HOME:+$JAVA_HOME/bin/java}" \
+                 /usr/lib/jvm/temurin-21-jdk-*/bin/java \
+                 /usr/lib/jvm/java-21-openjdk-*/bin/java \
+                 /usr/lib/jvm/temurin-17-jdk-*/bin/java \
+                 /usr/lib/jvm/java-17-openjdk-*/bin/java \
+                 /usr/lib/jvm/temurin-21-jdk/bin/java \
+                 /usr/lib/jvm/java-21-openjdk-amd64/bin/java \
+                 "$(command -v java 2>/dev/null || true)"; do
+    if supported_java "$candidate"; then JAVA="$candidate"; break; fi
+done
+[ -n "$JAVA" ] || { echo 'Java 17..21 is required for the chat history tests'; exit 1; }
 # Версия JDK — первой строкой: внутренние ошибки компилятора (exit 2) почти
 # всегда про несовпадение JDK и компилятора, и без версии это гадание.
 "$JAVA" -version 2>&1 | head -3

@@ -18,10 +18,25 @@
 # ============================================================================
 
 # ---- JDK: образ runner уже несёт temurin; apt - только если образа нет ----
-if [ -z "${JAVA_HOME:-}" ] || [ ! -x "${JAVA_HOME}/bin/java" ]; then
+# Диапазон 17..21 не случаен: компилятор Kotlin 2.0.21 не разбирает номер
+# версии новее 21 (`IllegalArgumentException: 25.0.5` из JavaVersion.parse), а
+# на образе ubuntu-latest теперь по умолчанию JDK 25. Поэтому JAVA_HOME
+# образа берём только если он в диапазоне, иначе ищем совместимый рядом.
+apu_jdk_major() {
+    [ -n "${1:-}" ] && [ -x "$1/bin/java" ] || return 1
+    "$1/bin/java" -version 2>&1 | sed -n 's/.*version "\([0-9][0-9]*\).*/\1/p' | head -1
+}
+apu_jdk_ok() {
+    local major
+    major="$(apu_jdk_major "${1:-}")"
+    [ -n "$major" ] && [ "$major" -ge 17 ] && [ "$major" -le 21 ]
+}
+if ! apu_jdk_ok "${JAVA_HOME:-}"; then
+    unset JAVA_HOME
     for d in /usr/lib/jvm/temurin-21-jdk-* /usr/lib/jvm/java-21-openjdk-* \
-             /usr/lib/jvm/temurin-17-jdk-* /usr/lib/jvm/java-17-openjdk-*; do
-        if [ -x "$d/bin/java" ]; then export JAVA_HOME="$d"; break; fi
+             /usr/lib/jvm/temurin-17-jdk-* /usr/lib/jvm/java-17-openjdk-* \
+             /usr/lib/jvm/temurin-21-jdk /usr/lib/jvm/java-21-openjdk-amd64; do
+        if apu_jdk_ok "$d"; then export JAVA_HOME="$d"; break; fi
     done
 fi
 if [ -z "${JAVA_HOME:-}" ] || [ ! -x "${JAVA_HOME}/bin/java" ]; then
