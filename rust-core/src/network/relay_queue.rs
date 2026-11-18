@@ -592,6 +592,32 @@ pub fn message_kind(message_id: &str, chat_scope: &str, payload: &[u8]) -> Relay
     payload_kind(payload)
 }
 
+/// Ключ склейки своего служебного кадра: у повторов одного смысла важна
+/// только последняя копия.
+///
+/// Зачем. Владелец 2026-11-18: «у нас точно не копятся ненужные строчки
+/// отправок? может есть ненужные повторы, которые должны удаляться, если
+/// появился такой же сигнал?» — да, копились. Адрес побудки (эпоха) уходит
+/// отдельным сообщением с НОВЫМ ID при каждом объявлении, поэтому дедупликация
+/// по `msg_id` их не видит: телефон, который ни разу не подтвердил приём,
+/// получает в очередь новую копию каждые пять минут — до 300 записей в сутки на
+/// одного собеседника (`своё ждёт получателя=317` в отчёте 536 при трёх
+/// отправленных сообщениях).
+///
+/// Склеиваются только кадры, у которых старая копия объективно бесполезна:
+/// эпоха — это один адрес на собеседника, а не история адресов. Переписка,
+/// файлы, истории и отзывы не склеиваются никогда: `None`.
+///
+/// Границы: ключ включает получателя и смысл, но не тело. Два разных кадра с
+/// одинаковым ID-префиксом (`push1-…`) для одного получателя — это одна и та же
+/// услуга, и заменять старую копию новой правильно.
+pub fn coalesce_key(message: &RelayMessage) -> Option<String> {
+    if message.msg_id.starts_with("push1-") {
+        return Some(format!("sleep|{}", message.recipient));
+    }
+    None
+}
+
 /// Запись очереди: само сообщение, признак «своё» и категория тела.
 ///
 /// Признаки живут ТОЛЬКО в RAM: durable-формат (`SensitiveRelayRecordV1`) и wire
@@ -642,6 +668,11 @@ pub struct RelayQueue {
     /// Число своих записей переписки, вытесненных из ограниченного RAM-кэша.
     /// Зашифрованная durable/outbox-копия остаётся источником восстановления.
     own_capacity_evictions: AtomicUsize,
+    /// Сколько старых копий своих служебных кадров снято склейкой: на один адрес
+    /// побудки или один служебный кадр нужна одна запись, а не все подряд
+    /// (владелец 2026-11-18). Число в журнале — доказательство, что склейка
+    /// работает, а не что очередь просто «сама рассосалась».
+    own_coalesced: AtomicUsize,
     max_per_recipient: usize,
     max_total: usize,
     max_own_per_recipient: usize,
@@ -675,6 +706,7 @@ impl RelayQueue {
             entries: Mutex::new(HashMap::new()),
             delivered_removed: AtomicUsize::new(0),
             own_capacity_evictions: AtomicUsize::new(0),
+            own_coalesced: AtomicUsize::new(0),
             max_per_recipient: MAX_PER_RECIPIENT,
             max_total: MAX_TOTAL,
             max_own_per_recipient: MAX_OWN_PER_RECIPIENT,
@@ -700,6 +732,7 @@ impl RelayQueue {
             entries: Mutex::new(HashMap::new()),
             delivered_removed: AtomicUsize::new(0),
             own_capacity_evictions: AtomicUsize::new(0),
+            own_coalesced: AtomicUsize::new(0),
             max_per_recipient,
             max_total,
             max_own_per_recipient,
@@ -780,8 +813,57 @@ impl RelayQueue {
 
         let mut entries = self.entries.lock().unwrap();
 
+        // Тот же ID у служебного кадра — это ПОВТОР, и важна последняя копия:
+        // «печатает…», состояние игры и анонс живут мгновением, а дедупликация
+        // по ID оставляла в очереди первую копию и не давала полю обновиться.
+        // Переписка так не переписывается: у неё тот же ID значит то же тело.
+        // Заменяем только когда есть что заменять: новая копия отличается телом
+        // или временем. Побайтовый повтор того же кадра ничего не выигрывает —
+        // он и раньше считался дублем («повтор с тем же ID не занимает новый
+        // слот»).
+        let repeated_kind = entries
+            .get(&msg.msg_id)
+            .filter(|existing| {
+                existing.own
+                    && existing.kind.is_transient()
+                    && (existing.message.e2e_payload != msg.e2e_payload
+                        || existing.message.created_at_ms < msg.created_at_ms)
+            })
+            .map(|existing| existing.kind);
+        if let Some(kind) = repeated_kind {
+            let class = QueueEntry::class_of(&msg, true, kind);
+            entries.insert(
+                msg.msg_id.clone(),
+                QueueEntry {
+                    message: msg,
+                    own: true,
+                    kind,
+                    class,
+                },
+            );
+            return Ok(true);
+        }
+
         if entries.contains_key(&msg.msg_id) {
             return Ok(false); // дедупликация
+        }
+
+        // Склейка повторов: на один адрес побудки нужна одна запись, а не все
+        // объявления подряд (см. `coalesce_key`).
+        if let Some(key) = coalesce_key(&msg) {
+            let stale: Vec<String> = entries
+                .values()
+                .filter(|entry| {
+                    entry.own && coalesce_key(&entry.message).as_deref() == Some(key.as_str())
+                })
+                .map(|entry| entry.message.msg_id.clone())
+                .collect();
+            for id in &stale {
+                entries.remove(id);
+            }
+            if !stale.is_empty() {
+                self.own_coalesced.fetch_add(stale.len(), Ordering::Relaxed);
+            }
         }
 
         let now_ms = utc_now_ms();
@@ -1234,6 +1316,11 @@ impl RelayQueue {
     /// своим путём (он только наш — там снятие всегда по адресату).
     pub fn delivered_removed(&self) -> usize {
         self.delivered_removed.load(Ordering::Relaxed)
+    }
+
+    /// Сколько старых копий своих служебных кадров сняла склейка.
+    pub fn own_coalesced(&self) -> usize {
+        self.own_coalesced.load(Ordering::Relaxed)
     }
 
     /// Удалить все сообщения для получателя (например, после прямой доставки).
@@ -2668,6 +2755,61 @@ mod tests {
         let (rest, _) = q.own_pending_page(next, 2);
         assert_eq!(rest.len(), 1, "осталась тревога");
         assert_eq!(rest[0].msg_id, "sos1-1");
+    }
+
+    /// Владелец 2026-11-18: «может есть ненужные повторы, которые должны
+    /// удаляться, если появился такой же сигнал?» Адрес побудки уходит отдельным
+    /// сообщением с новым ID при каждом объявлении, поэтому раньше копился: в
+    /// отчёте 536 стояло «своё ждёт получателя=317» при трёх отправленных
+    /// сообщениях. Теперь новая копия снимает старую, и на собеседника остаётся
+    /// ровно одна запись.
+    #[test]
+    fn a_repeated_sleep_address_replaces_the_previous_copy() {
+        let queue = RelayQueue::new();
+        assert!(queue
+            .enqueue_own(msg("push1-aaa", "pk_peer"))
+            .unwrap());
+        assert!(queue
+            .enqueue_own(msg("push1-bbb", "pk_peer"))
+            .unwrap());
+        assert!(queue
+            .enqueue_own(msg("push1-ccc", "pk_peer"))
+            .unwrap());
+        let stats = queue.stats();
+        assert_eq!(stats.own, 1, "должна остаться одна запись на собеседника");
+        assert_eq!(queue.own_coalesced(), 2, "две старые копии сняты склейкой");
+
+        let left = queue.for_recipient("pk_peer");
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].msg_id, "push1-ccc", "важна последняя копия");
+
+        // Другой собеседник — своя запись: склейка через получателей не ходит.
+        assert!(queue
+            .enqueue_own(msg("push1-ddd", "pk_other"))
+            .unwrap());
+        assert_eq!(queue.stats().own, 2);
+        assert_eq!(queue.own_coalesced(), 2);
+    }
+
+    /// Побайтовый повтор того же служебного кадра не занимает новый слот и не
+    /// считается заменой: заменять нечего.
+    #[test]
+    fn an_identical_service_frame_repeat_is_still_a_duplicate() {
+        let queue = RelayQueue::new();
+        let frame = signal_msg("udp-sig-77", "pk_peer");
+        assert!(queue.enqueue_own(frame.clone()).unwrap());
+        assert!(!queue.enqueue_own(frame).unwrap());
+        assert_eq!(queue.own_transient_count(), 1);
+    }
+
+    /// Переписка склейке не подлежит: два письма одному человеку — два письма.
+    #[test]
+    fn ordinary_correspondence_is_never_coalesced() {
+        let queue = RelayQueue::new();
+        assert!(queue.enqueue_own(msg("11111111-1111-1111-1111-111111111111", "pk_peer")).unwrap());
+        assert!(queue.enqueue_own(msg("22222222-2222-2222-2222-222222222222", "pk_peer")).unwrap());
+        assert_eq!(queue.stats().own, 2);
+        assert_eq!(queue.own_coalesced(), 0);
     }
 
 }

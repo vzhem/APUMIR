@@ -30,8 +30,15 @@ internal object PushEpochPublish {
      * queue that is already full on the phones that need this most. Five minutes
      * is short enough that a peer who missed the last offer learns the epoch in
      * the same conversation.
+     *
+     * Владелец 2026-11-18: «у нас точно не копятся ненужные строчки отправок?»
+     * Каждое объявление — отдельная строка в очереди и в durable-сторе, поэтому
+     * с 5 минут стало 15: собеседник, который был в сети, получает адрес в тот
+     * же вечер, а не в тот же час, и рост строк падает втрое. Ядро теперь ещё и
+     * склеивает повторы (`coalesce_key`), так что старая копия не занимает
+     * места рядом с новой.
      */
-    private const val OFFER_INTERVAL_MS = 5 * 60_000L
+    private const val OFFER_INTERVAL_MS = 15 * 60_000L
 
     /** id-подсказка ядру: анонс эпохи — пробуждение и адрес (высший класс). */
     private const val PUSH_WAKE_ID_PREFIX = "push1-"

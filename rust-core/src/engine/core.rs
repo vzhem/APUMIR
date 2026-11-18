@@ -4283,26 +4283,28 @@ impl P2PCore {
                             .join(", ");
                         match stats.own_oldest_age_ms {
                             Some(age_ms) => tracing::info!(
-                                "Relay-очередь: своих={} сигналов={} чужих={} всего={} получателей={} снято-по-ACK={} вытеснено-своих={} предел-своих={} старейшее-своё={} по-важности=[{}]",
+                                "Relay-очередь: своих={} сигналов={} чужих={} всего={} получателей={} снято-по-ACK={} склеено={} вытеснено-своих={} предел-своих={} старейшее-своё={} по-важности=[{}]",
                                 stats.own,
                                 stats.own_transients,
                                 stats.foreign,
                                 stats.total,
                                 stats.recipients,
                                 q.delivered_removed(),
+                                q.own_coalesced(),
                                 stats.own_capacity_evictions,
                                 stats.own_limit,
                                 age_ms / 1000,
                                 class_text
                             ),
                             None => tracing::info!(
-                                "Relay-очередь: своих={} сигналов={} чужих={} всего={} получателей={} снято-по-ACK={} вытеснено-своих={} предел-своих={} старейшее-своё=нет по-важности=[{}]",
+                                "Relay-очередь: своих={} сигналов={} чужих={} всего={} получателей={} снято-по-ACK={} склеено={} вытеснено-своих={} предел-своих={} старейшее-своё=нет по-важности=[{}]",
                                 stats.own,
                                 stats.own_transients,
                                 stats.foreign,
                                 stats.total,
                                 stats.recipients,
                                 q.delivered_removed(),
+                                q.own_coalesced(),
                                 stats.own_capacity_evictions,
                                 stats.own_limit,
                                 class_text
