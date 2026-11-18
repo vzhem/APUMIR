@@ -6,7 +6,11 @@
 set -euo pipefail
 # Логи Actions из песочницы не выкачиваются: без этой строки при падении
 # видно только хвост вывода, а не команду, на которой всё встало.
-trap 'status=$?; echo "chat-history: FAILED at line $LINENO: $BASH_COMMAND (exit $status)" >&2' ERR
+# Команду печатаем укороченной: у вызова K2JVMCompiler она длиной в 4000
+# символов и в хвосте лога занимала ВСЁ место, из-за чего отчёт CI показывал
+# только её, а настоящая причина падения (исключение компилятора) не
+# помещалась. Полный текст остаётся в логе шага.
+trap 'status=$?; echo "chat-history: FAILED at line $LINENO: ${BASH_COMMAND:0:160} (exit $status)" >&2' ERR
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 python3 "$ROOT/scripts/ci/check-deferred-cancel.py"
 python3 "$ROOT/scripts/ci/check-delete-read.py"
@@ -28,6 +32,9 @@ PY
 )
 JAVA="${JAVA_HOME:+$JAVA_HOME/bin/}java"
 command -v "$JAVA" >/dev/null || { echo 'Java 17+ is required for the chat history tests'; exit 1; }
+# Версия JDK — первой строкой: внутренние ошибки компилятора (exit 2) почти
+# всегда про несовпадение JDK и компилятора, и без версии это гадание.
+"$JAVA" -version 2>&1 | head -3
 MAVEN=https://repo.maven.apache.org/maven2
 fetch() {
     local group="$1" name="$2" version="$3" directory="$4"

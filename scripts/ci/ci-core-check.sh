@@ -128,6 +128,15 @@ comment_to_pr() {
         echo '```'
         grep -n -m 3 -A 14 -E '^error(\[|:| )|^e: ' "$LOG" || echo '(строк с ошибками компилятора в выводе нет)'
         echo '```'
+        # Внутренние ошибки (например, exit 2 у K2JVMCompiler) печатают не
+        # «e: …», а исключение Java: без этой выжимки в отчёте остаётся только
+        # хвост лога, где причины нет.
+        echo "Исключения и отказы инструментов:"
+        echo
+        echo '```'
+        grep -n -m 6 -E 'Exception|UnsupportedClassVersion|Could not (find|load|resolve)|NoClassDefFound|Unable to' "$LOG" \
+            || echo '(исключений в выводе нет)'
+        echo '```'
         if [ -s "$TESTS_DIGEST" ]; then
             echo "Упавшие тесты и причины:"
             echo
