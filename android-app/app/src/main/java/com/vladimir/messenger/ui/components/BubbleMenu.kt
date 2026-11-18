@@ -141,6 +141,9 @@ fun BubbleOverflowMenu(
  * Когда действий нет (каталог сети, карточка «Избранного»), остаётся обычный
  * клик: удержание без меню выглядело бы сломанным.
  */
+// combinedClickable в foundation 1.7 ещё экспериментальный — тот же opt-in
+// стоит у строк файлов (components/GroupFileCard.kt).
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun Modifier.apuRowPress(
     onClick: () -> Unit,
