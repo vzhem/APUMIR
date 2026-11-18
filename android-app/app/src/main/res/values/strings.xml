@@ -288,6 +288,9 @@
     <string name="settings_logs_hint">Скопировать безопасный отчёт о сети и передаче файлов</string>
     <string name="settings_support_dev">Поддержать разработчика</string>
     <string name="settings_support_dev_hint">Переводом напрямую - без комиссий магазинов</string>
+    <string name="settings_official_site">Официальный сайт</string>
+    <string name="settings_official_site_hint">Версии, файлы и новости проекта</string>
+    <string name="settings_official_site_failed">Не удалось открыть браузер</string>
     <string name="settings_version">Версия</string>
     <string name="settings_core">Ядро</string>
     <string name="settings_logout_title">Выйти из APU?</string>

@@ -240,6 +240,9 @@
     <string name="settings_logs_hint">Copy a safe report about the network and file transfers</string>
     <string name="settings_support_dev">Support the developer</string>
     <string name="settings_support_dev_hint">Direct transfer, no store fees</string>
+    <string name="settings_official_site">Official site</string>
+    <string name="settings_official_site_hint">Versions, files and project news</string>
+    <string name="settings_official_site_failed">Could not open a browser</string>
     <string name="settings_version">Version</string>
     <string name="settings_core">Core</string>
     <string name="settings_logout_title">Log out of APU?</string>

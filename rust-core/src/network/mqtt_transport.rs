@@ -1,7 +1,7 @@
 //! # MQTT Transport — децентрализованный bootstrap + presence + relay
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::time::{Duration, Instant};
@@ -174,11 +174,30 @@ const MQTT_OWN_RETRY_AFTER_MS: u64 = 15 * 60 * 1000;
 const MQTT_START_CONNACK_TIMEOUT: Duration = Duration::from_secs(20);
 const MQTT_FAILOVER_TCP_ERRORS: u64 = 4;
 const MQTT_FAILOVER_WSS_ERRORS: u64 = 6;
-const MQTT_WSS_REVIEW_AFTER_MS: u64 = 5 * 60 * 1000;
+/// Сколько стабильной работы моста считать доказательством, что сеть в порядке.
+///
+/// Было 5 минут (до этого — 30). Отчёт владельца с телефона 2026-11-18 показал
+/// цену: за 3 ч 24 мин `connacks=96` — сессия переподнималась примерно раз в две
+/// минуты, а сразу за «FAILOVER REVIEW … запрошен переход с моста» шли
+/// «REQUEST TIMEOUT … 5000 ms» и «FANOUT DEGRADED» каждые пять секунд, пока
+/// новый путь не устоится. В том же отчёте `core_wake_acquisitions=10258` и
+/// около 50 минут удержания wakelock ядра. Возвращаем исходные полчаса: рабочую
+/// сессию не бросаем ради проверки, которая доказывает только открытый порт.
+const MQTT_WSS_REVIEW_AFTER_MS: u64 = 30 * 60 * 1000;
 /// Как часто на стабильном мосте пробуем прямой TCP (CONACK-проба).
 /// Ответил - сеть стала нормальной, возвращаемся; нет - сидим на мосте.
-const MQTT_DIRECT_PROBE_EVERY_MS: u64 = 60 * 1000;
+/// Минута была слишком частой: каждая проба — отдельное рукопожатие к порту,
+/// который в тарифицируемой сети часто режется.
+const MQTT_DIRECT_PROBE_EVERY_MS: u64 = 10 * 60 * 1000;
 static MQTT_LAST_DIRECT_PROBE_MS: AtomicU64 = AtomicU64::new(0);
+/// Сколько раз ПОДРЯД прямой брокер ответил, прежде чем уходить с моста.
+///
+/// Ответ на CONACK доказывает только то, что порт открыт, а не то, что через
+/// него проходит публикация. Уходим после двух удачных проверок подряд (при
+/// пробе раз в 10 минут — не раньше чем через 10 минут и не позже 20), а
+/// неудача счёт сбрасывает.
+static MQTT_DIRECT_PROBE_STREAK: AtomicU32 = AtomicU32::new(0);
+const MQTT_DIRECT_PROBE_STREAK_REQUIRED: u32 = 2;
 
 /// Короткий хвост для core_build_info: « · MQTT: … » или пусто, если движок
 /// ещё не выбирал брокера. Строку читает человек на экране настроек.
@@ -1381,10 +1400,10 @@ impl MqttTransport {
             let mut reconnect_generation = RECONNECT_WAKE.generation();
             let mut has_connected_once = false;
             let exit_reason = loop {
-                // Стабильный мост - сеть могла смениться (Wi-Fi). Раз в минуту
-                // пробяем прямой TCP настоящим рукопожатием: ответил -
-                // возвращаемся (это же снимает «расщепление роя», когда
-                // мостовые и прямые телефоны сидят на разных брокерах).
+                // Стабильный мост - сеть могла смениться (Wi-Fi). Раз в десять
+                // минут пробуем прямой TCP настоящим рукопожатием: ответил
+                // дважды подряд - возвращаемся (это же снимает «расщепление
+                // роя», когда мостовые и прямые телефоны на разных брокерах).
                 if MQTT_WSS_ACTIVE.load(Ordering::Relaxed)
                     && MQTT_PREFER_WSS.load(Ordering::Relaxed)
                 {
@@ -1395,12 +1414,19 @@ impl MqttTransport {
                     if due {
                         MQTT_LAST_DIRECT_PROBE_MS.store(now_ms, Ordering::Relaxed);
                         if let Some((probe_host, probe_port)) = MQTT_BROKERS.first().copied() {
-                            if crate::network::multi_broker::probe_broker(
+                            let answered = crate::network::multi_broker::probe_broker(
                                 probe_host,
                                 probe_port,
                             )
-                            .await
-                            {
+                            .await;
+                            let streak = if answered {
+                                MQTT_DIRECT_PROBE_STREAK.fetch_add(1, Ordering::Relaxed) + 1
+                            } else {
+                                MQTT_DIRECT_PROBE_STREAK.store(0, Ordering::Relaxed);
+                                0
+                            };
+                            if answered && streak >= MQTT_DIRECT_PROBE_STREAK_REQUIRED {
+                                MQTT_DIRECT_PROBE_STREAK.store(0, Ordering::Relaxed);
                                 MQTT_PREFER_WSS.store(false, Ordering::Relaxed);
                                 MQTT_WSS_STABLE_SINCE_MS.store(0, Ordering::Relaxed);
                                 tracing::info!(
