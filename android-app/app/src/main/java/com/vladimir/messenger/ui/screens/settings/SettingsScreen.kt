@@ -766,16 +766,12 @@ private fun SettingsTabContent(
     // локальные для этого экрана.
     var showPrivacyPolicy by rememberSaveable { mutableStateOf(false) }
     if (showPrivacyPolicy) {
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { showPrivacyPolicy = false },
             title = { Text(stringResource(R.string.settings_privacy_policy)) },
-            text = {
-                androidx.compose.foundation.lazy.LazyColumn {
-                    item { Text(stringResource(R.string.settings_privacy_policy_body)) }
-                }
-            },
+            text = { Text(stringResource(R.string.settings_privacy_policy_body)) },
             confirmButton = {
-                TextButton(onClick = { showPrivacyPolicy = false }) { Text(stringResource(android.R.string.ok)) }
+                ApuTextAction(label = stringResource(R.string.action_close), onClick = { showPrivacyPolicy = false })
             },
         )
     }
