@@ -18,6 +18,8 @@ import android.util.Log
  */
 object GroupEditResend {
 
+    private const val TAG = "GroupEditResend"
+
     /** Очередь общая на процесс: правка одна, а зовут её из многих мест. */
     private val retry = GroupEditRetry()
 
@@ -52,8 +54,4 @@ object GroupEditResend {
 
     /** Сколько узлов ждёт досылки (диагностика и тесты). */
     fun pendingCount(): Int = retry.size()
-
-    companion object {
-        private const val TAG = "GroupEditResend"
-    }
 }
