@@ -43,6 +43,13 @@ const MAX_BACKOFF_MS: i64 = 30 * 60_000;
 const MAX_PINNED_IDENTITIES: usize = 2048;
 const MAX_STORE_BYTES: u64 = 1024 * 1024;
 const SAVE_INTERVAL_MS: i64 = 30_000;
+/// Через сколько можно ПОВТОРИТЬ брокерный запрос identity, если ответ не пришёл.
+///
+/// Первый запрос уходит сразу, как только понадобилась identity. Повтор — не
+/// чаще этого интервала: ответ идёт тем же брокером, и лишние запросы только
+/// занимают канал. Пока ответ не пришёл, узел остаётся в списке «нужна
+/// identity», поэтому следующий вызов не теряется.
+pub const IDENTITY_ASK_INTERVAL_MS: i64 = 20_000;
 const LEASE_DOMAIN: &[u8] = b"apu-peer-address-v1\0";
 const FRAME_DOMAIN: &[u8] = b"apu-peer-exchange-v1\0";
 
@@ -294,6 +301,12 @@ struct State {
     next_round_ms: i64,
     saved_at_ms: i64,
     target_cursor: usize,
+    /// Выданные, но ещё не подтверждённые nonce брокерных запросов identity.
+    ///
+    /// Значение — (когда просили, какой nonce выдали). Нужно дважды: чтобы не
+    /// спрашивать на каждое сообщение и чтобы принять ТОЛЬКО ответ на наш
+    /// свежий запрос (см. `identity_exchange`). Чистится в `cleanup`.
+    identity_asked_at: HashMap<String, (i64, String)>,
     dirty: bool,
 }
 
@@ -419,6 +432,67 @@ impl PeerExchange {
 
     pub fn helper_identity(&self, id: &str, now: i64) -> Option<HelperIdentity> {
         self.state.lock().unwrap().identities.get(id).filter(|identity| identity.claims.expires_at_ms > now).cloned()
+    }
+
+    /// Стоит ли попросить identity этого узла через брокер прямо сейчас.
+    ///
+    /// Возвращает `true`, только когда identity действительно НЕТ или она
+    /// протухла. Так запрос не уходит тем, кого мы и так знаем, и не
+    /// превращается в постоянный фон: после успешного ответа метод молчит до
+    /// истечения аренды (`LEASE_MS`, сутки).
+    ///
+    /// `true` не означает «отправляй немедленно»: вызывающий сначала спрашивает
+    /// [`PeerExchange::note_identity_asked`], чтобы соблюсти интервал повтора.
+    pub fn needs_identity(&self, id: &str, now: i64) -> bool {
+        if !valid_node_id(id) { return false; }
+        let s = self.state.lock().unwrap();
+        s.identities.get(id).map(|i| i.claims.expires_at_ms <= now).unwrap_or(true)
+    }
+
+    /// Отметить, что запрос с этим nonce ушёл, и решить, можно ли его слать.
+    ///
+    /// Один вызов = одна попытка: возвращает `true` и запоминает пару
+    /// (время, nonce), если с прошлого раза прошло не меньше
+    /// [`IDENTITY_ASK_INTERVAL_MS`]. Иначе возвращает `false` и ничего не
+    /// меняет — вызывающий не шлёт кадр и не тратит nonce.
+    pub fn note_identity_asked(&self, id: &str, nonce: &str, now: i64) -> bool {
+        if !valid_node_id(id) || nonce.is_empty() {
+            return false;
+        }
+        let mut s = self.state.lock().unwrap();
+        if s
+            .identity_asked_at
+            .get(id)
+            .map(|(at, _)| now.saturating_sub(*at) < IDENTITY_ASK_INTERVAL_MS)
+            .unwrap_or(false)
+        {
+            return false;
+        }
+        s.identity_asked_at.insert(id.to_string(), (now, nonce.to_string()));
+        true
+    }
+
+    /// Похож ли этот ответ на ответ тому узлу, у которого мы только что просили.
+    ///
+    /// Проверяет ровно две вещи: (а) именно ЭТОМУ узлу мы выдавали nonce и
+    /// (б) ответ повторяет ИМЕННО его. Слепая инъекция в нашу тему без знания
+    /// свежего nonce так не проходит.
+    pub fn identity_reply_expected(&self, id: &str, nonce: &str, now: i64) -> bool {
+        self.state
+            .lock()
+            .unwrap()
+            .identity_asked_at
+            .get(id)
+            .map(|(at, expected)| {
+                expected == nonce && now.saturating_sub(*at) <= IDENTITY_ASK_INTERVAL_MS
+            })
+            .unwrap_or(false)
+    }
+
+    /// Ответ принят: забыть про ожидание, чтобы после истечения аренды можно
+    /// было спросить снова без паузы.
+    pub fn note_identity_answered(&self, id: &str) {
+        self.state.lock().unwrap().identity_asked_at.remove(id);
     }
 
     pub fn authenticated_peer(&self, id: &str, now: i64) -> Option<AuthenticatedHelperPeer> {
@@ -776,6 +850,10 @@ fn fail(s: &mut State, id: &str, endpoint: SocketAddr, now: i64) {
 fn cleanup(s: &mut State, now: i64) {
     s.records.retain(|_, r| r.lease.claims.expires_at_ms > now);
     s.identities.retain(|_, i| i.claims.expires_at_ms > now);
+    // Метка «просили identity» живёт не дольше интервала повтора: после неё
+    // можно просить снова (ответ мог потеряться в пути).
+    s.identity_asked_at
+        .retain(|_, (at, _)| now.saturating_sub(*at) <= IDENTITY_ASK_INTERVAL_MS);
     s.authenticated.retain(|_, (_, at)| now.saturating_sub(*at) <= HEALTHY_REFRESH_MS + ONLINE_WINDOW_MS);
     while s.sent.front().map(|at| now.saturating_sub(*at) >= 60_000).unwrap_or(false) { s.sent.pop_front(); }
     s.received.retain(|(_, _, at)| now.saturating_sub(*at) <= FRAME_LIFETIME_MS + CLOCK_SKEW_MS);
@@ -1209,5 +1287,120 @@ mod tests {
         let second = d.plan(&a, Some(addr(1)), vec![candidate(3, NOW)], &targets, NOW + 5_000).remove(0);
         assert!(second.claims.targets.iter().any(|id| !first_targets.contains(id)));
         assert!(decode(&vec![0; MAX_EXCHANGE_BYTES + 1], a.legacy_routing_node_id(), BINDING, NOW).is_none());
+    }
+
+    #[test]
+    fn broker_identity_is_requested_only_when_missing_and_not_too_often() {
+        let b = identity(2);
+        let d = PeerExchange::open(None);
+        let peer = b.legacy_routing_node_id().to_string();
+        let nonce = "a".repeat(32);
+
+        // Ничего не знаем — просить надо.
+        assert!(d.needs_identity(&peer, NOW));
+        assert!(d.note_identity_asked(&peer, &nonce, NOW));
+
+        // Только что просили: ждём ответ, второй запрос не шлём и nonce не тратим.
+        assert!(d.needs_identity(&peer, NOW));
+        assert!(!d.note_identity_asked(&peer, &"b".repeat(32), NOW + 1));
+
+        // Интервал прошёл — можно снова, с новым nonce.
+        assert!(d.note_identity_asked(&peer, &"c".repeat(32), NOW + IDENTITY_ASK_INTERVAL_MS));
+
+        // Ответ пришёл: забываем про ожидание, identity считается известной.
+        let signed = HelperIdentity::create(&b, NOW).unwrap();
+        assert!(d.accept_identity_hint(&signed, NOW));
+        d.note_identity_answered(&peer);
+        assert!(!d.needs_identity(&peer, NOW));
+        assert!(d.note_identity_asked(&peer, &nonce, NOW));
+
+        // Истекла аренда — снова надо просить.
+        let after_lease = signed.claims.expires_at_ms + 1;
+        assert!(d.needs_identity(&peer, after_lease));
+    }
+
+    #[test]
+    fn identity_reply_must_repeat_the_nonce_we_issued() {
+        let d = PeerExchange::open(None);
+        let peer = identity(4).legacy_routing_node_id().to_string();
+        let ours = "d".repeat(32);
+        assert!(d.note_identity_asked(&peer, &ours, NOW));
+
+        assert!(d.identity_reply_expected(&peer, &ours, NOW), "наш nonce — ждём ответ");
+        assert!(!d.identity_reply_expected(&peer, &"e".repeat(32), NOW), "чужой nonce — не наш ответ");
+        assert!(!d.identity_reply_expected(&identity(5).legacy_routing_node_id().to_string(), &ours, NOW), "не тот узел");
+
+        // Просроченное ожидание больше не принимает ответ.
+        assert!(!d.identity_reply_expected(&peer, &ours, NOW + IDENTITY_ASK_INTERVAL_MS + 1));
+    }
+
+    #[test]
+    fn identity_requests_ignore_non_node_ids() {
+        let d = PeerExchange::open(None);
+        let nonce = "f".repeat(32);
+        assert!(!d.needs_identity("", NOW));
+        assert!(!d.needs_identity("pk_zzz", NOW));
+        assert!(!d.needs_identity("не-узел", NOW));
+        assert!(!d.note_identity_asked("не-узел", &nonce, NOW));
+        assert!(!d.note_identity_asked(&identity(6).legacy_routing_node_id().to_string(), "", NOW));
+    }
+
+    #[test]
+    fn broker_identity_makes_the_helper_route_usable_without_a_direct_channel() {
+        // Сценарий владельца: прямого канала нет (VPN), но брокер жив. Единственный
+        // путь — обмен кадрами pidreq/pidres. Проверяем, что после него
+        // `helper_identity` отвечает и `prepare_relay` собирает пакет.
+        use crate::network::identity_exchange as exchange;
+        use crate::network::peer_assistance::PeerAssistance;
+
+        let a = identity(21);
+        let b = identity(22);
+        let recipient = b.legacy_routing_node_id().to_string();
+        let da = PeerExchange::open(None);
+        let now = NOW;
+
+        // До обмена маршрута нет — ровно та причина, что писалась в журнал.
+        assert!(da.helper_identity(&recipient, now).is_none());
+        assert!(da.needs_identity(&recipient, now));
+
+        // A просит, B отвечает своей настоящей подписью.
+        let nonce = exchange::new_nonce();
+        assert!(da.note_identity_asked(&recipient, &nonce, now));
+        let ask = exchange::request_payload(a.legacy_routing_node_id(), &nonce);
+        assert_eq!(exchange::parse_request(&ask).unwrap().1, nonce);
+
+        let signed = HelperIdentity::create(&b, now).unwrap();
+        let reply = exchange::response_payload(&nonce, &signed).unwrap();
+
+        // A принимает ответ только потому, что ждал именно этот nonce.
+        let (back, received) = exchange::parse_response(&reply).unwrap();
+        assert!(da.identity_reply_expected(&recipient, &back, now));
+        assert!(da.accept_identity_hint(&received, now));
+        da.note_identity_answered(&recipient);
+
+        // Маршрут появился: именно его не хватало `send_with_helper`.
+        let known = da.helper_identity(&recipient, now).expect("identity должна быть в каталоге");
+        assert_eq!(known.claims.signing_key, received.claims.signing_key);
+        assert!(!da.needs_identity(&recipient, now), "повторно просить не нужно");
+
+        // И по ней уже собирается настоящий помощный пакет.
+        let assistance = PeerAssistance::new();
+        assert!(
+            assistance.prepare_relay(&a, &known, b"APUSEAL1|payload", now).is_some(),
+            "с известной identity пакет собирается без прямого канала"
+        );
+    }
+
+    #[test]
+    fn identity_request_throttle_expires_with_cleanup() {
+        let d = PeerExchange::open(None);
+        let peer = identity(3).legacy_routing_node_id().to_string();
+        assert!(d.note_identity_asked(&peer, &"a".repeat(32), NOW));
+        {
+            let mut s = d.state.lock().unwrap();
+            cleanup(&mut s, NOW + IDENTITY_ASK_INTERVAL_MS + 1);
+            assert!(!s.identity_asked_at.contains_key(&peer), "метка не должна жить дольше интервала");
+        }
+        assert!(d.note_identity_asked(&peer, &"b".repeat(32), NOW + IDENTITY_ASK_INTERVAL_MS + 1));
     }
 }

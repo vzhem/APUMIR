@@ -1247,6 +1247,9 @@ impl P2PCore {
                 let presence_scope_mqtt = Arc::clone(&self.presence_scope);
                 // Азбука адресов: публичный адрес из брокер-presence — тоже наш.
                 let address_book_mqtt = Arc::clone(&self.address_book);
+                // Обмен подписанной identity через брокер: единственный канал,
+                // который живёт под VPN, когда STUN/прямые пути мертвы.
+                let directory_mqtt = Arc::clone(&self.peer_exchange);
                 // K4-3: свой брокер из настроек (если задан) - первым.
                 // Своё значение — если оно задано (и из конфига на старте, и
                 // из настроек уже во время работы): сессия читает общий слот.
@@ -1277,6 +1280,7 @@ impl P2PCore {
                             presence_scope_mqtt,
                             own_broker_mqtt,
                             address_book_mqtt,
+                            directory_mqtt,
                             mqtt_outbound_rx,
                             policy_mqtt,
                         ).await;
@@ -2919,6 +2923,7 @@ impl P2PCore {
         presence_scope: Arc<PresenceScope>,
         own_broker: Arc<Mutex<Option<(String, u16)>>>,
         address_book: Arc<AddressBook>,
+        directory: Arc<PeerExchange>,
         mut outbound_rx: tokio::sync::mpsc::Receiver<MqttOutboundCommand>,
         policy: Arc<SwarmFirstPolicy>,
     ) {
@@ -3200,7 +3205,12 @@ impl P2PCore {
                         let refreshed = retained.as_ref()
                             .and_then(|m| Self::own_fallback_wire(m, crate::storage::models::now_ms()));
                         let wire = refreshed.or_else(|| {
-                            message_id.starts_with("ppres-").then_some(envelope)
+                            // Кадры, которых нет в очереди по определению:
+                            // подсказка адреса (ppres) и просьба прислать
+                            // подписанную identity (pidreq). Оба — разовые и
+                            // не являются сообщениями переписки.
+                            (message_id.starts_with("ppres-") || message_id.starts_with("pidreq-"))
+                                .then_some(envelope)
                         });
                         let Some(wire) = wire else { continue; };
                         match transport.send_mesh_relay(&recipient, &wire).await {
@@ -3521,6 +3531,27 @@ impl P2PCore {
                         if outcome != PresenceOutcome::Live { continue; }
                         seen_via_presence.insert(peer_id.to_string());
                         tracing::info!("MQTT: fresh peer presence: {} ({})", display_name, peer_id);
+                        // Узел только что объявился и слушает брокера. Если он
+                        // нам нужен для отправки, но его подписанной identity у
+                        // нас нет, просим её СЕЙЧАС: к моменту первой отправки
+                        // ответ уже придёт, и помощная доставка не упрётся в
+                        // `route_unavailable reason=recipient_identity`.
+                        // Спрашиваем только про «своих»: чужие presence — фон.
+                        if presence_scope.is_own(peer_id) {
+                            if let Some(ask) = Self::identity_request_due(
+                                directory.as_ref(), &node_id, peer_id, now_ms,
+                            ) {
+                                if let Err(error) =
+                                    transport.send_mesh_relay(peer_id, &ask).await
+                                {
+                                    tracing::warn!(
+                                        "IDENTITY: broker request to {} failed: {}",
+                                        peer_id,
+                                        error
+                                    );
+                                }
+                            }
+                        }
                         
                         // PEER ONLINE: РґРѕСЃС‚Р°РІРёС‚СЊ РЅР°РєРѕРїР»РµРЅРЅС‹Рµ СЃРѕРѕР±С‰РµРЅРёСЏ
                         if let Some(ref q) = queue {
@@ -4143,6 +4174,93 @@ impl P2PCore {
                             }
                         }
                     } else if evt.payload.starts_with(
+                        crate::network::identity_exchange::IDENTITY_RESPONSE_TAG,
+                    ) {
+                        // Ответ на брокерный запрос identity (владелец 2026-11-19).
+                        // Под VPN STUN/прямые пути мертвы, и подписанная identity
+                        // раньше не доходила никаким путём: помощная доставка
+                        // отвечала `route_unavailable reason=recipient_identity`.
+                        // Кадр принимаем только из СВОЕЙ темы и только если
+                        // подпись настоящая; тело сообщения и так запечатано
+                        // end-to-end выше по стеку, поэтому identity здесь не
+                        // секрет, а адрес доставки.
+                        let addressed_to_us =
+                            evt.topic.trim_start_matches("p2pm2/msg/") == node_id;
+                        if addressed_to_us {
+                            if let Some((nonce, identity)) =
+                                crate::network::identity_exchange::parse_response(&evt.payload)
+                            {
+                                let now = crate::storage::models::now_ms();
+                                let peer = identity.claims.node_id.clone();
+                                if peer == node_id {
+                                    // Своя же identity, отражённая брокером.
+                                } else if !directory.identity_reply_expected(&peer, &nonce, now) {
+                                    // Ответ не на наш свежий запрос: возможно,
+                                    // это старая копия или чужая инъекция.
+                                    // Молча отбрасываем — метка ожидания живёт
+                                    // своим сроком.
+                                    tracing::info!(
+                                        "IDENTITY: broker response for {} ignored (unexpected nonce)",
+                                        peer
+                                    );
+                                } else {
+                                    let accepted = directory.accept_identity_hint(&identity, now);
+                                    if accepted {
+                                        directory.note_identity_answered(&peer);
+                                        tracing::info!(
+                                            "IDENTITY: broker response accepted for {} (helper route ready)",
+                                            peer
+                                        );
+                                    } else {
+                                        tracing::info!(
+                                            "IDENTITY: broker response rejected for {}",
+                                            peer
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    } else if evt.payload.starts_with(
+                        crate::network::identity_exchange::IDENTITY_REQUEST_TAG,
+                    ) {
+                        // Просят НАШУ identity. Отвечаем своей же подписью —
+                        // той, что и так раздаём прямым соседям. Адрес доставки
+                        // берём из темы просившего, а не из тела: телу доверять
+                        // нельзя, а тема адресована именно нам.
+                        let requester = evt.topic.trim_start_matches("p2pm2/msg/");
+                        if requester != node_id {
+                            if let Some((_asker, nonce)) =
+                                crate::network::identity_exchange::parse_request(&evt.payload)
+                            {
+                                if let Some(signing) =
+                                    crate::crypto::signing_identity::installed_signing_identity()
+                                        .filter(|i| Some(i.legacy_routing_node_id()) == Some(node_id.as_str()))
+                                {
+                                    let now = crate::storage::models::now_ms();
+                                    if let Some(signed) =
+                                        crate::network::peer_assistance::HelperIdentity::create(&signing, now)
+                                    {
+                                        if let Some(reply) =
+                                            crate::network::identity_exchange::response_payload(&nonce, &signed)
+                                        {
+                                            // Не retained: разовый ответ, а не объявление.
+                                            match transport.send_mesh_relay(requester, &reply).await {
+                                                Ok(()) => tracing::info!(
+                                                    "IDENTITY: broker response sent to {}",
+                                                    requester
+                                                ),
+                                                Err(error) => tracing::warn!(
+                                                    "IDENTITY: broker response to {} failed: {}",
+                                                    requester,
+                                                    error
+                                                ),
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else if evt.payload.starts_with(
                         crate::network::presence_scope::DIRECT_PRESENCE_PREFIX,
                     ) {
                         // Адрес в конверте (владелец, 2026-09-19): отправитель,
@@ -4238,6 +4356,25 @@ impl P2PCore {
                                 // написавший через брокер, выглядел «не в сети»
                                 // (владелец 2026-11-17).
                                 presence_observation::note_live_sender(&events, &network, sender_id, "", ts);
+                                // Он точно жив и слушает брокера — самый надёжный
+                                // момент, чтобы попросить его подписанную identity.
+                                // Без неё наш ответ ему уйдёт только прямым путём,
+                                // которого под VPN нет.
+                                if let Some(ask) = Self::identity_request_due(
+                                    directory.as_ref(), &node_id, sender_id, ts,
+                                ) {
+                                    // Разовый кадр, а не объявление: retained не нужен.
+                                    match transport.send_mesh_relay(sender_id, &ask).await {
+                                        Ok(()) => tracing::info!(
+                                            "IDENTITY: broker request sent to {}",
+                                            sender_id
+                                        ),
+                                        Err(error) => tracing::warn!(
+                                            "IDENTITY: broker request to {} failed: {}",
+                                            sender_id, error
+                                        ),
+                                    }
+                                }
                                 tracing::info!("MQTT: MessageReceived EMITTED to EventBus");
                             }
                         }
@@ -5966,6 +6103,81 @@ impl P2PCore {
         self.send_with_helper(&transport, peer_id, &frame, false)
     }
 
+    /// Попросить у получателя его подписанную identity брокером.
+    ///
+    /// Зачем отдельный путь. Помощная доставка требует
+    /// `directory.helper_identity(&recipient)` — подписанные claims с
+    /// неистёкшей арендой. До этого они приходили только прямым подписанным
+    /// обменом (QUIC) или чужим `Introduction`. Под VPN STUN/UDP мертвы, MQTT
+    /// жив — и без этого запроса узел навсегда остаётся с
+    /// `route_unavailable reason=recipient_identity`, а своя очередь стоит.
+    ///
+    /// `true` = запрос только что поставлен в очередь. Остальные исходы
+    /// (`identity уже есть`, `недавно спрашивали`, `нет канала`) дают `false`:
+    /// вызывающий не должен на них рассчитывать.
+    fn request_recipient_identity(&self, recipient: &str, diagnostics: bool) -> bool {
+        let Some(outbound) = self
+            .mqtt_outbound_tx
+            .as_ref()
+            .filter(|_| self.external_transport_allowed())
+        else {
+            if diagnostics {
+                tracing::info!("IDENTITY: broker request skipped for {}: no channel", recipient);
+            }
+            return false;
+        };
+        let Some(own_id) = self.node_id_str.as_deref() else {
+            return false;
+        };
+        let now = crate::storage::models::now_ms();
+        let Some(payload) = Self::identity_request_due(self.peer_exchange.as_ref(), own_id, recipient, now)
+        else {
+            if diagnostics {
+                tracing::info!("IDENTITY: broker request not needed yet for {}", recipient);
+            }
+            return false;
+        };
+        // Тот же MeshRelay, что носит ppres: кадр публикуется в тему
+        // получателя, а не остаётся в нашей. Префикс `pidreq-` пропускает его
+        // мимо очереди пересылки (см. отбор в обработчике MeshRelay).
+        let queued = outbound
+            .try_send(MqttOutboundCommand::MeshRelay {
+                recipient: recipient.to_string(),
+                envelope: payload,
+                message_id: format!("pidreq-{}", recipient),
+                legacy_redelivery: false,
+            })
+            .is_ok();
+        if diagnostics {
+            tracing::info!("IDENTITY: broker request for {} queued={}", recipient, queued);
+        }
+        queued
+    }
+
+    /// Пора ли просить identity этого узла — и с каким телом.
+    ///
+    /// `None` означает «не надо»: identity уже есть и жива, или запрос ушёл
+    /// меньше [`crate::network::peer_exchange::IDENTITY_ASK_INTERVAL_MS`] назад
+    /// и мы ждём ответа. `Some(payload)` — запрос можно отправлять прямо сейчас;
+    /// ожидание с выданным nonce уже отмечено, так что следующий вызов молчит,
+    /// а ответ без этого nonce принят не будет.
+    #[must_use]
+    fn identity_request_due(
+        directory: &PeerExchange,
+        own_id: &str,
+        recipient: &str,
+        now: i64,
+    ) -> Option<String> {
+        if !directory.needs_identity(recipient, now) {
+            return None;
+        }
+        let nonce = crate::network::identity_exchange::new_nonce();
+        if !directory.note_identity_asked(recipient, &nonce, now) {
+            return None;
+        }
+        Some(crate::network::identity_exchange::request_payload(own_id, &nonce))
+    }
+
     /// Online transit does not enable disk custody. True means the RECIPIENT signed
     /// acceptance after end-to-end decryption, not that an intermediate stream was written.
     fn send_with_helper(
@@ -5998,6 +6210,10 @@ impl P2PCore {
             }
             return false;
         };
+        // Получателю нужна его подписанная identity, а прямых путей под VPN нет.
+        // Просим её брокером ЗАРАНЕЕ, до сборки пакета: ответ придёт следующим
+        // кадром (и тогда следующая попытка отправит сообщение), а не в этой.
+        self.request_recipient_identity(recipient, diagnostics);
         let transport = transport.clone();
         let directory = Arc::clone(&self.peer_exchange);
         let assistance = Arc::clone(&self.peer_assistance);
