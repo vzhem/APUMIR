@@ -5347,3 +5347,9 @@ measured with an infinity maximum height constraints, which is disallowed.
 `file_route`: 31 попытка и 31 отказ на каждом из четырёх маршрутов
 (lan/udp/quic/broker) — передача 1 стоит в `PREPARING`/`SEEDING`.
 
+**Проверка выпуска.** Сборка на `071378c` зелёная: `Unit tests (JVM)`,
+`Build Release APK` (Kotlin + Rust, APK подписан), storage/navigation и
+push-тесты, `Firebase preflight`. Новый сторож `check-dialog-scroll.py`
+прогнан в составе ворот сборки: ложных срабатываний нет, вложенной прокрутки
+в диалогах не осталось.
+
