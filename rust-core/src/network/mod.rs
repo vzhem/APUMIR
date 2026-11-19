@@ -53,6 +53,7 @@ pub mod presence;
 pub mod presence_dispatch;
 pub mod presence_observation;
 pub mod presence_scope;
+pub mod identity_exchange;
 pub mod quic_client;
 pub mod relay;
 pub mod relay_queue;

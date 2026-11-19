@@ -981,7 +981,13 @@ fun MessengerNavGraph(
             // QR приложение показывает в профиле, раньше он уходил в тост
             // «Это не ссылка APU». В навигацию отдаём ВЕСЬ текст: в ссылке
             // есть имя контакта, без него карточка контакта беднее.
-            val routeScanned: (String) -> Unit = { qrContent ->
+            val routeScanned: (String) -> Unit = { rawQr ->
+                // QR «Мой код» - адрес сайта с кодом контакта в параметре
+                // (`https://apu.clan.su/?apu=a/<узел>`). Камера без APU
+                // открывает такой код как страницу установки, а установивший
+                // APU наводит на тот же код сканером - здесь параметр снова
+                // становится обычной ссылкой на контакт.
+                val qrContent = com.vladimir.messenger.util.OfficialSite.contactFromQr(rawQr) ?: rawQr
                 when {
                     GroupInviteLinks.parseTarget(qrContent) != null ->
                         navController.navigate(Screen.Groups.createJoinRoute(qrContent)) {

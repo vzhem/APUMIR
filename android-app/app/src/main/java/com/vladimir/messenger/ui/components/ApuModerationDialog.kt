@@ -16,10 +16,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -327,9 +325,13 @@ fun ApuMessageModerationDialog(
         },
         text = {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
+                // ApuSettingsDialog уже ограничивает высоту и прокручивает ВСЮ
+                // карточку (заголовок, тело, кнопки). Вложенный verticalScroll
+                // здесь измерялся с бесконечной высотой и ронял Compose ровно
+                // в момент открытия окна «Удалить и модерация…» — тот же
+                // дефект, что раньше чинили в ProfileSyncDialog и GroupsScreen.
+                // Прокрутка остаётся одна, у диалога.
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 // Основной режим удаления: у всех или только на этом устройстве

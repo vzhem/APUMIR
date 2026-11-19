@@ -128,6 +128,14 @@
     font-size: clamp(17px, 2vw, 19px);
     line-height: 1.7;
   }
+  #apu-landing-root .apu-contact {
+    margin: 0 0 14px; padding: 12px 16px; border-radius: 14px;
+    background: rgba(138, 109, 31, 0.1); border: 1px solid rgba(138, 109, 31, 0.28);
+  }
+  #apu-landing-root .apu-contact[hidden] { display: none; }
+  #apu-landing-root .apu-contact-text { margin: 0 0 6px; color: #1E2430; }
+  #apu-landing-root .apu-contact-open { cursor: pointer; }
+
   #apu-landing-root .apu-actions {
     display: flex;
     align-items: center;
@@ -459,6 +467,10 @@
         <span class="apu-eyebrow"><span class="apu-dot"></span> Общение без лишнего</span>
         <h1>Ближе друг к другу.<br><span class="apu-title-accent">Проще на связи.</span></h1>
         <p class="apu-lead">APU — мессенджер для личных чатов, сообществ и обмена файлами. Установите приложение и оставайтесь на связи с теми, кто важен.</p>
+        <div class="apu-contact" id="apu-contact" hidden>
+          <p class="apu-contact-text">Вам передали контакт в APU. Установите приложение — и он добавится сам.</p>
+          <a class="apu-small-link apu-contact-open" id="apu-contact-open" href="#">Уже установлено? Открыть в APU</a>
+        </div>
         <div class="apu-actions" id="download">
           <a class="apu-download" data-apu-download href="https://p2p-relay.apuchat.workers.dev/update/apk" download="app-release.apk" aria-label="Скачать приложение APU для Android">
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3.5v11m0 0 4-4m-4 4-4-4M5 17.5v2A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -615,6 +627,22 @@
       var actual = sha256(site.sha256);
       return !!expected && expected === actual;
     }
+
+    // QR «Мой код» ведёт сюда с ?apu=a/<узел>[/<ник>]: человек пришёл за
+    // приложением, а не на общую страницу. Показываем, что ему передали
+    // контакт, и оставляем кнопку «Открыть в APU» на случай, если приложение
+    // уже установлено (тогда страницу открыли по ошибке).
+    (function () {
+      var match = /[?&]apu=(a\/[A-Za-z0-9_\-]{16,64}(?:\/[A-Za-z0-9_]{1,32})?)(?:[&#]|$)/.exec(
+        String(location.search || '')
+      );
+      if (!match) return;
+      var contactLink = 'apu://' + match[1];
+      var box = document.getElementById('apu-contact');
+      var open = document.getElementById('apu-contact-open');
+      if (open) open.setAttribute('href', contactLink);
+      if (box) box.hidden = false;
+    })();
 
     // Safe default: if JavaScript or metadata is unavailable, the button still
     // uses the existing relay and can never unknowingly serve an old site APK.

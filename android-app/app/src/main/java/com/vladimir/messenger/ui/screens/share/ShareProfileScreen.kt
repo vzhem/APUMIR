@@ -98,8 +98,10 @@ fun ShareProfileScreen(
                 ) {
             // QR-код профиля сразу на экране: наводишь камеру друга — и контакт добавлен,
             // без передачи ссылок вручную.
-            val qrBitmap = remember(uiState.shareLink) {
-                QrCodeGenerator.generateQrCode(uiState.shareLink)
+            // В коде только https (OfficialSite): у друга без APU камера откроет
+            // страницу со скачиванием, а не неоткрываемую схему apu://.
+            val qrBitmap = remember(uiState.qrLink) {
+                QrCodeGenerator.generateQrCode(uiState.qrLink.ifBlank { uiState.shareLink })
             }
             if (qrBitmap != null) {
                 Image(

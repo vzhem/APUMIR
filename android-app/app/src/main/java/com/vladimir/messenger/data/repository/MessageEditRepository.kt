@@ -94,6 +94,12 @@ class MessageEditRepository @Inject constructor(
         if (!text.startsWith("$PREFIX|")) return false
         val parts = text.split("|")
         if (parts.size == 3 && parts[1] == "ack") return true // подтверждение: очередь у нас нет, просто съедаем
+        // Собеседник не нашёл сообщения и просит прислать его заново. Нужен
+        // этот путь потому, что правка обгоняет само сообщение: телефон был
+        // офлайн, получил сначала правку. Отправляем текущий (уже
+        // исправленный) текст — тогда у собеседника появится верное
+        // сообщение, а не старое.
+        if (parts.size == 3 && parts[1] == "need") return resendForPeer(senderId, parts[2])
         if (parts.size != 5) {
             Log.w(TAG, "edit envelope malformed, dropped")
             return true
@@ -104,7 +110,20 @@ class MessageEditRepository @Inject constructor(
         if (senderId.isBlank() || targetId.isBlank() || newText.isBlank()) return true
         withContext(Dispatchers.IO) {
             val chat = chatDao.getChatByContactId(senderId) ?: return@withContext
-            val message = messageDao.getMessageById(targetId) ?: return@withContext
+            val message = messageDao.getMessageById(targetId)
+            if (message == null) {
+                // Самого сообщения у нас нет: оно не доехало, а правка пришла.
+                // Молчание оставило бы старый текст навсегда, поэтому просим
+                // автора прислать сообщение заново — его версия уже исправлена.
+                Log.i(TAG, "edit for unknown message $targetId - asking author to resend")
+                runCatching {
+                    RustBridge.sendMessage(
+                        editWireId(senderId, targetId, atMs), chat.id, senderId,
+                        "$PREFIX|need|$targetId",
+                    )
+                }
+                return@withContext
+            }
             // Правит только автор и только в этой переписке.
             if (message.chatId != chat.id || message.senderId != senderId) return@withContext
             if (applyLocal(chat.id, targetId, newText, atMs)) {
@@ -139,6 +158,31 @@ class MessageEditRepository @Inject constructor(
             if (message.chatId != chat.id) return@withContext
             applyLocal(chat.id, targetId, newText, atMs)
         }
+        return true
+    }
+
+    /**
+     * Собеседник просит прислать сообщение заново: у него нет строки, а
+     * правка до него уже дошла (так бывает, когда правка обгоняет само
+     * сообщение при офлайне).
+     *
+     * Отправляем ТЕКУЩИЙ текст со стабильным идентификатором записи — ядро
+     * узнаёт его и не заводит дубликат у собеседника. Если за это время
+     * сообщение успели ещё раз поправить, уйдёт последняя версия.
+     */
+    private suspend fun resendForPeer(peerId: String, messageId: String): Boolean {
+        if (peerId.isBlank() || messageId.isBlank()) return true
+        val chat = chatDao.getChatByContactId(peerId) ?: return true
+        val message = messageDao.getMessageById(messageId) ?: return true
+        if (message.chatId != chat.id) return true
+        // Переотправляем только своё: чужое пришло не от нас и не нам его слать.
+        if (!message.isFromMe) return true
+        runCatching {
+            RustBridge.sendMessage(
+                resendWireId(peerId, messageId), chat.id, peerId, message.content,
+            )
+        }.onSuccess { Log.i(TAG, "edit asked for resend id=$messageId sent=$it") }
+            .onFailure { Log.w(TAG, "resend failed id=$messageId: ${it.message}") }
         return true
     }
 
@@ -178,6 +222,13 @@ class MessageEditRepository @Inject constructor(
     /** Устойчивый id конверта в ядре: повторная досылка не заводит вторую запись. */
     private fun editWireId(peer: String, messageId: String, atMs: Long): String =
         UUID.nameUUIDFromBytes("apu-edit|$peer|$messageId|$atMs".toByteArray(Charsets.UTF_8)).toString()
+
+    /**
+     * Устойчивый id переотправки: тот же, сколько бы раз собеседник ни
+     * просил, — ядро не плодит копии, а приёмник узнаёт сообщение по id.
+     */
+    private fun resendWireId(peer: String, messageId: String): String =
+        UUID.nameUUIDFromBytes("apu-edit-resend|$peer|$messageId".toByteArray(Charsets.UTF_8)).toString()
 
     companion object {
         const val PREFIX = "APUEDIT1"

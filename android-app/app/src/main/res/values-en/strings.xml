@@ -1431,7 +1431,7 @@
     <string name="splash_core_cd">APU digital core and network servers</string>
     <string name="ac_nobody_found">Nobody found. Check the spelling of the username or ask for an invite link.</string>
     <string name="rc_hint_chat">Change the name this person is shown under in your chats and contacts.</string>
-    <string name="qr_show_hint">Show this code to your contact. The phone camera will add you to contacts, and if they do not have APU yet, they can download the app with this same code.</string>
+    <string name="qr_show_hint">Show this code to your friend: their phone camera opens the APU download page, and once the app is installed the same code adds you to contacts.</string>
     <string name="sp_send_link_hint">Send your friend the link. If APU is already installed, it opens adding a contact. If not, also send the APK link.</string>
     <string name="sp_when_opened_hint">When your friend opens the link, APU shows your profile and offers to add a contact. If the app is not installed, also send your friend the APK link or the APK file itself.</string>
     <string name="topic_icon_label">Topic icon: %1$s</string>

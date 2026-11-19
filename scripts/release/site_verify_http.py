@@ -107,7 +107,12 @@ def main() -> int:
         print(f"::error title=Site HTTP verification failed::{error.name}: {error.reason}")
         return 1
     except (OSError, ValueError, TypeError, KeyError) as error:
-        print(f"::error::Site HTTP verification failed: {type(error).__name__}")
+        # Пропавший входной файл — самая частая причина этого класса сбоев
+        # (так сайт стоял на .542: не было site-release.json). Имя файла
+        # безопасно: оно либо константа, либо проверенное имя из SITE_NAMES,
+        # поэтому печатаем его, но НЕ текст исключения (в нём бывает хост).
+        detail = f" (missing {Path(error.filename).name})" if isinstance(error, FileNotFoundError) and error.filename else ""
+        print(f"::error::Site HTTP verification failed: {type(error).__name__}{detail}")
         return 1
     print("::notice::All public site file bytes and metadata match the verified release snapshot")
     return 0

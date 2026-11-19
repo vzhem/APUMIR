@@ -108,7 +108,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Check helper, diagnostics, initial-sync, icon, delivery, UI-return, topic-read and invite contracts
+      - name: Check helper, diagnostics, initial-sync, icon, delivery, UI-return, topic-read, invite and dialog-scroll contracts
         run: |
           python3 scripts/ci/check-online-helper.py
           python3 scripts/ci/check-diagnostics-report.py
@@ -128,6 +128,9 @@ jobs:
           python3 scripts/ci/check-map-opening.py
           python3 scripts/ci/check-topic-read-contract.py
           python3 scripts/ci/check-invite-text.py
+          # Прокрутка внутри прокручивающегося диалога роняет Compose при
+          # открытии окна (падение на «Удалить и модерация…», 2026-11-19).
+          python3 scripts/ci/check-dialog-scroll.py
 
       # A release built from an explicit tag carries the push test gate. The
       # gate is what makes a shipped build ask Firebase for a token and register
@@ -182,7 +185,7 @@ jobs:
         working-directory: ./rust-core
         run: |
           set -o pipefail
-          for suite in helper_policy helper_quality helper_delivery peer_assistance peer_exchange direct_transport mqtt_fanout mqtt_topology mqtt_transport presence_scope presence_observation presence_dispatch swarm_first; do
+          for suite in helper_policy helper_quality helper_delivery peer_assistance peer_exchange identity_exchange direct_transport mqtt_fanout mqtt_topology mqtt_transport presence_scope presence_observation presence_dispatch swarm_first; do
             LOG="$RUNNER_TEMP/helper-$suite.log"
             if ! RUST_LOG=warn CARGO_TERM_COLOR=never cargo test --release --features mqtt-dual-broker --lib "network::$suite::tests" > "$LOG" 2>&1; then
               tail -150 "$LOG"
@@ -701,6 +704,78 @@ jobs:
             android-app/app/src/main/jniLibs/armeabi-v7a/libp2p_core.so
           git commit -m "ci: uniffi bindings + core rebuilt for ${GITHUB_REF#refs/tags/}"
           git push origin HEAD:main || echo "::warning::push to main failed - take the bindings from the core-bindings artifact of this run"
+
+      # ── Latest и публикация на сайт: порядок задаёт этот workflow ────────
+      #
+      # Почему это здесь, а не отдельным ручным шагом. Раньше релиз создавался
+      # черновиком, потом его публиковали вручную, а Latest переезжал ещё
+      # позже. Событие `release: published` при этом опережало Latest, и
+      # публикация сайта падала на своей проверке — сайт оставался с прошлым
+      # APK (так вышло с .543 и .544, пока сайт отдавал .542).
+      #
+      # Здесь релиз снимается с черновика ТЕМ ЖЕ прогоном, который его
+      # собрал, и сразу помечается Latest — до того, как кто-либо дёрнет
+      # публикацию сайта. Плюс явный запуск публикации по факту успеха:
+      # даже если событие published потеряется, сайт не останется старым.
+      #
+      # Без continue-on-error: именно он превращал прошлые сбои публикации в
+      # зелёные прогоны (v11.74.543/.544/.545 ушли с пустым телом и не стали
+      # Latest). Публикация Latest — часть успеха сборки, а не «пожелание»:
+      # молчаливый сбой здесь означает, что сайт отдаёт старый выпуск.
+      - name: Publish release and mark it Latest
+        if: success() && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.get_version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          # Черновик уже создан предыдущим шагом. Снимаем draft/prerelease и
+          # сразу ставим Latest одним вызовом, чтобы между этими состояниями
+          # не было окна, в котором сайт видит старый Latest.
+          #
+          # ВАЖНО: черновик НЕДОСТУПЕН по `/releases/tags/<tag>` — GitHub
+          # отвечает 404 на черновики этим путём (проверено на v11.74.546:
+          # `/releases/tags/v11.74.546` → 404, а `/releases/451311522` → 200).
+          # Поэтому id ищем перебором списка, включая черновики.
+          RELEASE_ID="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"${TAG}\") | .id" | head -n1)"
+          if [ -z "$RELEASE_ID" ]; then
+            echo "::error::release ${TAG} not found even among drafts"
+            exit 1
+          fi
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -f draft=false -f prerelease=false -f make_latest=true \
+            --jq '{id, tag_name, draft, prerelease}'
+          # Проверяем фактический результат, а не только код ответа.
+          for attempt in $(seq 1 15); do
+            LATEST="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+            if [ "$LATEST" = "$TAG" ]; then
+              echo "::notice::Latest is ${TAG}"
+              exit 0
+            fi
+            echo "Latest is ${LATEST:-unknown}, waiting for ${TAG} (attempt ${attempt}/15)"
+            sleep 4
+          done
+          echo "::error::Latest did not switch to ${TAG}; site publication would publish an older release"
+          exit 1
+
+      # Запуск публикации сайта по факту. workflow_dispatch требует права
+      # actions:write у GITHUB_TOKEN; если его нет, шаг честно предупреждает и
+      # не валит сборку: событие `release: published` от шага выше всё равно
+      # запустит публикацию, а у неё теперь есть ожидание Latest.
+      - name: Trigger site publication
+        if: success() && github.ref_type == 'tag'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.get_version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          if gh workflow run site-publish.yml -f tag="$TAG" --repo "$GITHUB_REPOSITORY"; then
+            echo "::notice::site publication requested for ${TAG}"
+          else
+            echo "::warning::could not dispatch site publication (event 'release: published' still covers it)"
+          fi
 
       - name: Remove temporary Firebase client configuration
         if: always()
