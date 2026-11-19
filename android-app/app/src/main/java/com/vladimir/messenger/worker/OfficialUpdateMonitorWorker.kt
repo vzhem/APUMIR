@@ -73,6 +73,7 @@ class OfficialUpdateMonitorWorker @AssistedInject constructor(
     private val apkSeeder: Provider<ApkSeeder>,
 ) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return Result.success()
         val id = OfficialUpdateMonitor.id(params)
         if (id < 0L) return Result.success()
         return try {

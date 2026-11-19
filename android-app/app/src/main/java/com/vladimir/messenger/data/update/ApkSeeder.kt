@@ -442,6 +442,7 @@ class ApkSeeder @Inject constructor(
 
     /** Открылись настройки: заодно догнать завершённые загрузки. */
     fun pickupDownloadedApks() {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return
         scope.launch { runCatching { adoptCompletedDownloads() } }
     }
 
@@ -454,6 +455,7 @@ class ApkSeeder @Inject constructor(
      * другому сиду). Все отказы — `upnone`, чтобы круг просьб не висел.
      */
     suspend fun onUpdateWant(senderId: String, packet: GroupWire.Packet.UpdateWant) {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return
         // Раунд 216 (уточнение владельца к р215): новый APK обновления - СВОЙ
         // файл на телефоне и ровно то, что нужно другим телефонам, поэтому
         // раздаём его ВСЕГДА, и в режиме абонента тоже («Я сервер» = ВЫКЛ).
@@ -500,6 +502,7 @@ class ApkSeeder @Inject constructor(
      * Отказ — `upnone` (версия «до», sha патча), чтобы круг просьб не висел.
      */
     suspend fun onUpdatePatchWant(senderId: String, packet: GroupWire.Packet.UpdatePatchWant) {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return
         // Раунд 216: патч - часть той же раздачи обновления, режим абонента
         // не мешает (у абонента свой скачанный патч).
         val info = store.loadPatchSeed()
@@ -546,6 +549,7 @@ class ApkSeeder @Inject constructor(
      * (более новая версия заменяет старую).
      */
     suspend fun onUpdatePack(senderId: String, packet: GroupWire.Packet.UpdatePack) {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return
         if (senderId == myId()) return
         if (!ApkUpdate.isNewer(packet.version, currentAppVersion())) return
         if (store.loadSeed()?.version == packet.version) return
@@ -573,6 +577,7 @@ class ApkSeeder @Inject constructor(
      * (собрать APK будет не из чего). По узлу — последнее объявление.
      */
     suspend fun onUpdatePatchPack(senderId: String, packet: GroupWire.Packet.UpdatePatchPack) {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return
         if (senderId == myId()) return
         val current = ApkUpdate.normalize(currentAppVersion())
         if (!ApkUpdate.isSame(packet.fromVersion, current)) return
@@ -604,6 +609,7 @@ class ApkSeeder @Inject constructor(
     /** «Нет этой версии» (`upnone`): вычёркиваю сида, спрашиваю следующего.
      *  Раунд 133: тем же пакетом сид отказывает и в патче (версия «до»). */
     suspend fun onUpdateNone(senderId: String, packet: GroupWire.Packet.UpdateNone) {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return
         val pp = patchPending
         if (pp != null && pp.toVersion == packet.version && pp.sha256 == packet.sha256) {
             if (senderId == pp.askedSeed || senderId in pp.tried) {
@@ -627,6 +633,7 @@ class ApkSeeder @Inject constructor(
      * обычный веер объявлений он уже получает по расписанию).
      */
     suspend fun onUpdateAsk(senderId: String, packet: GroupWire.Packet.UpdateAsk) {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return
         val info = store.loadSeed()
         val patchInfo = store.loadPatchSeed()
         // Раунд 133: патч отвечает РОВНО на версию спрашивающего — она «от».
@@ -665,6 +672,7 @@ class ApkSeeder @Inject constructor(
      * в настройках обновится сама). Возвращает, сколько узлов опрашено.
      */
     suspend fun askNeighbors(): Int {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return 0
         val version = ApkUpdate.normalize(currentAppVersion())
         if (ApkUpdate.parseVersion(version) == null) return 0
         val targets = com.vladimir.messenger.data.RustBridge.liveSwarmPeerIds().take(8)
@@ -708,6 +716,7 @@ class ApkSeeder @Inject constructor(
      * проскочили до записи `pending`.
      */
     suspend fun requestUpdate(nodeId: String): Boolean {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return false
         mutex.withLock {
             if (pending != null || patchPending != null || _download.value != null) return true
             val offer = _offers.value.firstOrNull { it.nodeId == nodeId } ?: return false
@@ -722,6 +731,7 @@ class ApkSeeder @Inject constructor(
 
     /** Начать качать ПАТЧ, который раздаёт узел [nodeId] (карточка «компактно»). */
     suspend fun requestPatchUpdate(nodeId: String) {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return
         val offer = _patchOffers.value.firstOrNull { it.nodeId == nodeId } ?: return
         val seeds = _patchOffers.value
             .filter { it.toVersion == offer.toVersion && it.patchSha256 == offer.patchSha256 }
@@ -737,6 +747,7 @@ class ApkSeeder @Inject constructor(
      * Вызывается из хука `onOfferAccepted` маршрутизатора.
      */
     suspend fun onSeedJoined(chatId: String, seedId: String, fileSha256: String, seedCount: Int) {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return
         if (chatId != ApkUpdate.CHAT_ID) return
         // Раунд 133: полосы собираются и из патча (маленького, но тоже со всех).
         val pp = patchPending
@@ -803,6 +814,7 @@ class ApkSeeder @Inject constructor(
      * отклоняется (CANCEL).
      */
     suspend fun routeApkOffer(senderId: String, fileSha256: String): FileTransferReceiver.OfferRouting {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return FileTransferReceiver.OfferRouting.Unknown
         // Раунд 133: в apkseed ходят и патчи — предложение патча принимаем,
         // только если я сам его запрашивал (patchPending).
         val wanted = pending?.sha256 == fileSha256 ||
@@ -823,6 +835,7 @@ class ApkSeeder @Inject constructor(
      * Возвращает true: строку в личный чат писать не нужно.
      */
     suspend fun onFileReceived(chatId: String, senderId: String, fileSha256: String): Boolean {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return chatId == ApkUpdate.CHAT_ID
         if (chatId != ApkUpdate.CHAT_ID) return false
         // Раунд 133: получен ПАТЧ (а не целый APK) — собрать, сверить, раздать.
         if (patchPending?.sha256 == fileSha256) {
@@ -861,6 +874,7 @@ class ApkSeeder @Inject constructor(
      * Копии нет — честно очищаем (файл можно отметить заново).
      */
     suspend fun maybeAutoReseed() {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return
         val info = store.loadSeed() ?: return
         if (!info.autoReseed) return
         if (!ApkUpdate.isSame(info.version, currentAppVersion())) return
@@ -907,6 +921,7 @@ class ApkSeeder @Inject constructor(
     }.getOrDefault(false)
 
     suspend fun ensureSelfSeeding(): Unit = selfSeedMutex.withLock {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return@withLock
         if (store.loadAutoSeedOptOut()) return@withLock
         val current = ApkUpdate.normalize(currentAppVersion())
         if (ApkUpdate.parseVersion(current) == null) return@withLock
@@ -1009,6 +1024,7 @@ class ApkSeeder @Inject constructor(
      * умирала молча).
      */
     suspend fun installReady(): String {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return "APK updates are managed by the store"
         val readyInfo = _ready.value ?: return "Обновление уже установлено — карточка устарела"
         if (installPermissionMissing()) return INSTALL_PERMISSION_HINT
         // Файл обновления: принятая копия (строка INCOMING/COMPLETE) или
@@ -1075,6 +1091,7 @@ class ApkSeeder @Inject constructor(
     // ── Помпа (файловый цикл, 20 с) ─────────────────────────────────────────
 
     suspend fun pump() {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return
         if (!RustBridge.isRunning()) return
         runCatching { ensureInit() }.onFailure { Log.w(TAG, "init failed: ${it.message}") }
         val now = System.currentTimeMillis()
@@ -1098,6 +1115,7 @@ class ApkSeeder @Inject constructor(
 
     /** Узел появился в сети: если он сид моей просьбы — спрашиваю сразу. */
     suspend fun onPeerOnline(nodeId: String) {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return
         val pp = patchPending
         if (pp != null && nodeId in knownPatchSeedsFor(pp) &&
             System.currentTimeMillis() - pp.askedAtMs > PRESENCE_REASK_MIN_MS

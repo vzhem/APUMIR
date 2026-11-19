@@ -205,6 +205,7 @@ class MainActivity : ComponentActivity() {
      * 60 запросов/час), закрытая «Позже» версия в этой сессии не надоедает.
      */
     private fun maybeCheckForUpdates() {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return
         if (startupUpdateJob?.isActive == true || updateCheckJob?.isActive == true) return
         val now = System.currentTimeMillis()
         if (now - lastUpdateCheckAtMs < resumeUpdateCheckIntervalMs) return
@@ -219,6 +220,7 @@ class MainActivity : ComponentActivity() {
      * Теперь ждём сигнал готовности (ограниченно, без опроса в цикле).
      */
     private fun startUpdateCheckAfterCoreReady(trigger: String = "startup") {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return
         if (startupUpdateJob?.isActive == true || updateCheckJob?.isActive == true) return
         startupUpdateJob = lifecycleScope.launch {
             val startedAt = android.os.SystemClock.elapsedRealtime()
@@ -239,6 +241,7 @@ class MainActivity : ComponentActivity() {
 
     /** Разрешение выдали после первой проверки: сохранённая карточка не теряется. */
     private fun retryUpdateNotificationAfterPermission() {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return
         val entryPoint = EntryPointAccessors.fromApplication(
             applicationContext,
             MainActivityEntryPoint::class.java,
@@ -330,6 +333,7 @@ class MainActivity : ComponentActivity() {
      * в раздел обновлений, а параллельно запускаем ручную проверку сайта.
      */
     private fun handleUpdateNotificationTap(intent: Intent?) {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return
         if (intent?.getBooleanExtra(UpdateNotifier.EXTRA_OPEN_UPDATE, false) != true) return
         runCatching { intent.removeExtra(UpdateNotifier.EXTRA_OPEN_UPDATE) }
         val entryPoint = EntryPointAccessors.fromApplication(

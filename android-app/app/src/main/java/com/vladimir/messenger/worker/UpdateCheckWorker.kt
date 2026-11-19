@@ -26,6 +26,7 @@ class UpdateCheckWorker @AssistedInject constructor(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return Result.success()
         val currentVersion = runCatching {
             applicationContext.packageManager
                 .getPackageInfo(applicationContext.packageName, 0)

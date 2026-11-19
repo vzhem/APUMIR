@@ -764,6 +764,21 @@ private fun SettingsTabContent(
 ) {
     // Диалог «Сеть сообщений» и буфер обмена для «Скопировать» в нём —
     // локальные для этого экрана.
+    var showPrivacyPolicy by rememberSaveable { mutableStateOf(false) }
+    if (showPrivacyPolicy) {
+        AlertDialog(
+            onDismissRequest = { showPrivacyPolicy = false },
+            title = { Text(stringResource(R.string.settings_privacy_policy)) },
+            text = {
+                androidx.compose.foundation.lazy.LazyColumn {
+                    item { Text(stringResource(R.string.settings_privacy_policy_body)) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPrivacyPolicy = false }) { Text(stringResource(android.R.string.ok)) }
+            },
+        )
+    }
     var showMqttDialog by remember { mutableStateOf(false) }
     // Безопасный отчёт о сети, ядре и передачах: сводка для человека плюс
     // текст, который копируют целиком (TransferDiagnostics.collect).
@@ -922,12 +937,20 @@ private fun SettingsTabContent(
                             trailingContent = { Icon(Icons.Default.ChevronRight, null) },
                         )
                         SettingsItem(
-                            icon = Icons.Default.Update,
-                            title = stringResource(R.string.settings_nav_updates),
-                            subtitle = stringResource(R.string.settings_nav_updates_hint),
-                            onClick = { onSectionChange(SettingsSection.Updates) },
+                            icon = Icons.Default.Help,
+                            title = stringResource(R.string.settings_privacy_policy),
+                            onClick = { showPrivacyPolicy = true },
                             trailingContent = { Icon(Icons.Default.ChevronRight, null) },
                         )
+                        if (com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) {
+                            SettingsItem(
+                                icon = Icons.Default.Update,
+                                title = stringResource(R.string.settings_nav_updates),
+                                subtitle = stringResource(R.string.settings_nav_updates_hint),
+                                onClick = { onSectionChange(SettingsSection.Updates) },
+                                trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+                            )
+                        }
                         SettingsItem(
                             icon = Icons.Default.Extension,
                             title = stringResource(R.string.settings_nav_features),
