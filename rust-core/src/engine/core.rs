@@ -4395,22 +4395,42 @@ impl P2PCore {
                     }
                 };
                 if publish_shared {
-                    if presence_mode == PresenceMode::Scoped {
-                        presence_scope.mark_beacon(now_ms);
-                    }
-                    if let Err(e) = transport
+                    // Отметку маяка ставим ТОЛЬКО после успешной публикации.
+                    // Владелец 2026-11-18 (CUBOT KINGKONG 9): «сейчас в сети:
+                    // 0 из 0» при живом брокере и восьми известных соседях, а
+                    // в журнале каждую минуту — «presence publish request
+                    // channel timed out». Отметка стояла ДО отправки, поэтому
+                    // таймаут съедал целый интервал: следующий маяк ждал 10
+                    // минут, тогда как окно «в сети» у соседей — 200 с. Нас
+                    // просто не было в общем списке, и всех снимало молчанием.
+                    let published = match transport
                         .publish_presence(&display_name, current_addr.as_deref(), current_is_relay)
                         .await
                     {
-                        tracing::warn!("MQTT: periodic presence request failed: {}", e);
+                        Ok(()) => true,
+                        Err(e) => {
+                            tracing::warn!("MQTT: periodic presence request failed: {}", e);
+                            false
+                        }
+                    };
+                    if published && presence_mode == PresenceMode::Scoped {
+                        presence_scope.mark_beacon(now_ms);
                     }
                     if presence_mode == PresenceMode::Scoped {
-                        tracing::info!(
-                            "PRESENCE K4: shared beacon published (scoped mode, {} known peer(s), own={}, next in {} min)",
-                            known_peers.len(),
-                            presence_scope.own_len(),
-                            BEACON_INTERVAL_MS / 60_000
-                        );
+                        if published {
+                            tracing::info!(
+                                "PRESENCE K4: shared beacon published (scoped mode, {} known peer(s), own={}, next in {} min)",
+                                known_peers.len(),
+                                presence_scope.own_len(),
+                                BEACON_INTERVAL_MS / 60_000
+                            );
+                        } else {
+                            // Не врём в журнале: провал виден как провал, и
+                            // повторим на следующем минутном тике.
+                            tracing::warn!(
+                                "PRESENCE K4: shared beacon NOT published, retrying on the next minute tick"
+                            );
+                        }
                     }
                 }
                 // Себя в общем списке тоже отмечаем. Если наше объявление не
