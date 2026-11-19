@@ -108,7 +108,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Check helper, diagnostics, initial-sync, icon, delivery, UI-return, topic-read and invite contracts
+      - name: Check helper, diagnostics, initial-sync, icon, delivery, UI-return, topic-read, invite and dialog-scroll contracts
         run: |
           python3 scripts/ci/check-online-helper.py
           python3 scripts/ci/check-diagnostics-report.py
@@ -128,6 +128,9 @@ jobs:
           python3 scripts/ci/check-map-opening.py
           python3 scripts/ci/check-topic-read-contract.py
           python3 scripts/ci/check-invite-text.py
+          # Прокрутка внутри прокручивающегося диалога роняет Compose при
+          # открытии окна (падение на «Удалить и модерация…», 2026-11-19).
+          python3 scripts/ci/check-dialog-scroll.py
 
       # A release built from an explicit tag carries the push test gate. The
       # gate is what makes a shipped build ask Firebase for a token and register
