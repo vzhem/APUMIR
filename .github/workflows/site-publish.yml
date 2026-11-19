@@ -8,6 +8,13 @@ name: Publish release to official site
 on:
   release:
     types: [published]
+  # Публикация Latest делает `gh api` с GITHUB_TOKEN, а события от этого
+  # токена НЕ запускают другие workflow — поэтому `release: published` в
+  # одиночку сайт не обновлял никогда. `workflow_run` срабатывает от факта
+  # завершения сборки и не зависит от прав токена.
+  workflow_run:
+    workflows: ["Build Release APK"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       tag:
@@ -37,12 +44,24 @@ jobs:
           EVENT_TAG: ${{ github.event.release.tag_name }}
           INPUT_TAG: ${{ inputs.tag }}
           IS_PRERELEASE: ${{ github.event.release.prerelease }}
+          RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
           set -e
+          # От сборки по тегу head_branch — это сам тег. Веточные прогоны и
+          # неудачные сборки сайт не трогают.
+          RUN_TAG=""
+          case "$RUN_BRANCH" in
+            v[0-9]*) if [ "${RUN_CONCLUSION:-}" = "success" ]; then RUN_TAG="$RUN_BRANCH"; fi ;;
+          esac
           TAG="${EVENT_TAG:-$INPUT_TAG}"
+          if [ -z "$TAG" ]; then TAG="$RUN_TAG"; fi
           if [ -z "$TAG" ]; then
-            echo "::error::Не задан тег релиза"
-            exit 1
+            # Завершилась сборка ветки (не тега) — публиковать нечего.
+            # Это не ошибка: иначе каждый push красил бы публикацию сайта.
+            echo "::notice::Сборка не по тегу — публикация сайта не требуется."
+            echo "SKIP=1" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           echo "TAG=$TAG" >> "$GITHUB_OUTPUT"
           echo "release tag: $TAG (prerelease: ${IS_PRERELEASE:-false})"
