@@ -2109,7 +2109,7 @@ class CoreServerService : Service() {
                 CoreEventLoops.Lane.Main -> RustBridge.pollMainEvent(prefer)
                 CoreEventLoops.Lane.File -> RustBridge.pollFileEvent()
             } },
-            isInteractive = { event: CoreEventFfi -> event.eventType == "message_received" || event.eventType == "delivery_ack" },
+            isInteractive = { event: CoreEventFfi -> MainLanePriority.isInteractive(event.eventType) },
             process = { event -> coreWorkWakeLock.withLock {
                 RuntimeDiagnostics.measure(DiagnosticOperation.CORE_EVENTS) {
                     DeliveryCadence.touch()
