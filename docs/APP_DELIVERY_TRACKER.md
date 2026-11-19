@@ -5184,3 +5184,36 @@ identity. Но тот же разбор показал вторую полови
 необходимости, троттлинг, проверка nonce, очистка, полный путь
 `pidreq/pidres → каталог → prepare_relay`). Suite `identity_exchange` добавлен в
 гейт `build-release.yml`. Прогон CI — по push ветки (без публикации).
+
+### Выпуск v11.74.545 (2026-11-19)
+
+**Содержание.** Единственное изменение против `.544` — получение подписанной
+identity через брокер (раздел выше). Kotlin, ресурсы и uniffi-контракт не
+менялись: `git diff 2c4e39ef 50f29011` не содержит ни одного `.kt`/`.xml`.
+
+**Сборка.** Тег `v11.74.545` на `50f29011`, предок `v11.74.544` — ворота
+происхождения прошли (`Latest stable baseline: v11.74.544`). Run
+`44483901233` — success: `Test online helper routing and direct transport`
+(включая новый suite `identity_exchange`), `Build native core from source
+(all ABIs)`, `Run all JVM unit tests`, APK и подпись. 15 ассетов;
+`app-release.apk` 78 936 101 B, `app-full.apk` 235 248 839 B.
+
+**Публикация.** Release `451052851`, draft/prerelease сняты,
+`make_latest=true` — `/releases/latest` = `v11.74.545`. Важно: одного
+`draft=false` мало, Latest не съезжает сам, нужен отдельный PATCH
+`make_latest`.
+
+**Сайт снова отстал — та же гонка.** Run `44487427007` («Publish release to
+official site») упал на шаге «Require the published Latest release»: событие
+`release: published` приходит раньше, чем переезжает Latest. Перезапуск из
+песочницы невозможен (`gh run rerun` — «cannot be rerun»,
+`gh workflow run` — HTTP 403).
+
+**Другу это не мешает.** Кнопка на сайте идёт через воркер на
+`releases/latest/download/app-release.apk` (`tools/worker/p2p_relay_worker.js`
+строки 1117 и 1525), а Latest уже `.545`. Сайтовая копия подставляется только
+при совпадении версии и SHA-256 (`siteCopyMatches`), поэтому устаревший сайт
+отдаёт воркерную ссылку.
+
+**Осталось за владельцем (одно действие).** Actions → «Publish release to
+official site» → Run workflow → tag `v11.74.545`.
