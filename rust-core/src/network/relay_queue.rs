@@ -565,6 +565,24 @@ pub fn message_kind(message_id: &str, chat_scope: &str, payload: &[u8]) -> Relay
         if uuid::Uuid::parse_str(id).is_ok() { return RelayPayloadKind::ServiceSignal; }
     }
 
+    // Подсказка адреса (`ppres-`) и просьба прислать identity (`pidreq-`) —
+    // служебные кадры, а не переписка. Ядро оборачивает в `ppres-` КАЖДОЕ
+    // исходящее (в том числе `ppres-eph1-…`, `ppres-frag-…`), поэтому без
+    // этого распознавания они попадали в резерв переписки с её семисуточным
+    // TTL и копились там сотнями.
+    //
+    // Отчёт владельца 2026-11-19 (CUBOT KINGKONG X): `своих=332`,
+    // `по-важности=[пробуждение 10, личное 323, прочее 54]` — при том, что
+    // переписки в сессии не было вовсе. 332 из 1000 — это уже треть резерва,
+    // занятая адресами, которые живут минуты. Старейшее-своё при этом 2 ч 33
+    // мин, то есть записи не залёживались бы, будь у них короткий TTL.
+    //
+    // Проверка по префиксу, а не по телу: тела запечатаны, и различать их
+    // шифротекст нельзя (та же причина, что у `eph1-` выше).
+    if message_id.starts_with("ppres-") || message_id.starts_with("pidreq-") {
+        return RelayPayloadKind::ServiceSignal;
+    }
+
     // FileTransferWire uses `f` + 32 lowercase hex bytes of transfer ID + a
     // bounded packet-kind suffix (offer/chunk/ACK/want/cancel/FCAP). Its text
     // is sealed before Rust sees it, even in a normal one-to-one chat scope.
@@ -2619,6 +2637,59 @@ mod tests {
         // Ciphertext hides the prefix; guessing transient would delete chat data.
         assert_eq!(message_kind("ordinary-uuid", "chat-1", b"APUSL1|opaque"),
             RelayPayloadKind::Correspondence);
+    }
+
+    /// Подсказка адреса и просьба об identity — служебные кадры, а не переписка.
+    ///
+    /// Отчёт владельца 2026-11-19 (CUBOT KINGKONG X): `своих=332`,
+    /// `по-важности=[пробуждение 10, личное 323, прочее 54]` при полном
+    /// отсутствии переписки в сессии. Адрес собеседника (`ppres-…`) уходит
+    /// вместе с КАЖДЫМ исходящим, и раньше попадал в резерв переписки с его
+    /// семисуточным TTL. Здесь проверяются настоящие формы ID из logcat:
+    /// `ppres-eph1-…`, `ppres-frag-…`, `ppres-<uuid>` и `pidreq-…`.
+    #[test]
+    fn presence_hint_and_identity_request_are_short_lived_signals() {
+        let sealed = b"APUSEAL1|opaque-random-ciphertext";
+        for id in [
+            "ppres-01234567-89ab-4cde-8123-456789abcdef",
+            "ppres-eph1-01234567-89ab-4cde-8123-456789abcdef",
+            "ppres-frag-957796606066241",
+            "ppres-lan-seek-957796606066241",
+            "ppres-udp-sig-957800085011395",
+            "pidreq-pk_peer",
+        ] {
+            assert_eq!(
+                message_kind(id, "any-chat", sealed),
+                RelayPayloadKind::ServiceSignal,
+                "{id} должен жить минуты, а не семь суток"
+            );
+        }
+        // Переписка при этом остаётся перепиской: обычный ID её не теряет.
+        assert_eq!(
+            message_kind("ordinary-uuid", "chat-1", sealed),
+            RelayPayloadKind::Correspondence
+        );
+    }
+
+    /// Служебные кадры не занимают резерв переписки: 10 своих сообщений
+    /// помещаются, сколько бы подсказок адреса ни легло рядом.
+    #[test]
+    fn presence_hints_do_not_take_the_correspondence_reserve() {
+        let q = RelayQueue::with_all_limits(1000, 1000, 1000, 1000);
+        for n in 0..300 {
+            let id = format!("ppres-eph1-0000000{n}-89ab-4cde-8123-456789abcdef");
+            assert!(q
+                .enqueue_own(RelayMessage::new(
+                    id,
+                    "pk_b".into(),
+                    "pk_origin".into(),
+                    "any-chat".into(),
+                    b"APUSEAL1|opaque".to_vec(),
+                ))
+                .unwrap());
+        }
+        assert_eq!(q.stats().own, 0, "подсказки адреса не должны быть перепиской");
+        assert_eq!(q.stats().own_transients, 300);
     }
 
     #[test]

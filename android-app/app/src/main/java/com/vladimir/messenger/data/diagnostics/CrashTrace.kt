@@ -55,17 +55,31 @@ object CrashTrace {
         }
     }
 
-    /** Секция для отчёта «Логи»; пусто, пока падений не записано. */
+    /**
+     * Секция для отчёта «Логи»; пусто, пока падений не записано.
+     *
+     * Время в заголовке обязательно. Файл переживает обновления: он хранит
+     * след, снятый ещё СТАРОЙ сборкой, и в отчёте без даты выглядел как
+     * свежее падение. Владелец 2026-11-19 прислал отчёт, где
+     * «[последнее падение]» показывало давно исправленный
+     * `libface_detector_v2_jni.so` (лечение — v11.74.489), а в истории
+     * выходов Android за ту сессию были только `package_updated`. Дата
+     * снимает догадки: старое видно сразу.
+     */
     fun report(context: Context): String {
-        val text = runCatching {
-            File(context.applicationContext.filesDir, FILE_NAME).takeIf { it.isFile }?.readText()
-        }.getOrNull()
+        val file = File(context.applicationContext.filesDir, FILE_NAME)
+        val text = runCatching { file.takeIf { it.isFile }?.readText() }.getOrNull()
         if (text.isNullOrBlank()) return ""
         val body = text.lineSequence()
             .map { DiagnosticsPrivacy.clipLogcatLine(DiagnosticsPrivacy.redact(it)) }
             .take(REPORT_LINES)
             .joinToString("\n")
-        return REPORT_HEADER + "\n" + body + "\n"
+        val stamp = runCatching {
+            java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+                .format(java.util.Date(file.lastModified()))
+        }.getOrNull()
+        val header = if (stamp.isNullOrBlank()) REPORT_HEADER else "$REPORT_HEADER (след от $stamp)"
+        return header + "\n" + body + "\n"
     }
 
     private fun write(context: Context, text: String) {
