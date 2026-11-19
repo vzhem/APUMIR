@@ -3,6 +3,7 @@ package com.vladimir.messenger.util
 import com.vladimir.messenger.data.link.ServiceHost
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -69,15 +70,20 @@ class OfficialSiteTest {
     fun `чужая https-ссылка в qr не попадает`() {
         // Экран берёт адрес из нескольких источников; чужой адрес в коде -
         // это утечка человека на посторонний сайт.
+        // Свой код `apu://` в этот список НЕ входит: он не «чужой», а
+        // правильный код контакта - из него и строится адрес сайта.
         for (foreign in listOf(
             "https://example.com/s/AbCdEfGhJk",
             "https://" + ServiceHost.HOST + ".evil.test/s/AbCdEfGhJk",
             "http://" + ServiceHost.HOST + "/s/AbCdEfGhJk",
             "https://t.me/p2p_messenger_relay_bot?start=" + node,
-            contact,
         )) {
             assertFalse(foreign, OfficialSite.isServicePage(foreign))
-            assertEquals(foreign, OfficialSite.URL, OfficialSite.qrLink(foreign, contact))
+            // Чужой адрес в код не попадает: остаётся страница сайта (с кодом
+            // контакта, он-то как раз правильный), а не присланная ссылка.
+            val inQr = OfficialSite.qrLink(foreign, contact)
+            assertTrue(inQr.startsWith(OfficialSite.URL + "/"))
+            assertNotEquals(foreign, inQr)
         }
     }
 
@@ -86,7 +92,8 @@ class OfficialSiteTest {
         // Ничего лишнего в адрес сайта не дописываем: неизвестную запись
         // отбрасываем, отдаём чистый сайт.
         for (bad in listOf("apu://a/", "apu://a/short", "apu://a/$node/x/y", "apu://a/$node/плохой")) {
-            assertEquals(bad, OfficialSite.URL, OfficialSite.qrLink(null, bad))
+            assertEquals("кривой код не должен менять адрес: $bad",
+                OfficialSite.URL, OfficialSite.qrLink(null, bad))
         }
     }
 
