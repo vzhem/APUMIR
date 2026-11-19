@@ -2671,25 +2671,45 @@ mod tests {
         );
     }
 
-    /// Служебные кадры не занимают резерв переписки: 10 своих сообщений
-    /// помещаются, сколько бы подсказок адреса ни легло рядом.
+    /// Подсказки адреса живут в запасе служебного и не занимают резерв
+    /// переписки: обычные сообщения кладутся рядом и не вытесняются ими.
+    ///
+    /// Запас служебного ограничен (`MAX_OWN_TRANSIENT` = 200), поэтому
+    /// подсказок кладём меньше предела — проверяем именно РАЗДЕЛЬНОСТЬ
+    /// резервов, а не поведение переполнения (у него свой тест).
     #[test]
     fn presence_hints_do_not_take_the_correspondence_reserve() {
         let q = RelayQueue::with_all_limits(1000, 1000, 1000, 1000);
-        for n in 0..300 {
-            let id = format!("ppres-eph1-0000000{n}-89ab-4cde-8123-456789abcdef");
-            assert!(q
-                .enqueue_own(RelayMessage::new(
+        for n in 0..150 {
+            let id = format!("ppres-eph1-{n:04}-89ab-4cde-8123-456789abcdef");
+            assert!(
+                q.enqueue_own(RelayMessage::new(
                     id,
                     "pk_b".into(),
                     "pk_origin".into(),
                     "any-chat".into(),
                     b"APUSEAL1|opaque".to_vec(),
                 ))
+                .unwrap(),
+                "подсказка адреса должна приниматься в запас служебного"
+            );
+        }
+        // Настоящая переписка рядом: она идёт в свой резерв.
+        for n in 0..10 {
+            assert!(q
+                .enqueue_own(own_msg(&format!("chat-{n}"), "pk_b"))
                 .unwrap());
         }
-        assert_eq!(q.stats().own, 0, "подсказки адреса не должны быть перепиской");
-        assert_eq!(q.stats().own_transients, 300);
+        assert_eq!(
+            q.stats().own,
+            10,
+            "в резерве переписки должны быть только настоящие сообщения"
+        );
+        assert_eq!(
+            q.stats().own_transients,
+            150,
+            "подсказки адреса живут в запасе служебного"
+        );
     }
 
     #[test]
