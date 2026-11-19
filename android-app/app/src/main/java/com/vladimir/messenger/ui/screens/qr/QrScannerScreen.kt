@@ -241,15 +241,20 @@ private fun MyCodePane() {
     val maybeLink = remember { OwnInvite.link(context) }
     val displayName = remember { OwnInvite.displayName(context) }
     val username = remember { OwnInvite.username(context) }
-    // Раунд 208: QR несёт УНИВЕРСАЛЬНУЮ https-ссылку (короткую с нашего
-    // сервиса). У кого APU уже стоит - Android откроет приложение сразу
-    // на добавлении контакта; у кого нет - откроется страница сервиса с
-    // кнопкой установки: скачает APU по этому же коду (владелец).
-    // Пока сервис не ответил (или ответил отказом) - прежний apu:// код.
-    var qrLink by remember { mutableStateOf<String?>(null) }
+    // QR несёт ТОЛЬКО https-адрес: камера телефона без APU собственный код
+    // приложения (`apu://a/…`) не открывает вообще, а экран обещал по нему
+    // скачивание. Пока сервис не ответил - в коде сразу официальный сайт с
+    // кодом контакта в параметре, а не мёртвая для камеры схема.
+    // Что именно положить в код, решает OfficialSite.qrLink (владелец
+    // 2026-11-19: «показываешь другу лично»).
+    //
+    // Стартовое значение считается сразу, без ожидания сети: иначе на первом
+    // кадре экран показывал бы «код не готов» вместо сайта.
+    var qrLink by remember(maybeLink) {
+        mutableStateOf(com.vladimir.messenger.util.OfficialSite.qrLink(null, maybeLink))
+    }
     androidx.compose.runtime.LaunchedEffect(maybeLink) {
         val own = maybeLink ?: return@LaunchedEffect
-        qrLink = own
         val short = withContext(Dispatchers.IO) {
             runCatching {
                 dagger.hilt.android.EntryPointAccessors.fromApplication(
@@ -258,9 +263,9 @@ private fun MyCodePane() {
                 ).linkShortener().shorten(own)
             }.getOrNull()
         }
-        if (!short.isNullOrBlank()) qrLink = short
+        qrLink = com.vladimir.messenger.util.OfficialSite.qrLink(short, own)
     }
-    val bitmap = remember(qrLink) { qrLink?.let { QrCodeGenerator.generateQrCode(it) } }
+    val bitmap = remember(qrLink) { QrCodeGenerator.generateQrCode(qrLink) }
 
     Column(
         modifier = Modifier
@@ -270,7 +275,7 @@ private fun MyCodePane() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (maybeLink == null || bitmap == null) {
+        if (bitmap == null) {
             ApuBubble {
                 Text(
                     stringResource(R.string.qr_not_ready),
@@ -282,7 +287,12 @@ private fun MyCodePane() {
 
         // Код на белом поле и во всю ширину: чем крупнее модули, тем быстрее
         // его ловит камера другого телефона.
-        val link = qrLink ?: maybeLink
+        // В QR - всегда https (сайт либо страница сервиса). «Копировать» и
+        // «Поделиться» отдают свой код `apu://a/…`, если сервис не ответил:
+        // его понимает поле добавления контакта, а ShortShare сам укоротит
+        // его для чужих мессенджеров.
+        val link = qrLink.takeIf { com.vladimir.messenger.util.OfficialSite.isServicePage(it) }
+            ?: maybeLink.orEmpty()
 
         Image(
             bitmap = bitmap.asImageBitmap(),

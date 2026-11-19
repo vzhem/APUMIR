@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.link.LinkShortener
 import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import com.vladimir.messenger.service.BotApi
+import com.vladimir.messenger.util.OfficialSite
 import com.vladimir.messenger.util.OwnInvite
 import com.vladimir.messenger.util.ReferralInviteLink
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -26,6 +27,11 @@ data class ShareProfileUiState(
     val shareLink: String = "",
     val legacyLink: String = "",
     val alternativeLink: String = "",
+    // Что кладём в QR. Только https: камера телефона без APU собственный
+    // код приложения (`apu://a/…`) не открывает вообще, а у человека без
+    // APU должен открыться сайт со скачиванием (владелец 2026-11-19:
+    // «показываешь другу лично»). Считается в OfficialSite.qrLink.
+    val qrLink: String = "",
     // Раунд 157: APK отдаёт наш воркер (/update/apk - поток последнего
     // релиза), ссылка на GitHub (vzhem) больше не показывается. Хост -
     // рабочий воркер (apumir.app не наш, владелец).
@@ -85,6 +91,10 @@ class ShareProfileViewModel @Inject constructor(
                     shareLink = chosenLink,
                     legacyLink = legacyLink,
                     alternativeLink = alternativeLink,
+                    // QR показывает сайт, пока сервис коротких ссылок не
+                    // ответил: он откроется у любого телефона, в том числе
+                    // там, где APU ещё нет.
+                    qrLink = OfficialSite.qrLink(null, legacyLink),
                     // Правда о той ссылке, которая реально показана: токен может
                     // лежать и в HTTPS-форме, и в параметре r= обычной ссылки.
                     isSignedReferral = signedLink != null ||
@@ -98,7 +108,18 @@ class ShareProfileViewModel @Inject constructor(
             // а адрес узла в ней не виден. Экран уже показан, ответа сервиса
             // ждём в фоне; сервис молчит - остаётся прежняя t.me-ссылка.
             val short = runCatching { linkShortener.shorten(legacyLink) }.getOrNull()
-            if (short != null) _uiState.update { it.copy(alternativeLink = short) }
+            if (short != null) {
+                _uiState.update {
+                    it.copy(
+                        alternativeLink = short,
+                        // Ответ сервиса проверен по его же алгоритму
+                        // (LinkShortener.matchesWorkerCode), значит страница
+                        // /s/<код> существует - она лучше сайта: у кого APU
+                        // стоит, Android откроет приложение сразу на контакте.
+                        qrLink = OfficialSite.qrLink(short, legacyLink),
+                    )
+                }
+            }
         }
     }
 
