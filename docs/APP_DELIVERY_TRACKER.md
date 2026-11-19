@@ -5278,8 +5278,16 @@ release» падал на первой же проверке — сайт ост
   проверяет фактический `/releases/latest`; отдельный шаг запускает
   публикацию сайта по факту.
 
-**Проверки без компилятора (в песочнице его нет).** YAML разобран
-`yaml.safe_load`; логика ворот прогнана на шести подставных ответах GitHub;
-`GroupEditRetry` — на 13 сценариях; сигнатуры теста сверены с реализацией;
-`check-god-files.py` и `check-docs-index.py` — зелёные. Настоящая компиляция
-Kotlin и прогон JUnit — в CI этого выпуска.
+**Проверки.** В песочнице нет ни JDK, ни Rust — компилятор только в CI.
+Первый прогон дал настоящую ошибку Kotlin, которую статикой не поймать:
+`GroupEditResend.kt:56 Modifier 'companion' is not applicable inside
+'standalone object'`. Константа перенесена в тело `object` (коммит
+`5cf72e0`). Второй прогон на `5cf72e0` — все зелёные:
+
+- `Unit tests (JVM)` — success (включая новый `GroupEditRetryTest`);
+- `Build Release APK` — success: Kotlin и Rust-ядро собрались, APK подписан;
+- `Android storage and navigation tests`, `Remote push prototype tests`,
+  `Firebase Android configuration preflight` — success.
+
+Отдельно: аннотации check-runs (`gh api .../check-runs/<id>/annotations`)
+из песочницы читаются — в отличие от логов. Дальше ошибки CI смотреть там.
