@@ -916,6 +916,26 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -943,7 +963,13 @@ internal interface UniffiLib : Library {
     ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_await_events(`ptr`: Pointer,`timeoutMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_await_file_event(`ptr`: Pointer,`timeoutMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_await_main_event(`ptr`: Pointer,`timeoutMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_configure_online_helper(`ptr`: Pointer,`enabled`: Byte,`maxRoutes`: Int,`maxBytesPerMinute`: Int,`maxRelaysPerMinute`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_confirm_message_delivered(`ptr`: Pointer,`messageId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_connect_via_invite(`ptr`: Pointer,`link`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
@@ -987,13 +1013,21 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_method_p2pcorehandle_offer_file_chunk_for_custody(`ptr`: Pointer,`recipientId`: RustBuffer.ByValue,`transferIdHex`: RustBuffer.ByValue,`chunkIndex`: Long,`chunkOffset`: Int,`ciphertextChunkLen`: Int,`ciphertextRange`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_on_foreground_recovery(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_on_network_available(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_p2p_core_fn_method_p2pcorehandle_on_network_lost(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_own_relay_message_ids(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_method_p2pcorehandle_pending_events(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
     fun uniffi_p2p_core_fn_method_p2pcorehandle_poll_event(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_poll_file_event(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_poll_main_event(`ptr`: Pointer,`preferInteractive`: Byte,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_method_p2pcorehandle_probe_own_broker(`ptr`: Pointer,`hostPort`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
@@ -1071,6 +1105,8 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_decrypt_file_transfer_chunk(`manifestBytes`: RustBuffer.ByValue,`fileKey`: RustBuffer.ByValue,`chunkIndex`: Long,`ciphertext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_derive_push_wake_material(`localBinding`: RustBuffer.ByValue,`pinnedPeerBinding`: RustBuffer.ByValue,`localExchangeSecret`: RustBuffer.ByValue,`epoch`: RustBuffer.ByValue,`localIsSender`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_device_public_key_from_seed(`seed`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_encrypt_file_transfer_chunk(`manifestBytes`: RustBuffer.ByValue,`fileKey`: RustBuffer.ByValue,`chunkIndex`: Long,`plaintext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1131,6 +1167,10 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_p2p_core_fn_func_set_mqtt_socks5_proxy(`host`: RustBuffer.ByValue,`port`: Short,`username`: RustBuffer.ByValue,`password`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_p2p_core_fn_func_sign_push_mailbox_access(`localBinding`: RustBuffer.ByValue,`capability`: RustBuffer.ByValue,`device`: RustBuffer.ByValue,`issuedAtSeconds`: Long,`after`: RustBuffer.ByValue,`items`: RustBuffer.ByValue,`acknowledge`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_sign_push_wake_registration(`localBinding`: RustBuffer.ByValue,`capability`: RustBuffer.ByValue,`device`: RustBuffer.ByValue,`sequence`: Long,`issuedAtSeconds`: Long,`token`: RustBuffer.ByValue,`revoke`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_verified_referral_inviter_node_id(`token`: RustBuffer.ByValue,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_verify_device_certificate_bytes(`cert`: RustBuffer.ByValue,`pinnedAccountPublicKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1287,6 +1327,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_func_decrypt_file_transfer_chunk(
     ): Short
+    fun uniffi_p2p_core_checksum_func_derive_push_wake_material(
+    ): Short
     fun uniffi_p2p_core_checksum_func_device_public_key_from_seed(
     ): Short
     fun uniffi_p2p_core_checksum_func_encrypt_file_transfer_chunk(
@@ -1347,6 +1389,10 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_func_set_mqtt_socks5_proxy(
     ): Short
+    fun uniffi_p2p_core_checksum_func_sign_push_mailbox_access(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_sign_push_wake_registration(
+    ): Short
     fun uniffi_p2p_core_checksum_func_verified_referral_inviter_node_id(
     ): Short
     fun uniffi_p2p_core_checksum_func_verify_device_certificate_bytes(
@@ -1361,7 +1407,13 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_await_events(
     ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_await_file_event(
+    ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_await_main_event(
+    ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_configure_online_helper(
+    ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_confirm_message_delivered(
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_connect_via_invite(
     ): Short
@@ -1405,13 +1457,21 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_offer_file_chunk_for_custody(
     ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_on_foreground_recovery(
+    ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_on_network_available(
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_on_network_lost(
     ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_own_relay_message_ids(
+    ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_pending_events(
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_poll_event(
+    ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_poll_file_event(
+    ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_poll_main_event(
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_probe_own_broker(
     ): Short
@@ -1523,6 +1583,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_func_decrypt_file_transfer_chunk() != 10425.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_func_derive_push_wake_material() != 30597.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_func_device_public_key_from_seed() != 61870.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1613,6 +1676,12 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_func_set_mqtt_socks5_proxy() != 58761.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_func_sign_push_mailbox_access() != 7896.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_sign_push_wake_registration() != 18732.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_func_verified_referral_inviter_node_id() != 59487.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1634,7 +1703,16 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_await_events() != 51170.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_await_file_event() != 41467.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_await_main_event() != 40437.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_configure_online_helper() != 7151.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_confirm_message_delivered() != 27477.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_connect_via_invite() != 5714.toShort()) {
@@ -1700,16 +1778,28 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_offer_file_chunk_for_custody() != 56053.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_on_foreground_recovery() != 24738.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_on_network_available() != 60050.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_on_network_lost() != 23035.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_own_relay_message_ids() != 32881.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_pending_events() != 20402.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_poll_event() != 30692.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_poll_file_event() != 52421.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_poll_main_event() != 19448.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_probe_own_broker() != 50310.toShort()) {
@@ -2227,7 +2317,13 @@ public interface P2pCoreHandleInterface {
     
     fun `awaitEvents`(`timeoutMs`: kotlin.ULong): kotlin.ULong
     
+    fun `awaitFileEvent`(`timeoutMs`: kotlin.ULong): kotlin.Boolean
+    
+    fun `awaitMainEvent`(`timeoutMs`: kotlin.ULong): kotlin.Boolean
+    
     fun `configureOnlineHelper`(`enabled`: kotlin.Boolean, `maxRoutes`: kotlin.UInt, `maxBytesPerMinute`: kotlin.UInt, `maxRelaysPerMinute`: kotlin.UInt): kotlin.Boolean
+    
+    fun `confirmMessageDelivered`(`messageId`: kotlin.String): kotlin.Boolean
     
     fun `connectViaInvite`(`link`: kotlin.String): kotlin.Boolean
     
@@ -2271,13 +2367,21 @@ public interface P2pCoreHandleInterface {
     
     fun `offerFileChunkForCustody`(`recipientId`: kotlin.String, `transferIdHex`: kotlin.String, `chunkIndex`: kotlin.Long, `chunkOffset`: kotlin.UInt, `ciphertextChunkLen`: kotlin.UInt, `ciphertextRange`: kotlin.ByteArray): kotlin.Boolean
     
+    fun `onForegroundRecovery`(): kotlin.Boolean
+    
     fun `onNetworkAvailable`()
     
     fun `onNetworkLost`()
     
+    fun `ownRelayMessageIds`(): List<kotlin.String>
+    
     fun `pendingEvents`(): kotlin.ULong
     
     fun `pollEvent`(): CoreEventFfi?
+    
+    fun `pollFileEvent`(): CoreEventFfi?
+    
+    fun `pollMainEvent`(`preferInteractive`: kotlin.Boolean): CoreEventFfi?
     
     fun `probeOwnBroker`(`hostPort`: kotlin.String): kotlin.Boolean
     
@@ -2429,12 +2533,48 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     
 
+    override fun `awaitFileEvent`(`timeoutMs`: kotlin.ULong): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_await_file_event(
+        it, FfiConverterULong.lower(`timeoutMs`),_status)
+}
+    }
+    )
+    }
+    
+
+    override fun `awaitMainEvent`(`timeoutMs`: kotlin.ULong): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_await_main_event(
+        it, FfiConverterULong.lower(`timeoutMs`),_status)
+}
+    }
+    )
+    }
+    
+
     override fun `configureOnlineHelper`(`enabled`: kotlin.Boolean, `maxRoutes`: kotlin.UInt, `maxBytesPerMinute`: kotlin.UInt, `maxRelaysPerMinute`: kotlin.UInt): kotlin.Boolean {
             return FfiConverterBoolean.lift(
     callWithPointer {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_configure_online_helper(
         it, FfiConverterBoolean.lower(`enabled`),FfiConverterUInt.lower(`maxRoutes`),FfiConverterUInt.lower(`maxBytesPerMinute`),FfiConverterUInt.lower(`maxRelaysPerMinute`),_status)
+}
+    }
+    )
+    }
+    
+
+    override fun `confirmMessageDelivered`(`messageId`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_confirm_message_delivered(
+        it, FfiConverterString.lower(`messageId`),_status)
 }
     }
     )
@@ -2693,6 +2833,18 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     
 
+    override fun `onForegroundRecovery`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_on_foreground_recovery(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
     override fun `onNetworkAvailable`()
         = 
     callWithPointer {
@@ -2715,6 +2867,18 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     
     
 
+    override fun `ownRelayMessageIds`(): List<kotlin.String> {
+            return FfiConverterSequenceString.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_own_relay_message_ids(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
     override fun `pendingEvents`(): kotlin.ULong {
             return FfiConverterULong.lift(
     callWithPointer {
@@ -2733,6 +2897,30 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_poll_event(
         it, _status)
+}
+    }
+    )
+    }
+    
+
+    override fun `pollFileEvent`(): CoreEventFfi? {
+            return FfiConverterOptionalTypeCoreEventFfi.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_poll_file_event(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    override fun `pollMainEvent`(`preferInteractive`: kotlin.Boolean): CoreEventFfi? {
+            return FfiConverterOptionalTypeCoreEventFfi.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_poll_main_event(
+        it, FfiConverterBoolean.lower(`preferInteractive`),_status)
 }
     }
     )
@@ -4016,6 +4204,16 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
     }
     
 
+    @Throws(CoreException::class) fun `derivePushWakeMaterial`(`localBinding`: kotlin.ByteArray, `pinnedPeerBinding`: kotlin.ByteArray, `localExchangeSecret`: kotlin.ByteArray, `epoch`: kotlin.ByteArray, `localIsSender`: kotlin.Boolean): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_derive_push_wake_material(
+        FfiConverterByteArray.lower(`localBinding`),FfiConverterByteArray.lower(`pinnedPeerBinding`),FfiConverterByteArray.lower(`localExchangeSecret`),FfiConverterByteArray.lower(`epoch`),FfiConverterBoolean.lower(`localIsSender`),_status)
+}
+    )
+    }
+    
+
     @Throws(CoreException::class) fun `devicePublicKeyFromSeed`(`seed`: kotlin.ByteArray): kotlin.ByteArray {
             return FfiConverterByteArray.lift(
     uniffiRustCallWithError(CoreException) { _status ->
@@ -4295,6 +4493,26 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
         FfiConverterString.lower(`host`),FfiConverterUShort.lower(`port`),FfiConverterString.lower(`username`),FfiConverterString.lower(`password`),_status)
 }
     
+    
+
+    @Throws(CoreException::class) fun `signPushMailboxAccess`(`localBinding`: kotlin.ByteArray, `capability`: kotlin.ByteArray, `device`: kotlin.ByteArray, `issuedAtSeconds`: kotlin.ULong, `after`: kotlin.ByteArray, `items`: kotlin.ByteArray, `acknowledge`: kotlin.Boolean): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_sign_push_mailbox_access(
+        FfiConverterByteArray.lower(`localBinding`),FfiConverterByteArray.lower(`capability`),FfiConverterByteArray.lower(`device`),FfiConverterULong.lower(`issuedAtSeconds`),FfiConverterByteArray.lower(`after`),FfiConverterByteArray.lower(`items`),FfiConverterBoolean.lower(`acknowledge`),_status)
+}
+    )
+    }
+    
+
+    @Throws(CoreException::class) fun `signPushWakeRegistration`(`localBinding`: kotlin.ByteArray, `capability`: kotlin.ByteArray, `device`: kotlin.ByteArray, `sequence`: kotlin.ULong, `issuedAtSeconds`: kotlin.ULong, `token`: kotlin.ByteArray, `revoke`: kotlin.Boolean): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_sign_push_wake_registration(
+        FfiConverterByteArray.lower(`localBinding`),FfiConverterByteArray.lower(`capability`),FfiConverterByteArray.lower(`device`),FfiConverterULong.lower(`sequence`),FfiConverterULong.lower(`issuedAtSeconds`),FfiConverterByteArray.lower(`token`),FfiConverterBoolean.lower(`revoke`),_status)
+}
+    )
+    }
     
 
     @Throws(CoreException::class) fun `verifiedReferralInviterNodeId`(`token`: kotlin.ByteArray, `nowMs`: kotlin.Long): kotlin.String {
