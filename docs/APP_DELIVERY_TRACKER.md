@@ -5428,3 +5428,38 @@ Relay-очередь: своих=332 сигналов=55 чужих=3973 все�
 CI на `0132b9f`: `Unit tests (JVM)`, `Build Release APK` (Rust-гейт + Kotlin +
 подпись), `Android storage and navigation tests`, `Remote push prototype tests`,
 `Firebase preflight` — успешно.
+
+### Найденная причина пустого тела релизов и стоящего сайта
+
+`.543`, `.544`, `.545` ушли с пустым телом, а сайт остался на `.542` — два
+независимых дефекта в публикации.
+
+**1. Черновик недоступен по тегу.** Шаг «Publish release and mark it Latest»
+делал `PATCH repos/{repo}/releases/tags/{tag}`. GitHub отвечает **404** на
+`/releases/tags/<tag>`, если релиз ещё черновик: проверено на `v11.74.546` —
+`/releases/tags/v11.74.546` → 404, а `/releases/451311522` → 200. Шаг падал, но
+стоял с `continue-on-error: true`, поэтому прогон был **зелёным**, Latest не
+переезжал, а заметки (`body_path`) не попадали в релиз — так и получилось
+пустое тело у трёх выпусков.
+
+Исправление: id черновика ищется по списку релизов (он включает черновики),
+`continue-on-error` с публикации снят — сбой публикации Latest теперь краснит
+сборку, а не притворяется успехом.
+
+**2. `site-release.json` никто не создавал.** Три скрипта публикации
+(`site_staged_upload.py:325`, `site_verify_http.py:96`,
+`site_compare_snapshots.py:112`) читают метаданные релиза из этого файла, но ни
+один шаг `site-publish.yml` его не писал. С `.543` загрузка падала на
+`FileNotFoundError` — сайт оставался на `.542`. Добавлен шаг «Write release
+metadata for the publication scripts»: берёт `releases/tags/<tag>` через `gh`,
+проверяет `tag_name` и размер (< 1 МБ), кладёт файл рядом с `site-files/`.
+
+**Проверки:** `test_site_staged_upload.py` — 41 тест, OK;
+`check-site-publishing.py`, `check-docs-index`, `check-god-files`,
+`check-dialog-scroll`, `check-camera-crash`, `check-feature-packs` — зелёные.
+
+**Состояние выпуска.** `v11.74.546` опубликован: сборка `44520771944` прошла
+все шаги (Rust-гейт с новыми тестами, Kotlin, подпись, 15 ассетов), черновик
+снят, Latest переведён на `.546` (`gh release edit v11.74.546 --latest`).
+Тело релиза — заметки `.546`. Публикация сайта с исправлением уйдёт следующим
+прогоном.

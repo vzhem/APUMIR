@@ -126,6 +126,41 @@ jobs:
               )
           PY
 
+      # Метаданные релиза рядом с его файлами. Их читают все три скрипта
+      # публикации (проверка Latest, загрузка и HTTP-сверка), но НИ ОДИН шаг
+      # их не создавал: с v11.74.543 публикация падала на
+      # `FileNotFoundError: site-release.json`, сайт оставался на .542,
+      # а сборка при этом выглядела зелёной.
+      - name: Write release metadata for the publication scripts
+        if: steps.tag.outputs.SKIP != '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APU_RELEASE_TAG: ${{ steps.tag.outputs.TAG }}
+        run: |
+          set -e
+          PYTHONPATH=scripts/release python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          from site_release_files import MAX_METADATA_BYTES
+
+          tag = os.environ["APU_RELEASE_TAG"]
+          repository = os.environ["GITHUB_REPOSITORY"]
+          raw = subprocess.run(
+              ["gh", "api", f"repos/{repository}/releases/tags/{tag}"],
+              check=True, capture_output=True,
+          ).stdout
+          if len(raw) > MAX_METADATA_BYTES:
+              raise SystemExit("release metadata too large")
+          release = json.loads(raw)
+          if release.get("tag_name") != tag:
+              raise SystemExit(f"release metadata is for {release.get('tag_name')!r}, not {tag!r}")
+          payload = json.dumps(release, ensure_ascii=False, indent=2)
+          Path("site-release.json").write_text(payload + "\n", encoding="utf-8")
+          assets = release.get("assets") or []
+          print(f"site-release.json: {tag}, {len(assets)} ассетов")
+          PY
+          test -s site-release.json
+
       - name: Download release assets
         if: steps.tag.outputs.SKIP != '1'
         env:

@@ -718,11 +718,12 @@ jobs:
       # публикацию сайта. Плюс явный запуск публикации по факту успеха:
       # даже если событие published потеряется, сайт не останется старым.
       #
-      # continue-on-error: публикация не должна «красить» сборку APK, которая
-      # уже выложила файлы. Состояние Latest и сайта видно отдельными прогонами.
+      # Без continue-on-error: именно он превращал прошлые сбои публикации в
+      # зелёные прогоны (v11.74.543/.544/.545 ушли с пустым телом и не стали
+      # Latest). Публикация Latest — часть успеха сборки, а не «пожелание»:
+      # молчаливый сбой здесь означает, что сайт отдаёт старый выпуск.
       - name: Publish release and mark it Latest
         if: success() && github.ref_type == 'tag'
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.get_version.outputs.VERSION }}
@@ -731,9 +732,20 @@ jobs:
           # Черновик уже создан предыдущим шагом. Снимаем draft/prerelease и
           # сразу ставим Latest одним вызовом, чтобы между этими состояниями
           # не было окна, в котором сайт видит старый Latest.
-          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+          #
+          # ВАЖНО: черновик НЕДОСТУПЕН по `/releases/tags/<tag>` — GitHub
+          # отвечает 404 на черновики этим путём (проверено на v11.74.546:
+          # `/releases/tags/v11.74.546` → 404, а `/releases/451311522` → 200).
+          # Поэтому id ищем перебором списка, включая черновики.
+          RELEASE_ID="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"${TAG}\") | .id" | head -n1)"
+          if [ -z "$RELEASE_ID" ]; then
+            echo "::error::release ${TAG} not found even among drafts"
+            exit 1
+          fi
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
             -f draft=false -f prerelease=false -f make_latest=true \
-            --jq '{tag_name, draft, prerelease}'
+            --jq '{id, tag_name, draft, prerelease}'
           # Проверяем фактический результат, а не только код ответа.
           for attempt in $(seq 1 15); do
             LATEST="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
