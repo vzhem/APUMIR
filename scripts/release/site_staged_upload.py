@@ -343,7 +343,12 @@ def main() -> int:
         publish_with_retry(connect, directory, files, still_current)
     except (OSError, EOFError, ValueError, TypeError, KeyError, ftplib.Error) as error:
         # Do not print the exception text: it can contain a host or credentials.
-        print(f"::error::Staged site upload failed: {type(error).__name__}")
+        # Пропавший входной файл — самая частая причина этого класса сбоев
+        # (так сайт стоял на .542: не было site-release.json). Имя файла
+        # безопасно: оно либо константа, либо проверенное имя из SITE_NAMES,
+        # поэтому печатаем его, но НЕ текст исключения (в нём бывает хост).
+        detail = f" (missing {Path(error.filename).name})" if isinstance(error, FileNotFoundError) and error.filename else ""
+        print(f"::error::Staged site upload failed: {type(error).__name__}{detail}")
         return 1
     print("Site staging and promotion completed; independent byte verification is still required")
     return 0

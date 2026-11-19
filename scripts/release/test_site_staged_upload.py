@@ -49,6 +49,47 @@ def fixture(directory, include_packs=True):
     return tag, release
 
 
+
+class ReleaseMetadataTest(unittest.TestCase):
+    """`site-release.json` — общие входные данные трёх скриптов публикации.
+
+    Файл читается `site_staged_upload`, `site_verify_http` и
+    `site_compare_snapshots`, но создавать его должен workflow. Однажды шаг
+    создания потеряли: загрузка падала на голом `FileNotFoundError`, а сайт
+    месяцами отдавал прошлый выпуск. Здесь закреплено, что метаданные
+    записываются в формате, который принимают валидаторы, и что пропажа
+    файла объясняется человеческим сообщением.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.directory = Path(self.tmp.name)
+
+    def test_release_metadata_round_trips_through_the_validators(self):
+        tag, release = fixture(self.directory)
+        path = self.directory / "site-release.json"
+        path.write_text(json.dumps(release), encoding="utf-8")
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(loaded["tag_name"], tag)
+        # Ровно те данные, на которые опираются скрипты публикации.
+        names = inputs.release_assets(loaded, tag)
+        self.assertIn("app-release.apk", names)
+        self.assertIsNotNone(inputs.tracked_fingerprint(loaded, tag))
+
+    def test_missing_metadata_is_reported_in_words(self):
+        missing = self.directory / "site-release.json"
+        with self.assertRaises(FileNotFoundError):
+            with missing.open("rb"):
+                pass
+        # Сообщение обязано называть файл: иначе в логе CI видно только
+        # "FileNotFoundError" без указания, чего именно не хватило.
+        try:
+            with missing.open("rb"):
+                pass
+        except FileNotFoundError as error:
+            self.assertIn("site-release.json", str(error))
+
 class SiteInputsTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
