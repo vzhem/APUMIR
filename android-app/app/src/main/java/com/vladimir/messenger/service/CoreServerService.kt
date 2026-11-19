@@ -2806,10 +2806,10 @@ class CoreServerService : Service() {
                         if (!lightTouch) {
                             runCatching { groupFiles.onPeerOnline(peerId) }
                                 .onFailure { Log.w(TAG, "group file presence failed: ${it.message}") }
-                            // Обновление, которое я жду, может раздавать именно
-                            // этот узел: спросить сразу, не дожидаясь круга.
+                            // Обновление раздаёт именно этот узел — спросить сразу.
                             runCatching { apkSeeder.onPeerOnline(peerId) }
-                                .onFailure { Log.w(TAG, "apk seeder presence failed: ${it.message}") }
+                                .onFailure { Log.w(TAG, "apk presence failed: ${it.message}") }
+                            runCatching { groupRepository.onPeerOnline(peerId) } // досылка правки
                         }
                     }
 

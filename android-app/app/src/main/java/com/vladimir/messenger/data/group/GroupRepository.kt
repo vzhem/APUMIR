@@ -2267,10 +2267,10 @@ class GroupRepository(
         }
         for (row in stale) messageDao.deleteById(row.id)
         applyEdit(message, content)
-        broadcast(
-            groupId,
-            GroupWire.buildEdit(groupId, topicIdValue, messageId, wireText),
-            excludeSelf = true,
+        // Кому не доехало — дослать при появлении узла в сети.
+        val editEnvelope = GroupWire.buildEdit(groupId, topicIdValue, messageId, wireText)
+        GroupEditResend.remember(
+            groupId, editEnvelope, broadcast(groupId, editEnvelope, excludeSelf = true).failed, now,
         )
         if (partRows.isNotEmpty()) {
             val senderName = member.displayName
@@ -3209,24 +3209,10 @@ class GroupRepository(
             }
 
             is GroupWire.Packet.Edit -> {
-                val group = groupDao.getGroupById(packet.groupId) ?: return
-                if (groupDao.getMember(packet.groupId, me) == null) return
-                val message = messageDao.getMessageById(packet.messageId) ?: return
-                if (message.chatId != packet.groupId) return
-                // Править вправе автор и владелец группы - остальное отбрасываем.
-                if (senderId != message.senderId && senderId != group.ownerId) return
-                // Приходят только слова (и пометка о продолжении длинного
-                // текста); свои служебные строки (фото) оставляем.
-                val content = InlineImage.replaceText(message.content, packet.text)
-                if (content.isBlank() || content.length > MAX_MESSAGE_CHARS) return
-                applyEdit(message, content)
-                // Куски текста прежних редакций больше не подклеиваются - убираем.
-                val keepRev = InlineImage.textTail(content)?.rev
-                for (row in messageDao.getByContentPattern(group.id, InlineImage.textPartPattern(packet.messageId))) {
-                    val part = InlineImage.parseTextPart(row.content) ?: continue
-                    if (part.headId == packet.messageId && part.rev != keepRev) messageDao.deleteById(row.id)
-                }
-                Log.i(TAG, "message edit applied id=${packet.messageId} group=${group.id} from=$senderId")
+                val applied = incomingEdit.apply(
+                    senderId, me, packet.groupId, packet.topicId, packet.messageId, packet.text,
+                )
+                if (applied) Log.i(TAG, "message edit applied id=${packet.messageId} group=${packet.groupId}")
             }
 
             // Раунд 135+: автор, владелец или администратор стёр сообщение (или все сообщения автора/группы) у всех.
@@ -5301,6 +5287,20 @@ class GroupRepository(
      * отметки о проходах.
      */
     suspend fun resyncMembers(groupId: String): Result<Int> = infoResync.resyncAll(groupId)
+
+    /** Узел в сети — дослать недоставленную правку. */
+    suspend fun onPeerOnline(nodeId: String) =
+        GroupEditResend.onPeerOnline(nodeId) { g, e, p -> delivery.deliver(g, e, p) }
+
+    /** Приём входящей правки — отдельный файл (этот god-файл с потолком). */
+    private val incomingEdit: GroupEditIncoming by lazy {
+        GroupEditIncoming(
+            groupDao, messageDao,
+            { message, content -> applyEdit(message, content) },
+            { gid, tid -> requestGroupMessages(gid, tid) },
+            MAX_MESSAGE_CHARS,
+        )
+    }
 
     private suspend fun broadcast(
         groupId: String,

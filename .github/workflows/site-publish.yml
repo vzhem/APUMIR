@@ -51,8 +51,23 @@ jobs:
             echo "SKIP=1" >> "$GITHUB_OUTPUT"
           fi
 
-      # A manual dispatch must not silently downgrade the site, either.
-      # Capture the exact stable Latest metadata before touching FTP.
+      # ── Защита от гонки «published раньше Latest» ────────────────────────
+      #
+      # Раньше здесь стояло жёсткое требование: Latest уже указывает на наш
+      # тег. Но событие `release: published` приходит в тот момент, когда
+      # релиз только сняли с черновика, а Latest переезжает ОТДЕЛЬНЫМ
+      # вызовом (сборка ставит make_latest после публикации). Между этими
+      # двумя моментами Latest ещё указывает на предыдущую версию, и вся
+      # публикация падала на первой же проверке — сайт двое суток отдавал
+      # .542, пока выходили .543 и .544.
+      #
+      # Теперь проверка — не «ворота с отказом», а ожидание с повтором:
+      #  1) ждём, пока Latest станет нашим тегом (до 10 минут, шаг 20 с);
+      #  2) если так и не стал — публикуем, НО только когда наш тег реально
+      #     новее текущего Latest и это стабильный (не черновой) релиз.
+      #     Так сайт нельзя откатить на старую версию вручную, но и редкая
+      #     задержка Latest больше не оставляет сайт с прошлым APK.
+      #  3) ручной запуск для более СТАРОГО тега по-прежнему запрещён.
       - name: Require the published Latest release
         if: steps.tag.outputs.SKIP != '1'
         env:
@@ -60,17 +75,55 @@ jobs:
           APU_RELEASE_TAG: ${{ steps.tag.outputs.TAG }}
         run: |
           set -e
-          gh api "repos/${GITHUB_REPOSITORY}/releases/latest" > site-release.json
           PYTHONPATH=scripts/release python3 - <<'PY'
-          import json, os
+          import json, os, subprocess, sys, time
           from pathlib import Path
-          from site_release_files import MAX_METADATA_BYTES, release_assets
-          with Path('site-release.json').open('rb') as source:
-              data = source.read(MAX_METADATA_BYTES + 1)
-          if len(data) > MAX_METADATA_BYTES:
-              raise ValueError('release metadata too large')
-          release_assets(json.loads(data), os.environ['APU_RELEASE_TAG'])
-          print('Published stable Latest matches the requested tag')
+          from site_release_files import MAX_METADATA_BYTES, VERSION_RE, release_assets
+
+          tag = os.environ['APU_RELEASE_TAG']
+          repository = os.environ['GITHUB_REPOSITORY']
+
+          def api(path: str) -> dict:
+              raw = subprocess.run(
+                  ['gh', 'api', f'repos/{repository}/{path}'],
+                  check=True, capture_output=True,
+              ).stdout
+              if len(raw) > MAX_METADATA_BYTES:
+                  raise ValueError('release metadata too large')
+              return json.loads(raw)
+
+          def version(tag_name: str) -> tuple:
+              return tuple(int(part) for part in tag_name.lstrip('v').split('.'))
+
+          # Наш собственный релиз обязан быть опубликованным и стабильным.
+          release = api(f'releases/tags/{tag}')
+          release_assets(release, tag)
+          print(f'{tag}: published stable release, assets verified')
+
+          # 1) Ждём переезда Latest: до 10 минут, шаг 20 секунд.
+          latest = None
+          for attempt in range(31):
+              latest = api('releases/latest')
+              if latest.get('tag_name') == tag:
+                  print(f'Latest is {tag} (attempt {attempt + 1})')
+                  break
+              if attempt < 30:
+                  print(f'Latest is {latest.get("tag_name")!r}, waiting for {tag}...')
+                  time.sleep(20)
+          else:
+              # 2) Latest не переехал. Публикуем, только если наш тег новее и
+              #    стабильный: откат сайта назад недопустим ни при каких сбоях.
+              current = latest.get('tag_name') if latest else None
+              if not isinstance(current, str) or not VERSION_RE.fullmatch(current):
+                  print(f'::error::Latest unavailable ({current!r}); refusing to guess site version')
+                  sys.exit(1)
+              if version(tag) <= version(current):
+                  print(f'::error::Requested {tag} is not newer than Latest {current}; refusing to downgrade the site')
+                  sys.exit(1)
+              print(
+                  f'::warning::Latest still points at {current} while publishing {tag}; '
+                  'the tag is newer and stable, publishing anyway so the site is not left behind'
+              )
           PY
 
       - name: Download release assets

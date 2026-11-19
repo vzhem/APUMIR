@@ -702,6 +702,66 @@ jobs:
           git commit -m "ci: uniffi bindings + core rebuilt for ${GITHUB_REF#refs/tags/}"
           git push origin HEAD:main || echo "::warning::push to main failed - take the bindings from the core-bindings artifact of this run"
 
+      # ── Latest и публикация на сайт: порядок задаёт этот workflow ────────
+      #
+      # Почему это здесь, а не отдельным ручным шагом. Раньше релиз создавался
+      # черновиком, потом его публиковали вручную, а Latest переезжал ещё
+      # позже. Событие `release: published` при этом опережало Latest, и
+      # публикация сайта падала на своей проверке — сайт оставался с прошлым
+      # APK (так вышло с .543 и .544, пока сайт отдавал .542).
+      #
+      # Здесь релиз снимается с черновика ТЕМ ЖЕ прогоном, который его
+      # собрал, и сразу помечается Latest — до того, как кто-либо дёрнет
+      # публикацию сайта. Плюс явный запуск публикации по факту успеха:
+      # даже если событие published потеряется, сайт не останется старым.
+      #
+      # continue-on-error: публикация не должна «красить» сборку APK, которая
+      # уже выложила файлы. Состояние Latest и сайта видно отдельными прогонами.
+      - name: Publish release and mark it Latest
+        if: success() && github.ref_type == 'tag'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.get_version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          # Черновик уже создан предыдущим шагом. Снимаем draft/prerelease и
+          # сразу ставим Latest одним вызовом, чтобы между этими состояниями
+          # не было окна, в котором сайт видит старый Latest.
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+            -f draft=false -f prerelease=false -f make_latest=true \
+            --jq '{tag_name, draft, prerelease}'
+          # Проверяем фактический результат, а не только код ответа.
+          for attempt in $(seq 1 15); do
+            LATEST="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+            if [ "$LATEST" = "$TAG" ]; then
+              echo "::notice::Latest is ${TAG}"
+              exit 0
+            fi
+            echo "Latest is ${LATEST:-unknown}, waiting for ${TAG} (attempt ${attempt}/15)"
+            sleep 4
+          done
+          echo "::error::Latest did not switch to ${TAG}; site publication would publish an older release"
+          exit 1
+
+      # Запуск публикации сайта по факту. workflow_dispatch требует права
+      # actions:write у GITHUB_TOKEN; если его нет, шаг честно предупреждает и
+      # не валит сборку: событие `release: published` от шага выше всё равно
+      # запустит публикацию, а у неё теперь есть ожидание Latest.
+      - name: Trigger site publication
+        if: success() && github.ref_type == 'tag'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.get_version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          if gh workflow run site-publish.yml -f tag="$TAG" --repo "$GITHUB_REPOSITORY"; then
+            echo "::notice::site publication requested for ${TAG}"
+          else
+            echo "::warning::could not dispatch site publication (event 'release: published' still covers it)"
+          fi
+
       - name: Remove temporary Firebase client configuration
         if: always()
         run: rm -f android-app/app/google-services.json
