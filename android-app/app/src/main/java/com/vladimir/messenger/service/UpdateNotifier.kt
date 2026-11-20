@@ -48,6 +48,7 @@ class UpdateNotifier @Inject constructor(
 
     /** Сохранить официальный релиз и, если он ещё не был показан, уведомить. */
     fun notifyOfficialRelease(release: UpdateChecker.ReleaseInfo) {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return
         saveOfficialRelease(release)
         postOnce(
             version = release.version,
@@ -61,6 +62,7 @@ class UpdateNotifier @Inject constructor(
      * запрашивается только руками из «Настройки → Обновления».
      */
     fun notifyPeerRelease(version: String, compact: Boolean = false) {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return
         val text = if (compact) {
             context.getString(R.string.update_notification_compact_text, displayVersion(version))
         } else {
@@ -84,6 +86,7 @@ class UpdateNotifier @Inject constructor(
      * раз, поэтому после успешной установки старое окно не покажется.
      */
     fun pendingOfficialRelease(currentVersion: String): UpdateChecker.ReleaseInfo? {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return null
         val raw = prefs().getString(KEY_OFFICIAL_RELEASE, null) ?: return null
         val release = runCatching {
             val json = JSONObject(raw)

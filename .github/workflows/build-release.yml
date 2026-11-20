@@ -468,6 +468,11 @@ jobs:
           cat "$RUNNER_TEMP/gradle-release.log"
           exit "$status"
 
+      - name: Build Uptodown QA candidate (no publication)
+        if: github.ref_name == 'arena/b18267ab-apumir'
+        working-directory: ./android-app
+        run: ./gradlew :app:assembleStoreRelease --no-daemon -Papu.lightBase=true -Papu.storeVersioned=true -PreleaseVersionName=v11.74.550
+
       # Второй вариант при скачивании (только релизные теги): полная
       # версия одним файлом — все библиотеки внутри, функции работают
       # сразу, в том числе на эмуляторе и без сети. Лежит рядом как
@@ -551,15 +556,18 @@ jobs:
           # Старый ключ первым: им подписываются v1/v2 для Android 8; новым -
           # v3 для Android 9+ (rotation-min-sdk-version 28), где и живёт
           # родословная. Старый ключ после этого обновлять приложение не может.
-          "$BT/apksigner" sign \
-            --ks android-app/app/p2p-release.jks --ks-pass pass:p2p2026release \
-            --ks-key-alias p2p --key-pass pass:p2p2026release \
-            --next-signer \
-            --ks "$RUNNER_TEMP/apu-release.jks" --ks-pass "file:$RUNNER_TEMP/apu-release-ks.pass" \
-            --ks-key-alias "$APU_KS_ALIAS" --key-pass "file:$RUNNER_TEMP/apu-release-key.pass" \
-            --lineage "$LINEAGE" --rotation-min-sdk-version 28 \
-            --v4-signing-enabled false \
-            --out "$APK_DIR/app-release-rotated.apk" "$APK_DIR/app-release.apk"
+          resign_apk() {
+            "$BT/apksigner" sign \
+              --ks android-app/app/p2p-release.jks --ks-pass pass:p2p2026release \
+              --ks-key-alias p2p --key-pass pass:p2p2026release \
+              --next-signer \
+              --ks "$RUNNER_TEMP/apu-release.jks" --ks-pass "file:$RUNNER_TEMP/apu-release-ks.pass" \
+              --ks-key-alias "$APU_KS_ALIAS" --key-pass "file:$RUNNER_TEMP/apu-release-key.pass" \
+              --lineage "$LINEAGE" --rotation-min-sdk-version 28 \
+              --v4-signing-enabled false \
+              --out "$2" "$1"
+          }
+          resign_apk "$APK_DIR/app-release.apk" "$APK_DIR/app-release-rotated.apk"
           "$BT/apksigner" verify --verbose --print-certs "$APK_DIR/app-release-rotated.apk"
           mv -f "$APK_DIR/app-release-rotated.apk" "$APK_DIR/app-release.apk"
           # Полная версия (если собрана) — той же парой ключей и
@@ -578,6 +586,17 @@ jobs:
             "$BT/apksigner" verify --verbose --print-certs "$APK_DIR/app-full-rotated.apk"
             mv -f "$APK_DIR/app-full-rotated.apk" "$APK_DIR/app-full.apk"
             echo "full APK signed with the rotated key"
+          fi
+          STORE_DIR=android-app/app/build/outputs/apk/storeRelease
+          if [ -f "$STORE_DIR/app-storeRelease.apk" ]; then
+            resign_apk "$STORE_DIR/app-storeRelease.apk" "$STORE_DIR/uptodown-qa.apk"
+            "$BT/apksigner" verify --verbose --print-certs "$STORE_DIR/uptodown-qa.apk"
+            "$BT/aapt" dump permissions "$STORE_DIR/uptodown-qa.apk" > "$RUNNER_TEMP/uptodown-permissions.txt"
+            if grep -Fq android.permission.REQUEST_INSTALL_PACKAGES "$RUNNER_TEMP/uptodown-permissions.txt"; then
+              echo "::error::Uptodown candidate declares APK installation permission"
+              exit 1
+            fi
+            (cd "$STORE_DIR" && sha256sum uptodown-qa.apk > SHA256SUMS.txt)
           fi
           rm -f "$RUNNER_TEMP/apu-release.jks" "$RUNNER_TEMP/apu-release-ks.pass" "$RUNNER_TEMP/apu-release-key.pass"
           echo "signed with the rotated key"
@@ -656,6 +675,17 @@ jobs:
           path: android-app/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: ignore
           retention-days: 30
+
+      - name: Upload Uptodown QA candidate
+        if: github.ref_name == 'arena/b18267ab-apumir'
+        uses: actions/upload-artifact@v4
+        with:
+          name: uptodown-qa
+          path: |
+            android-app/app/build/outputs/apk/storeRelease/uptodown-qa.apk
+            android-app/app/build/outputs/apk/storeRelease/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Create Release
         if: github.ref_type == 'tag'

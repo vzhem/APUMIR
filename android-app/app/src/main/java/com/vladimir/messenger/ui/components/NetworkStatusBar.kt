@@ -23,7 +23,7 @@ import androidx.compose.material.icons.filled.SyncProblem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -107,31 +107,7 @@ fun NetworkStatusBar(
                 color = Color.White,
             )
 
-            // Анимированные точки для stringResource(R.string.nsb_connecting)
-            if (status == NetworkStatus.Connecting) {
-                AnimatedDots()
-            }
             }
         }
     }
-}
-
-// Анимированные три точки "..."
-@Composable
-private fun AnimatedDots() {
-    var dotCount by remember { mutableIntStateOf(0) }
-
-    LaunchedEffect(Unit) {
-        while (true) {
-            kotlinx.coroutines.delay(500)
-            dotCount = (dotCount + 1) % 4
-        }
-    }
-
-    Text(
-        text  = ".".repeat(dotCount),
-        style = MaterialTheme.typography.labelMedium,
-        color = Color.White,
-        modifier = Modifier.width(20.dp),
-    )
 }

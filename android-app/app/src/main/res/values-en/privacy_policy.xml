@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_privacy_policy">APU Privacy Policy</string>
+    <string name="settings_privacy_policy_body">APU stores your profile, contacts, chats, settings and received files on your device. When you send a message or file, the recipients you choose receive it and may keep a copy.\n\nAPU may use network nodes and relays for connectivity and delivery. They process technical information needed for communication, such as IP addresses, routing identifiers and connection times. If remote notifications are enabled, the delivery server and push provider process a device notification token and technical delivery information.\n\nCamera, microphone and location access are used for features you start if you grant the corresponding permissions. You can change permissions in Android settings.\n\nYou can clear local data in Android settings. This does not remove copies held by recipients or backups you created. For questions about data processing or deletion, email 1985vzhem@gmail.com.</string>
+</resources>

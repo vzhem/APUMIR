@@ -117,7 +117,8 @@
     margin: 22px 0 18px;
     font-size: clamp(48px, 7vw, 82px);
     line-height: .99;
-    letter-spacing: -.075em;
+    letter-spacing: -.06em;
+    text-wrap: balance;
     font-weight: 780;
   }
   #apu-landing-root .apu-title-accent { color: #438d78; }
@@ -413,8 +414,22 @@
     color: #869591;
     font-size: 11px;
   }
-  #apu-landing-root .apu-footer a { color: #577a70; text-decoration: none; }
-  #apu-landing-root .apu-footer a:hover { text-decoration: underline; }
+  #apu-landing-root .apu-footer-links { display: flex; flex-wrap: wrap; gap: 8px; }
+  #apu-landing-root .apu-footer a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 12px;
+    border: 1px solid var(--apu-line);
+    border-radius: 999px;
+    background: #fff;
+    color: #315f52;
+    font-size: 13px;
+    font-weight: 650;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  #apu-landing-root .apu-footer a:hover { background: var(--apu-mint); }
 
   @media (max-width: 800px) {
     #apu-landing-root .apu-hero { grid-template-columns: 1fr; gap: 18px; min-height: auto; padding: 55px 0 30px; }
@@ -570,7 +585,10 @@
 
   <footer class="apu-shell apu-footer">
     <span>© APU · Официальная страница приложения</span>
-    <a href="#top" class="apu-text-link">Наверх ↑</a>
+    <nav class="apu-footer-links" aria-label="Ссылки сайта">
+      <a href="https://apu.clan.su/privacy.html" class="apu-text-link">Политика конфиденциальности</a>
+      <a href="#top" class="apu-text-link">Наверх ↑</a>
+    </nav>
   </footer>
 </div>
 

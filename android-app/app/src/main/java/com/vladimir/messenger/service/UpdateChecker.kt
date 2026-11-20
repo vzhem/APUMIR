@@ -311,6 +311,7 @@ class UpdateChecker @Inject constructor(
         manual: Boolean = false,
         trigger: String = if (manual) "manual" else "foreground",
     ): ReleaseInfo? = withContext(Dispatchers.IO) {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return@withContext null
         val trace = UpdateDiagnosticsStore.begin(context, currentVersion, trigger)
         try {
             // Ask for the *version and available bytes*, not merely "is a
@@ -586,6 +587,7 @@ class UpdateChecker @Inject constructor(
      * @return ID загрузки
      */
     suspend fun downloadApk(releaseInfo: ReleaseInfo, preferOfficial: Boolean = false): Long {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) error("APK updates are managed by the store")
         // Any displayed card can be hours or days old, even with a true saved
         // marker. Refresh the complete official release on every explicit tap.
         val confirmed = if (preferOfficial) {
@@ -865,6 +867,7 @@ class UpdateChecker @Inject constructor(
      * Установить скачанный APK через FileProvider.
      */
     fun installApk(downloadId: Long) {
+        if (!com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) return
         if (!officialDownloads.mayExposeCompleted(downloadId)) {
             Log.w(TAG, "Refusing to install an unverified update")
             return

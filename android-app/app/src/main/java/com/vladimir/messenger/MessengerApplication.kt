@@ -77,6 +77,7 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
 
     override fun onCreate() {
         ApplicationStartupDiagnostics.progress.start()
+        com.vladimir.messenger.data.diagnostics.ThermalCpuDiagnostics.setForeground(false)
         super.onCreate()
         ApplicationStartupDiagnostics.progress.advance(ApplicationStartupProgress.Phase.PREPARING)
         // Политика пути доставки и kill-switch IPv6 — ДО старта службы: ядро
