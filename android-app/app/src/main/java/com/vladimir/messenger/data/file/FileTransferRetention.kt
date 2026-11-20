@@ -27,8 +27,8 @@ object FileTransferRetention {
     /** Тяжёлое (фото, видео, гифки, большие файлы) — максимум сутки. */
     const val HEAVY_TTL_MS: Long = 24L * 60L * 60L * 1000L
 
-    /** Текст и малое — неделя, как было до этого правила. */
-    const val LIGHT_TTL_MS: Long = 7L * 24L * 60L * 60L * 1000L
+    /** Малые вложения тоже живут не больше суток. */
+    const val LIGHT_TTL_MS: Long = 24L * 60L * 60L * 1000L
 
     /** Фото и видео тяжёлые всегда: даже маленькая картинка — это вложение. */
     fun isHeavyCategory(mediaType: String): Boolean {
@@ -45,7 +45,7 @@ object FileTransferRetention {
         if (isHeavy(mediaType, totalBytes)) HEAVY_TTL_MS else LIGHT_TTL_MS
 
     /** Строка для отчёта «Логи»: владелец видит правило, а не догадывается. */
-    fun describe(): String = "срок хранения: тяжёлое 24 ч · текст и малое 7 сут"
+    fun describe(): String = "срок хранения новых файловых передач: 24 ч"
 
     /** Короткое объяснение для журнала, когда уборка что-то убрала. */
     fun describeSweep(removedRows: Int, freedCopies: Int): String =

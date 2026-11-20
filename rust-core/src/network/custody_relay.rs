@@ -416,6 +416,7 @@ pub struct OfferTask {
     pub envelope: String,
     /// Кому уже предложили (их не спрашиваем второй раз).
     pub offered_to: Vec<String>,
+    reserved_peers: Vec<String>,
     /// Number of anonymous legacy acknowledgments, not verified distinct holders.
     pub accepted: usize,
     pub expires_at_ms: i64,
@@ -462,6 +463,7 @@ impl CustodyOffers {
             recipient: item.recipient,
             envelope: item.envelope,
             offered_to: Vec::new(),
+            reserved_peers: Vec::new(),
             accepted: 0,
             expires_at_ms: item.expires_at_ms,
             next_candidate: 0,
@@ -492,10 +494,18 @@ impl CustodyOffers {
                 let start = task.next_candidate % candidates.len();
                 let chosen = (0..candidates.len())
                     .map(|offset| (start + offset) % candidates.len())
-                    .find(|&index| !task.offered_to.contains(&candidates[index]));
+                    .find(|&index| {
+                        let peer = &candidates[index];
+                        peer != &task.recipient && !task.offered_to.contains(peer)
+                            && (task.reserved_peers.contains(peer)
+                                || task.reserved_peers.len() < MAX_CUSTODY_PEERS)
+                    });
                 if let Some(index) = chosen {
                     let peer = &candidates[index];
                     task.next_candidate = (index + 1) % candidates.len();
+                    if !task.reserved_peers.contains(peer) {
+                        task.reserved_peers.push(peer.clone());
+                    }
                     task.offered_to.push(peer.clone());
                     // Even a failed write might have reached the holder; keep
                     // its bounded drop-hint history until Room confirms delivery.
@@ -818,7 +828,7 @@ mod tests {
 
         let peers = vec!["pk_a".to_string(), "pk_b".to_string(), "pk_c".to_string()];
         let planned = offers.next_offers(&peers);
-        assert_eq!(planned.len(), 3, "спрашиваем всех трёх, кто ещё не отвечал");
+        assert_eq!(planned.len(), 2, "третьему хранителю копию не предлагаем");
         // Второй раз тех же не спрашиваем.
         assert!(offers.next_offers(&peers).is_empty());
 
@@ -839,6 +849,7 @@ mod tests {
         let retry = offers.next_offers(&peers);
         assert_eq!(retry.len(), 1);
         assert_eq!(retry[0].2, "pk_a");
+        assert!(offers.next_offers(&["pk_c".into()]).is_empty());
         assert!(offers.next_offers(&peers).is_empty());
         assert_eq!(offers.take_offered_peers("m1"), peers);
     }

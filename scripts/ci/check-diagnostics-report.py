@@ -567,7 +567,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertIn("onDrawWithContent", gloss_block)
 
     def test_lost_items_do_not_live_forever(self):
-        """Владелец 2026-10-07: тяжёлое — сутки, текст и малое — неделя, и уборка.
+        """Владелец 2026-10-07: временные копии файлов — сутки, независимо от размера.
 
         Проверяются ИМЕНА и числа в исходниках: срок задаётся в одном месте,
         иначе «потеряшка» снова заживёт по старому правилу в другом файле.
@@ -577,7 +577,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "object FileTransferRetention",
             "const val HEAVY_MAX_BYTES: Long = 2L * 1024 * 1024",
             "const val HEAVY_TTL_MS: Long = 24L * 60L * 60L * 1000L",
-            "const val LIGHT_TTL_MS: Long = 7L * 24L * 60L * 60L * 1000L",
+            "const val LIGHT_TTL_MS: Long = 24L * 60L * 60L * 1000L",
             "fun isHeavyCategory(mediaType: String)",
             "fun ttlMs(mediaType: String, totalBytes: Long)",
         ):
@@ -653,7 +653,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
         tests = source(ROOT / "android-app/app/src/test/java/com/vladimir/messenger/data/file/FileTransferRetentionTest.kt")
         for marker in (
             "fun heavyIsPhotoVideoOrBigFile()",
-            "fun heavyLivesOneDayAndLightLivesAWeek()",
+            "fun allFileTransfersLiveOneDay()",
             "fun logsSayTheRuleAndTheSweep()",
         ):
             with self.subTest(marker=marker):

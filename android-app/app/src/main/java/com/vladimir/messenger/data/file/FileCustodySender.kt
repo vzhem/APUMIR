@@ -170,6 +170,8 @@ class FileCustodySender(
                 }
                 continue
             }
+            // Give the direct sender priority while the recipient is reachable.
+            if (isOnline(transfer.peerNodeId)) continue
             val blocked = rejectedUntil[id].orEmpty().filterValues { it > now }.keys
             val candidate = candidates(transfer.peerNodeId, transfer.totalBytes)
                 .firstOrNull { it != transfer.peerNodeId && it != me && it !in blocked && it !in holders }
