@@ -132,6 +132,7 @@ fun PeerProfileSheet(
                     vip = vip,
                     size = 88.dp,
                     peerId = contactId,
+                    playVideo = true,
                     modifier = Modifier.then(
                         if (onStoryClick != null) {
                             Modifier.border(3.dp, if (unseenStory) Color(0xFFE6BE70) else Color(0xFF84909F), CircleShape)

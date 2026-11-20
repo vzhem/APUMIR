@@ -29,7 +29,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -144,7 +144,7 @@ fun VipRing(modifier: Modifier = Modifier) {
 @Composable
 fun rememberSelfVip(): Boolean {
     val context = LocalContext.current
-    val changes by ReferralRankStore.changes.collectAsState()
+    val changes by ReferralRankStore.changes.collectAsStateWithLifecycle()
     return remember(changes) {
         FileTransferRankPolicy.isVip(ReferralRankStore.qualifiedDirectCount(context))
     }
@@ -158,9 +158,8 @@ fun rememberSelfVip(): Boolean {
  * рисует поверх круга (например, точка «в сети»).
  *
  * [peerId] — node id того, кто на аватаре: у контакта с видеоаватаром его
- * ролик крутится везде, где встречается аватар (список и чат, профиль,
- * участники группы/канала, отклики, дни рождения, визитка). Без id или без
- * приехавшего ролика остаётся прежний постер.
+ * ролик крутится только при [playVideo]. В списках и чатах остаётся постер;
+ * без id сохраняется обычный аватар.
  */
 @Composable
 fun PeerAvatar(
@@ -170,6 +169,7 @@ fun PeerAvatar(
     modifier: Modifier = Modifier,
     vip: Boolean = false,
     peerId: String? = null,
+    playVideo: Boolean = false,
     overlay: @Composable BoxScope.() -> Unit = {},
 ) {
     // Разбор картинки — в фоне и один раз на строку base64 (AvatarBitmaps).
@@ -197,7 +197,7 @@ fun PeerAvatar(
             }
             // Видеокружок собеседника поверх постера: пока ролик не приехал
             // (или его убрали), крутится нечего и слой просто не рисуется.
-            PeerVideoAvatarLayer(peerId = peerId)
+            PeerVideoAvatarLayer(peerId = peerId, playVideo = playVideo)
         }
         if (vip) {
             VipRing(Modifier.matchParentSize())
@@ -212,12 +212,13 @@ fun PeerAvatar(
  * по поколению хранилища: установленный ролик появляется без перезахода в экран.
  */
 @Composable
-private fun PeerVideoAvatarLayer(peerId: String?) {
+private fun PeerVideoAvatarLayer(peerId: String?, playVideo: Boolean) {
     if (peerId.isNullOrBlank()) return
     val context = LocalContext.current
-    val version by PeerVideoAvatarStore.changed.collectAsState()
+    val version by PeerVideoAvatarStore.changed.collectAsStateWithLifecycle()
     val video = remember(peerId, version) { PeerVideoAvatarStore.fileFor(context, peerId) }
     if (video != null) {
+        if (!playVideo) return
         val circle = remember(peerId, version) { PeerVideoAvatarStore.circleFor(context, peerId) }
         // key: при смене ролика плеер создаётся заново под новый файл.
         androidx.compose.runtime.key(peerId, video.absolutePath, circle) {
@@ -231,7 +232,7 @@ private fun PeerVideoAvatarLayer(peerId: String?) {
         // прогресс. Пока байтов нет, отметка неподвижна на «12 часах».
         val meta = remember(peerId, version) { PeerVideoAvatarStore.metaFor(context, peerId) }
         if (meta != null) {
-            val downloads by PeerVideoAvatarStore.downloads.collectAsState()
+            val downloads by PeerVideoAvatarStore.downloads.collectAsStateWithLifecycle()
             val progress = downloads[peerId]?.takeIf { it.sha256 == meta.sha256 }?.fraction
             VideoAvatarLoadingRing(progress = progress, modifier = Modifier.fillMaxSize())
         }

@@ -24,7 +24,7 @@ import java.io.File
  * Проигрыватель видеоаватара поверх кадра-постера: свой и чужой.
  *
  * Один на оба случая — свой в профиле (MyAvatar) и ролики собеседников везде,
- * где встречается их аватар (PeerAvatar). Копия «для чужих» расходилась бы с
+ * где явно включено воспроизведение (профиль собеседника). Копия «для чужих» расходилась бы с
  * профильной по зацикливанию, звуку и паузе в фоне: правило одно — TextureView
  * через StoryVideoSurface (SurfaceView уходит из-под круглой маски Compose и
  * видео торчит квадратом), звук выключен (аватар, а не просмотр), на уходе
@@ -65,7 +65,7 @@ internal fun VideoAvatarPlayback(path: String, circle: Boolean, onLoadingFinishe
         player.volume = 0f
         player.setMediaItem(MediaItem.fromUri(Uri.fromFile(File(path))))
         player.prepare()
-        player.playWhenReady = true
+        player.playWhenReady = owner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
         onDispose {
             owner.lifecycle.removeObserver(observer)
             player.removeListener(listener)

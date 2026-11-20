@@ -264,12 +264,13 @@ class VideoAvatarContract(unittest.TestCase):
         )
 
     # 8) видеокружки собеседников -------------------------------------------
-    def test_peer_video_avatars_play_everywhere(self):
-        # Показ: у PeerAvatar есть peerId и общий плеер крутит ролик поверх
-        # постера (запрос владельца 2026-11-06: «видиокружочки профиля крутились
-        # на профиле чата и во всех других местах»).
+    def test_peer_video_avatars_play_in_profile_and_use_posters_in_lists(self):
         self.assertIn("peerId: String? = null", self.peer)
-        self.assertIn("PeerVideoAvatarLayer(peerId = peerId)", self.peer)
+        self.assertIn("playVideo: Boolean = false", self.peer)
+        self.assertIn("PeerVideoAvatarLayer(peerId = peerId, playVideo = playVideo)", self.peer)
+        self.assertIn("if (!playVideo) return", self.peer)
+        profile = read(JAVA / "ui/components/PeerProfileSheet.kt")
+        self.assertIn("playVideo = true", profile)
         self.assertIn("VideoAvatarPlayback(path = video.absolutePath", self.peer)
         self.assertIn("PeerVideoAvatarStore.fileFor(", self.peer)
         # Все места, где встречается аватар собеседника, передают его id.

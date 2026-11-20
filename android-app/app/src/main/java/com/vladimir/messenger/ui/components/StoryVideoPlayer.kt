@@ -22,6 +22,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -40,13 +43,16 @@ import kotlinx.coroutines.withContext
 internal fun StoryVideoPlayer(story: StoryStore.Story, paused: Boolean,
     onProgress: (Float) -> Unit, onEnded: () -> Unit) {
     val context = LocalContext.current
+    val owner = LocalLifecycleOwner.current
     var file by remember(story.id) { mutableStateOf<File?>(null) }
     var unavailable by remember(story.id) { mutableStateOf<String?>(null) }
-    LaunchedEffect(story.id) {
-        while (file == null) {
-            file = withContext(Dispatchers.IO) { StoryVideoStorage.file(context, story) }
-            unavailable = StoryVideoStorage.failure(story)
-            if (file == null) delay(1000)
+    LaunchedEffect(story.id, owner) {
+        owner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (file == null) {
+                file = withContext(Dispatchers.IO) { StoryVideoStorage.file(context, story) }
+                unavailable = StoryVideoStorage.failure(story)
+                if (file == null) delay(1000)
+            }
         }
     }
     val progressNow by rememberUpdatedState(onProgress)
@@ -60,10 +66,10 @@ internal fun StoryVideoPlayer(story: StoryStore.Story, paused: Boolean,
         }
         return
     }
-    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     val pausedNow by rememberUpdatedState(paused)
     val player = remember(story.id, source, owner) { ExoPlayer.Builder(context).build() }
     var state by remember(player) { mutableIntStateOf(Player.STATE_IDLE) }
+    var playing by remember(player) { mutableStateOf(false) }
     var error by remember(player) { mutableStateOf<String?>(null) }
     DisposableEffect(player) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
@@ -73,6 +79,7 @@ internal fun StoryVideoPlayer(story: StoryStore.Story, paused: Boolean,
         owner.lifecycle.addObserver(observer)
         val listener = object : Player.Listener {
             override fun onRenderedFirstFrame() { if (!story.mine) StoryStore.markSeen(story.id) }
+            override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
             override fun onPlaybackStateChanged(playbackState: Int) { state = playbackState }
             override fun onPlayerError(failure: PlaybackException) { error = context.getString(R.string.story_video_play_failed) }
         }
@@ -81,11 +88,14 @@ internal fun StoryVideoPlayer(story: StoryStore.Story, paused: Boolean,
         player.prepare()
         onDispose { owner.lifecycle.removeObserver(observer); player.removeListener(listener); player.release() }
     }
-    LaunchedEffect(player, paused) { player.playWhenReady = !paused }
+    LaunchedEffect(player, paused) {
+        player.playWhenReady = !paused && owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+    }
     LaunchedEffect(player, state, paused) {
         if (state == Player.STATE_ENDED && !paused) endedNow()
     }
-    LaunchedEffect(player) {
+    LaunchedEffect(player, playing) {
+        if (!playing) return@LaunchedEffect
         while (true) {
             val duration = player.duration
             if (duration > 0) progressNow((player.currentPosition.toFloat() / duration).coerceIn(0f, 1f))
