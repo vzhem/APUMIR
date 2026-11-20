@@ -158,16 +158,16 @@ class VideoAvatarContract(unittest.TestCase):
         # Плеер не живёт вечно: снятие с композиции освобождает декодер.
         self.assertIn("player.release()", self.player)
 
-    def test_live_playback_is_opt_in_and_reaches_the_chat_list(self):
+    def test_live_playback_is_opt_in_and_story_strip_uses_posters(self):
         # Флаг явный: по умолчанию постер, иначе плеер заводился бы на каждом
         # мелком аватаре (отклики, просмотр истории) и сажал батарею.
         self.assertIn("playVideo: Boolean = false", self.avatar)
         self.assertIn("if (video != null && playVideo)", self.avatar)
         stories = read(JAVA / "ui/components/Stories.kt")
-        self.assertIn("playVideo = true", stories)
-        # Плеер заводится только у своей ячейки ленты, не у чужих историй.
+        # Ни одна ячейка ленты не должна запускать декодер.
         bubble = stories.split("private fun StoryBubble(")[1].split("\n@Composable")[0]
-        self.assertIn("playVideo = true", bubble)
+        self.assertIn("MyAvatar(", bubble)
+        self.assertNotIn("playVideo", bubble)
         self.assertNotIn("playVideo", stories.split("fun StoryViewerDialog(")[1])
 
     # 5) постер наружу, ролик себе ------------------------------------------

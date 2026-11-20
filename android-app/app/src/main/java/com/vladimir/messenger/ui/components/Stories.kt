@@ -252,12 +252,11 @@ private fun StoryBubble(
                     }
                 }
                 if (self) {
-                    // Своя ячейка играет через MyAvatar, чужая — через PeerAvatar.
+                    // В списке показываем постер: декодер не должен работать в простое.
                     MyAvatar(
                         displayName = selfName.orEmpty().ifBlank { title },
                         modifier = Modifier.size(54.dp),
                         size = 54,
-                        playVideo = true,
                     )
                 } else {
                     PeerAvatar(name = title, avatarB64 = avatar, size = 54.dp, peerId = peerId)
