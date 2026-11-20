@@ -44,7 +44,7 @@ class FileTransferRetentionTest {
             24L * 60 * 60 * 1000,
             FileTransferRetention.ttlMs("application/pdf", FileTransferRetention.HEAVY_MAX_BYTES),
         )
-        assertTrue(FileTransferRetention.HEAVY_TTL_MS < FileTransferRetention.LIGHT_TTL_MS)
+        assertEquals(FileTransferRetention.HEAVY_TTL_MS, FileTransferRetention.LIGHT_TTL_MS)
     }
 
     @Test
