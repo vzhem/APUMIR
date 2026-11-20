@@ -1144,7 +1144,7 @@ class DiagnosticsReportTest {
             journal = emptyList(),
             logcat = emptyList(),
         )
-        assertTrue(quiet.contains("срок хранения: тяжёлое 24 ч · текст и малое 7 сут"))
+        assertTrue(quiet.contains("срок хранения новых файловых передач: 24 ч"))
         assertTrue(quiet.contains("убрано просроченного=0 (копий на диске освобождено=0)"))
 
         val swept = DiagnosticsReport.render(
