@@ -254,7 +254,7 @@ mod tests {
         assert!(!is_user_correspondence_send(
             "typing-1",
             "chat-alice",
-            b"typing|1",
+            b"APUTYP1|1",
         ));
         assert!(!is_user_correspondence_send(
             "ppres-1",
@@ -264,7 +264,12 @@ mod tests {
         assert!(!is_user_correspondence_send(
             "heart-1",
             "chat-alice",
-            b"heart|score|42",
+            b"APUTYP1|APUGAME1|score|42",
+        ));
+        assert!(!is_user_correspondence_send(
+            "push1-epoch-pk_a",
+            "chat-alice",
+            b"APU1|sealed-push-epoch",
         ));
         assert!(!is_user_correspondence_send(
             "eph1-00000000-0000-4000-8000-000000000001",
