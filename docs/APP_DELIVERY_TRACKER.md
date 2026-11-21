@@ -5641,4 +5641,11 @@ Gradle-зависимости, документация и CI-гейты) на �
     `ApkReceivedScanner.kt` (из `ApkSeeder.kt` с явным логированием ошибок чтения
     APK); потолки в `god-files-baseline.json`, `silent-catch-baseline.json` и
     `hardcoded-strings-baseline.json` понижены через `--write`.
+- **Проверка CI на коммите `7392dc3` (`arena/e576e256-apumir`):**
+  - Build Release APK: [run 44891046617](https://github.com/vzhem/APUMIR/actions/runs/44891046617) — success (Rust-ядро по всем ABI, 309 классов / 2286 JVM-тестов, сборка и подпись release APK + feature packs).
+  - Unit tests (JVM): [run 44891046616](https://github.com/vzhem/APUMIR/actions/runs/44891046616) — success.
+  - Android storage and navigation tests: [run 44891046575](https://github.com/vzhem/APUMIR/actions/runs/44891046575) — success.
+  - Remote push prototype tests: [run 44891046585](https://github.com/vzhem/APUMIR/actions/runs/44891046585) — success.
+  - Firebase Android configuration preflight: [run 44891046584](https://github.com/vzhem/APUMIR/actions/runs/44891046584) — success.
+
 
