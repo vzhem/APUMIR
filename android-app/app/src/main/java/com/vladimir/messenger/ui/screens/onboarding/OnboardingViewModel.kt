@@ -428,13 +428,6 @@ class OnboardingViewModel @Inject constructor(
         }
     }
 
-    // ------------------------------------------------------------------
-    // Пользователь завершил онбординг
-    // ------------------------------------------------------------------
-    fun onFinishOnboarding(): Boolean {
-        return _uiState.value.step == OnboardingStep.ShowInvite
-    }
-
     fun clearError() {
         _uiState.update { it.copy(error = null) }
     }

@@ -281,7 +281,10 @@ class SettingsStyleTest(unittest.TestCase):
         # И экран зовёт именно вынесенный поток, а не держит второй свой.
         self.assertIn("ProfileAvatarDialogs(onDismiss = { showAvatarPicker = false })", text)
         self.assertNotIn("videoAvatarPicker", text)
-        self.assertIn("SelectionContainer", text)
+        # Выбор текста ID/узла вынесен в ProfileIdentityBadge.kt вместе с бейджем профиля.
+        badge = source("screens/settings/ProfileIdentityBadge.kt")
+        self.assertIn("SelectionContainer", badge)
+        self.assertIn("ProfileIdentityBadge(", text)
         self.assertIn("uiState.fingerprint", text)
         self.assertIn("uiState.heartCount", text)
         self.assertIn("QrCodeGenerator.generateQrCode(uiState.inviteLink)", text)

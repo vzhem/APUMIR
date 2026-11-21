@@ -15,7 +15,6 @@ import android.media.audiofx.NoiseSuppressor
 import android.os.Process
 import android.util.Log
 import com.vladimir.messenger.data.voice.VoiceEffect
-import com.vladimir.messenger.data.voice.VoiceEffectPreferences
 import com.vladimir.messenger.data.voice.VoiceEffectProcessor
 
 /**

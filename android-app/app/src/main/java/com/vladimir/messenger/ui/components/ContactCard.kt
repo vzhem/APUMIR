@@ -45,7 +45,6 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.PushPin
 import com.vladimir.messenger.domain.model.Chat
 import com.vladimir.messenger.ui.theme.StatusOnline
-import com.vladimir.messenger.ui.theme.StatusOffline
 import java.text.SimpleDateFormat
 import java.util.*
 

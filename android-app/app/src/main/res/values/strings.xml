@@ -39,7 +39,6 @@
     <string name="folder_delete">Удалить папку</string>
     <string name="folder_delete_text">Папка «%1$s» исчезнет из вкладок. Сами чаты не пострадают.</string>
     <string name="folder_chat_count">Чатов: %1$d</string>
-    <string name="folder_empty_list">В этой папке пока пусто.</string>
     <string name="folder_type_chat">Личный чат</string>
     <string name="folder_type_group">Группа</string>
     <string name="folder_type_channel">Канал</string>
@@ -331,7 +330,6 @@
     <string name="call_camera_off">Выключить камеру</string>
         <string name="call_share_screen">Показать экран</string>
     <string name="call_stop_share">Закрыть экран</string>
-    <string name="call_you_sharing">Вы показываете экран</string>
             <string name="call_bg_none">Без фона</string>
     <string name="call_bg_blur">Размытие</string>
     <string name="call_bg_office">Офис</string>
@@ -345,13 +343,11 @@
     <string name="call_bg_library">Библиотека</string>
     <string name="call_bg_aurora">Северное сияние</string>
     <string name="call_background">Фон</string>
-    <string name="story_background_title">Фон</string>
     <string name="call_captions">Текст звонка</string>
     <string name="call_captions_preparing">Готовлю текст звонка… первый раз может скачаться модель.</string>
     <string name="call_captions_failed">Не удалось включить текст звонка. Проверьте интернет (первый раз) и попробуйте ещё.</string>
     <string name="call_captions_you">Вы</string>
     <string name="call_captions_peer">Собеседник</string>
-    <string name="call_peer_sharing">Собеседник показывает экран</string>
     <string name="call_camera_on">Включить камеру</string>
     <string name="menu_share_contact">Поделиться контактом</string>
     <string name="menu_unarchive">Вернуть из архива</string>
@@ -427,13 +423,10 @@
     <string name="map_invalid_point">Координаты точки некорректны.</string>
     <string name="map_choose_other">Выбрать приложение</string>
     <string name="map_open_web">Открыть веб-карту</string>
-    <string name="loc_dialog_title">Отправить мои координаты?</string>
     <string name="loc_dialog_label_hint">Подпись (необязательно)</string>
-    <string name="loc_send">Отправить</string>
     <string name="loc_cancel">Отмена</string>
     <string name="loc_unavailable">Не удалось определить координаты. Проверьте, что геолокация включена, и попробуйте ещё раз.</string>
     <string name="loc_permission_denied">Без разрешения на геолокацию координаты не определить. Разрешите доступ в настройках приложения.</string>
-    <string name="loc_preview">📍 Геопозиция</string>
     <string name="loc_pick_title">Отправить геопозицию</string>
     <string name="loc_send_point">Отправить эту точку</string>
     <string name="loc_my_location">Моё местоположение</string>
@@ -839,7 +832,6 @@
     <string name="peer_reset">Сбросить наблюдения</string>
     <string name="peer_routing_title">Через кого идут данные</string>
     <string name="peer_of_100">из 100</string>
-    <string name="peer_online">В сети</string>
     <string name="peer_speed">Скорость обмена</string>
     <string name="peer_no_data">нет данных</string>
     <string name="peer_delivery">Доставка</string>
@@ -901,8 +893,6 @@
     <string name="settings_stop_sharing_hint">Убрать объявление и локальную копию</string>
     <string name="settings_stop_receiving">Остановить приём</string>
     <string name="settings_update_two_places">Обновление найдено в двух местах — выберите, откуда скачать:</string>
-    <string name="settings_via_internet">Через интернет (GitHub); файл сам встанет в этот раздел</string>
-    <string name="settings_from_github">С GitHub; файл сам встанет в этот раздел и начнёт раздаваться</string>
     <string name="settings_share_received">Раздать полученный APK</string>
     <string name="settings_mark_apk">Отметить APK как обновление</string>
     <string name="settings_checking">Проверяю…</string>
@@ -923,7 +913,6 @@
     <string name="settings_relay_off">Выключено - режим абонента: НОВОЕ чужое на хранение не принимается, тяжёлое (картинки, видео, гифки, большие файлы) другим не пересылается. Лёгкое и нужное для связи несут все: маленькие документы и стикеры, текст и резервные копии, APK обновлений.</string>
     <string name="settings_relay_on">Включено: телефон хранит чужие файлы на хранении для контактов не в сети, раздаёт файлы сообществ и обновления другим. Чем больше телефонов-серверов, тем быстрее сеть.</string>
     <!-- Резервная копия профиля (вынесено из ProfileBackupScreen) -->
-    <string name="backup_restart_replace">Полная замена: приложение закроется, а после повторного открытия профиль и переписка станут такими, какими были на дату копии. Прежняя база не удаляется, а откладывается в служебную папку приложения.</string>
     <string name="backup_restart_new">Приложение закроется; откройте его снова - и вы войдёте в восстановленный профиль.</string>
     <string name="backup_restart_merge">Приложение закроется; откройте его снова - и оно дополнит профиль из копии. Нынешние чаты останутся, недостающее добавится из копии.</string>
     <string name="backup_restore_merge_button">Дополнить и закрыть</string>
@@ -977,8 +966,6 @@
     <string name="mod_author">Автор</string>
     <!-- Сохранённое и статистика группы (вынесено из экранов) -->
     <string name="sv_file_lc">файл</string>
-    <string name="sv_title">Избранное</string>
-    <string name="action_add">Добавить</string>
     <string name="sv_empty">В избранном пусто</string>
     <string name="sv_add">Добавить в избранное</string>
     <string name="sv_file_phone">Файл с телефона</string>
@@ -995,14 +982,9 @@
     <string name="sv_remove_q">Убрать из избранного?</string>
     <string name="sv_remove_body">Запись пропадёт из избранного. Сам файл в чате останется.</string>
     <string name="sv_remove_short">Запись пропадёт из избранного.</string>
-    <string name="sv_remove">Убрать</string>
-    <string name="sv_sticker">Стикер</string>
     <string name="sv_actions">Действия</string>
     <string name="sv_save_phone">Сохранить в телефон</string>
-    <string name="action_share">Поделиться</string>
     <string name="sv_goto_original">Перейти к оригиналу</string>
-    <string name="sv_unpin">Открепить</string>
-    <string name="sv_pin">Закрепить</string>
     <string name="sv_unsave">Убрать из избранного</string>
     <string name="sv_note_self">Заметка себе</string>
     <string name="sv_text">Текст</string>
@@ -1021,7 +1003,6 @@
     <string name="stat_posts">Публикации</string>
     <string name="stat_messages">Сообщения</string>
     <string name="stat_post_views">Просмотры постов</string>
-    <string name="stat_topics">Темы</string>
     <string name="stat_comments">Комментарии</string>
     <string name="stat_authors_7d">Авторы за 7 дней</string>
     <string name="stat_engagement">Отклик на публикации</string>
@@ -1029,7 +1010,6 @@
     <string name="stat_avg_views">Просмотров в среднем на пост</string>
     <string name="stat_avg_comments">Комментариев в среднем на пост</string>
     <string name="stat_views_note">Сумма просмотров постов — не число уникальных читателей канала.</string>
-    <string name="stat_manage">Управление</string>
     <string name="stat_admins">Администраторов</string>
     <string name="stat_requests">Заявок в ожидании</string>
     <string name="stat_empty_topics">Тем без сообщений</string>
@@ -1468,7 +1448,6 @@
     <string name="av_take_photo">Снять фото</string>
     <string name="av_video">Видеоаватар</string>
     <string name="av_video_set">Видеоаватар установлен: в профиле он играет, у друзей виден кадр из него</string>
-    <string name="av_video_too_long">Нужно видео до 15 секунд — это аватар, а не фильм</string>
     <string name="av_video_failed">Не удалось поставить видеоаватар</string>
     <string name="av_video_editor_title">Видеоаватар · до 15 секунд</string>
     <string name="av_video_source_hint">Снимите видео или выберите готовое. Доступно всё, что есть в видеоисториях: передняя и задняя камера, пауза, звук, фонарик, фильтры лица, замена фона, эффекты голоса, обрезка, кадр-постер и подпись.</string>
@@ -1591,14 +1570,11 @@
     <string name="bk_too_new_ver">Копия сделана более новой версией приложения (%1$s). Сначала обновите APU.</string>
     <string name="bk_update_bg">Обновление запущено в фоне; итог появится здесь через минуту-другую.</string>
     <string name="st_neighbors_offer">Соседи раздают новую версию — кнопка «Скачать» в карточке</string>
-    <string name="st_update_delta_done">Обновление скачано компактно (только разница версий) - установщик открыт</string>
     <string name="st_download_started">Скачивание началось. Когда файл скачается, он сам появится в «Обновлениях» — установка и раздача соседям начнутся сами</string>
     <string name="apc_anon_note">Анонимный опрос показывает только числа: кто как проголосовал, не видно никому.</string>
     <string name="st_dl_patch_title">Скачать компактно v%1$s</string>
-    <string name="st_dl_official_v">С официального сайта v%1$s</string>
     <string name="st_dl_net_v">По сети v%1$s</string>
     <string name="st_dl_v">Скачать v%1$s</string>
-    <string name="st_dl_official_only">Скачать официальный v%1$s</string>
     <string name="psd_auto_sync_note">Уже настроенные телефоны с одним профилем синхронизируются сами в фоне — ничего нажимать не нужно. Это окно только для разового переноса или восстановления нового телефона. Данные не заменяются без подтверждения.</string>
     <string name="bubble_kind_personal">личный чат</string>
     <string name="bubble_kind_group">группа</string>
@@ -1820,7 +1796,6 @@
     <string name="receiving_compact_tpl">Принимаю v%1$s (компактно)</string>
     <string name="receiving_patch_tpl">%1$s из %2$s — качаем только разницу версий</string>
     <string name="patch_offer_tpl">Патч %1$s от %2$d сосед(ей) — только разница версий</string>
-    <string name="pieces_offer_tpl">Кусками от %1$d сосед(ей) — без интернета</string>
     <string name="offers_many_tpl">Раздают %1$d соседа; %2$s</string>
     <string name="offer_one_tpl">Раздаёт сосед; %1$s</string>
     <string name="received_apk_tpl">Получен, %1$s</string>
@@ -1835,8 +1810,6 @@
     <string name="groups_create_group_failed">Не удалось создать группу</string>
     <string name="groups_join_failed">Не удалось войти: %1$s</string>
     <string name="ch_images_partial_failed">Не удалось прикрепить картинок: %1$d</string>
-    <string name="contact_sent_ok">Контакт отправлен: %1$s</string>
-    <string name="contact_send_failed">Не удалось отправить контакт</string>
     <string name="sync_copy_handed">Копия передана</string>
     <string name="sync_transfer_failed">Передача не удалась: %1$s</string>
     <string name="sync_cancelled">отмена</string>
@@ -1880,7 +1853,6 @@
     <string name="gif_server_busy">Сервер перегружен — показываю сохранённые гифки.</string>
     <string name="cdv_downloading_from">Качается с %1$s - сейчас отправим</string>
     <string name="cdv_asked_by">Просили: %1$s</string>
-    <string name="cdv_files_locked">Отправка фото, файлов и голосовых открывается с ранга «Круг друзей» — это 3 подтверждённых приглашения. Видео открывается с ранга «Проводник». Сейчас подтверждено: %1$d.</string>
     <string name="cdv_gif_not_sent">Гифка не отправлена: %1$s</string>
     <string name="peer_node_suffix">%1$s узел</string>
     <string name="identity_nick_hint">Никнейм для восстановления: @%1$s</string>
@@ -1993,7 +1965,6 @@
     <string name="voice_too_long">Сообщение слишком длинное для перевода в текст (до 12 минут).</string>
     <string name="voice_play">Слушать</string>
     <string name="voice_pause">Пауза</string>
-    <string name="voice_speed_default">1× · По умолчанию</string>
     <string name="voice_speed_normal">1×</string>
     <string name="voice_speed_half">0,5×</string>
     <string name="voice_speed_three_quarters">0,75×</string>
@@ -2158,7 +2129,6 @@
     <string name="st_official_download_version">Скачать с официального сайта — v%1$s</string>
     <string name="st_official_checking">Проверяем версию на официальном сайте…</string>
     <string name="st_official_check_download_hint">Проверить свежую версию и скачать, если она новее установленной</string>
-    <string name="st_official_already_requested">Эта версия уже скачивается или скачана. Проверьте загрузки и готовые обновления.</string>
     <string name="group_timezone_title">Часовой пояс группы</string>
     <string name="group_timezone_search">Поиск страны или города, например Москва</string>
     <string name="group_timezone_offset_hint">Смещение относительно UTC сейчас; летнее время учитывается автоматически.</string>
@@ -2240,7 +2210,6 @@
     <string name="heart_game_empty">Результаты других участников пока не получены.</string>
     <string name="heart_game_you_place">Вы — %1$d место</string>
     <string name="heart_game_place">Место %1$d</string>
-    <string name="heart_game_my_place">Ваше место: %1$d · ♥ %2$d</string>
 
     <!-- Мои заявки на вступление -->
     <string name="groups_my_requests_groups">Мои заявки в группы</string>
@@ -2275,7 +2244,6 @@
     <string name="my_join_keep">Оставить</string>
     <string name="my_join_remove">Убрать</string>
     <string name="my_join_open">Открыть</string>
-    <string name="my_join_resent">Заявка снова отправлена</string>
     <string name="my_join_empty_title">Заявок пока нет</string>
     <string name="my_join_empty_body">Здесь появятся заявки на вступление: отправленные, полученные владельцем и с ответом.</string>
 
@@ -2307,7 +2275,6 @@
     <string name="devices_manual_button">Подключиться по коду</string>
     <string name="devices_manual_placeholder">123 456</string>
     <string name="devices_not_pairing_qr">Введите шесть цифр с карточки QR-кода или полную строку apupair:.</string>
-    <string name="devices_comparison_code_hint">Это код сверки, а не код подключения. Сначала введите шесть цифр подключения с карточки QR.</string>
     <string name="devices_waiting_code">Ищем этот код подключения… QR-текст придёт автоматически.</string>
     <string name="devices_pairing_start_failed">Не удалось начать подключение. Откройте QR-код заново и попробуйте ещё раз.</string>
     <string name="devices_confirm_failed">Не удалось подтвердить подключение. Запрос остался на экране — попробуйте ещё раз.</string>
@@ -2594,7 +2561,6 @@
     <string name="ipv6_rec_copy_btn">Скопировать ссылку</string>
     <string name="ipv6_rec_copied">Ссылка скопирована в буфер обмена</string>
     <string name="ipv6_rec_any_provider_note">Рекомендация приведена для удобства: вы можете приобрести IPv6 по ссылке https://ru.shopproxy.net/buy-proxy/ipv6/ или использовать любой другой ресурс, магазин прокси либо собственный сервер, который вам нравится. При покупке выбирайте протокол SOCKS5 (или тариф SOCKS5 + HTTP) — полученные реквизиты сразу подойдут к полям выше.</string>
-    <string name="dpb_callsign_label">Код профиля</string>
     <string name="dpb_callsign_value_tpl">Код профиля: %1$s</string>
     <string name="dpb_callsign_short_tpl">Код %1$s</string>
     <string name="dpb_callsign_copied">Код профиля скопирован: %1$s</string>

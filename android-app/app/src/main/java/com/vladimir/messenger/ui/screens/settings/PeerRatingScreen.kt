@@ -78,7 +78,6 @@ import com.vladimir.messenger.ui.components.ApuSearchField
 import com.vladimir.messenger.ui.components.ApuSettingsHeader
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
-import com.vladimir.messenger.ui.components.apuGoldBrush
 import com.vladimir.messenger.ui.components.apuPremiumGloss
 import com.vladimir.messenger.ui.components.apuPremiumLift
 import com.vladimir.messenger.ui.components.ApuScrollbar

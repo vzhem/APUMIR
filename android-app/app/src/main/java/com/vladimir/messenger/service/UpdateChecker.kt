@@ -629,30 +629,6 @@ class UpdateChecker @Inject constructor(
     }
 
     /**
-     * Есть ли в системе уже начатая загрузка обновления APU.
-     *
-     * `DownloadManager` живёт вне процесса: после перезапуска приложения наш
-     * собственный таймер пуст, а файл всё ещё качается. Заголовки наших
-     * загрузок начинаются с «APU v» (см. ниже), по ним и узнаём свои.
-     */
-    /** Системная загрузка завершилась отказом (для текста в настройках). */
-    fun downloadFailed(downloadId: Long): Boolean = runCatching {
-        if (downloadId < 0L) return@runCatching false
-        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
-            ?: return@runCatching false
-        manager.query(DownloadManager.Query().setFilterById(downloadId))?.use { cursor ->
-            if (!cursor.moveToFirst()) return@use false
-            val titleColumn = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
-            val title = if (titleColumn >= 0) cursor.getString(titleColumn).orEmpty() else ""
-            cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) == DownloadManager.STATUS_FAILED &&
-                title.startsWith("APU v")
-        } == true
-    }.getOrElse {
-        Log.w(TAG, "download status query failed: ${it.message}")
-        false
-    }
-
-    /**
      * Видимое состояние официальной загрузки. Системное уведомление
      * DownloadManager человек может смахнуть, а загрузка (или её отказ)
      * остаётся: карточка в «Обновлениях» показывает ход и даёт отмену/повтор.

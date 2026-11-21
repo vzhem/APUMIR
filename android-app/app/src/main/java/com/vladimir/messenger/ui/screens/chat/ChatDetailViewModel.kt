@@ -495,12 +495,6 @@ class ChatDetailViewModel @Inject constructor(
     /** Микрофон при закрытых голосовых: объясняем, а не начинаем запись. */
     fun onVoiceLocked() = notify(_uiState.value.attachmentsLockedHint)
 
-    /** Кнопка звонка при закрытых звонках: объясняем, а не открываем звонок. */
-    fun onCallLocked() = notify(_uiState.value.callLockedHint)
-
-    /** Видео до «Проводника»: объясняем, а не молчим. */
-    fun onVideoLocked() = notify(_uiState.value.videoLockedHint)
-
     /** Третий рубеж для GIF: карточка панели могла остаться от прошлой версии. */
     private fun gifAllowed(): Boolean {
         if (rankRights.isAllowed(RankCapability.SEND_GIF)) return true

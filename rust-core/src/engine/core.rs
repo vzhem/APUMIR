@@ -5097,24 +5097,6 @@ impl P2PCore {
         });
     }
 
-    pub fn on_peer_connected(&self, peer_id: String, display_name: String) {
-        self.network.set_status(NetworkStatus::Connected);
-        self.events.emit(CoreEvent::PeerDiscovered {
-            peer_id,
-            display_name,
-            is_local: false,
-            observed_at_ms: crate::storage::models::now_ms(),
-        });
-        self.events.emit(CoreEvent::NetworkStatusChanged {
-            status: "connected".into(),
-        });
-    }
-
-    pub fn on_peer_lost(&self, peer_id: String) {
-        self.network.remove_peer(&peer_id);
-        self.events.emit(CoreEvent::PeerLost { peer_id });
-    }
-
     pub fn network_status(&self) -> String {
         self.network.status_str()
     }

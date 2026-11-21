@@ -15,8 +15,6 @@ import com.vladimir.messenger.ui.components.ApuPremiumIconTile
 import com.vladimir.messenger.ui.components.ApuPremiumDialog
 import com.vladimir.messenger.ui.components.ApuPremiumNoticeDialog
 import com.vladimir.messenger.ui.components.ApuPremiumChoiceRow
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuScrollbar
@@ -60,10 +58,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import com.vladimir.messenger.ui.components.swipeBack
 import com.vladimir.messenger.util.AppShare
 import android.content.Context
@@ -72,15 +68,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -88,7 +81,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -103,7 +95,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.ui.components.ProfileScreenBackground
-import com.vladimir.messenger.ui.components.AvatarPickerDialog
 import com.vladimir.messenger.ui.components.MyAvatar
 import com.vladimir.messenger.ui.theme.AvatarHolder
 import com.vladimir.messenger.ui.theme.StatusConnecting
@@ -115,8 +106,6 @@ import com.vladimir.messenger.data.swarm.StorageSettings
 import com.vladimir.messenger.data.swarm.SwarmMode
 import com.vladimir.messenger.data.swarm.SwarmPolicy
 import com.vladimir.messenger.data.swarm.SwarmSettings
-import com.vladimir.messenger.data.textcolor.TextColorPalette
-import com.vladimir.messenger.data.textcolor.TextColorSettingsStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -2471,79 +2460,6 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
             )
         }
     }
-}
-
-/**
- * Диалог подтверждения версии обновления: числовая (например 11.70.29),
- * должна быть новее текущей. Версия подставляется сама (из имени или из
- * самого APK); человек может исправить. [reading] — файл ещё копируется,
- * версия вот-вот заполнится.
- */
-@Composable
-private fun ApkVersionDialog(
-    title: String,
-    initialVersion: String,
-    onConfirm: (String) -> Unit,
-    onDismiss: () -> Unit,
-    fileName: String? = null,
-    sizeText: String? = null,
-    reading: Boolean = false,
-) {
-    var version by remember(initialVersion) { mutableStateOf(initialVersion) }
-    ApuSettingsDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            Column {
-                if (fileName != null) {
-                    Text(
-                        fileName,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                if (sizeText != null) {
-                    Text(
-                        stringResource(R.string.size_label_tpl, sizeText),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (reading) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        stringResource(R.string.settings_reading_version),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Spacer(modifier = Modifier.height(10.dp))
-                Text(
-                    stringResource(R.string.settings_version_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                ApuBubbleField(
-                    value        = version,
-                    onValueChange = { version = it },
-                    singleLine = true,
-                    label      = { Text(stringResource(R.string.settings_version_label)) },
-                    modifier   = Modifier.fillMaxWidth(),
-                )
-            }
-        },
-        confirmButton = {
-            ApuTextAction(
-                label = stringResource(R.string.settings_share_btn),
-                onClick = { onConfirm(version) },
-                enabled = !reading && version.isNotBlank(),
-            )
-        },
-        dismissButton = {
-            ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
-        },
-    )
 }
 
 @Composable

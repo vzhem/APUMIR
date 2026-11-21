@@ -47,6 +47,7 @@
 | [`CONTACT_DIRECTORY_RESET.md`](CONTACT_DIRECTORY_RESET.md) | Однократная очистка справочника контактов |
 | [`CORE_ROADMAP.md`](CORE_ROADMAP.md) | План развития ядра |
 | [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md) | План развития проекта: маршрут выхода на бесплатные площадки, решения владельца, риски. Очередь работ, не состояние |
+| [`PUBLICATION_WAVE_1.md`](PUBLICATION_WAVE_1.md) | Подготовка первой волны публикации (Uptodown и альтернативные площадки) |
 | [`DUAL_STACK_IPV6.md`](DUAL_STACK_IPV6.md) | Dual-stack: IPv6 и IPv4 в прямом канале |
 | [`FLASH_BACKUP_RUNBOOK.md`](FLASH_BACKUP_RUNBOOK.md) | Памятка по копии на флешку |
 | [`GROUP_QUIET_HOURS.md`](GROUP_QUIET_HOURS.md) | Расписание запрета сообщений в группе |
@@ -78,6 +79,7 @@
 | [`RESTORE_ON_NEW_PC.md`](RESTORE_ON_NEW_PC.md) | Продолжение работы на новом ПК |
 | [`IDLE_POWER.md`](IDLE_POWER.md) | Лёгкий простой: нагрев/батарея без действий |
 | [`CHAT_IDLE_RESOURCE_AUDIT.md`](CHAT_IDLE_RESOURCE_AUDIT.md) | Статический аудит нагрузки/нагрева, роли server/helper и план контролируемого A/B |
+| [`THERMAL_CHECK.md`](THERMAL_CHECK.md) | Методика замера нагрева и CPU на физическом Android-телефоне |
 | [`RUNTIME_DIAGNOSTICS.md`](RUNTIME_DIAGNOSTICS.md) | Расширенная диагностика |
 | [`SCHEDULED_PREDELIVERY.md`](SCHEDULED_PREDELIVERY.md) | Предварительная доставка и отложенный показ |
 | [`SCHEDULED_SEND_DATE_TIME.md`](SCHEDULED_SEND_DATE_TIME.md) | Произвольная дата и время отправки |

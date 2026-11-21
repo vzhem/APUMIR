@@ -46,7 +46,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import androidx.compose.ui.viewinterop.AndroidView

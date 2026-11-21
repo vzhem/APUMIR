@@ -5,7 +5,6 @@ import com.vladimir.messenger.ui.components.ApuBackButton
 import com.vladimir.messenger.ui.components.ApuPremiumSpinner
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
-import androidx.compose.material3.HorizontalDivider
 import com.vladimir.messenger.data.local.MessagePinPolicy
 import com.vladimir.messenger.data.textcolor.TextColorPalette
 import com.vladimir.messenger.data.textcolor.TextColorSettingsStore
@@ -21,7 +20,6 @@ import com.vladimir.messenger.data.textcolor.TextColorSettingsStore
 import androidx.compose.ui.text.style.TextOverflow
 import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
-import com.vladimir.messenger.ui.components.ApuNotificationBadge
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuBubbleCard
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
@@ -92,10 +90,6 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton

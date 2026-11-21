@@ -17,8 +17,6 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /** Итог замены фона: файл и понятное сообщение, если фон не лёг. */

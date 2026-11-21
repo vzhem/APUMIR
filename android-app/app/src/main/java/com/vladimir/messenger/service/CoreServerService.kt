@@ -3,7 +3,6 @@ package com.vladimir.messenger.service
 import com.vladimir.messenger.data.link.ServiceHost
 import com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
 import com.vladimir.messenger.data.diagnostics.OperationalCounter
-import com.vladimir.messenger.data.diagnostics.DiagnosticPhase
 import com.vladimir.messenger.data.diagnostics.RuntimeDiagnostics
 import com.vladimir.messenger.data.diagnostics.DiagnosticOperation
 
@@ -16,12 +15,10 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
-import android.os.SystemClock
 import androidx.core.app.ServiceCompat
 import android.util.Log
 import com.vladimir.messenger.domain.model.MessageChannel
 import com.vladimir.messenger.data.relay.RelayEnvelope
-import com.vladimir.messenger.domain.model.MessageStatus
 import androidx.core.app.NotificationCompat
 import com.vladimir.messenger.MainActivity
 import com.vladimir.messenger.MessengerApplication

@@ -2,7 +2,6 @@ package com.vladimir.messenger.data.local.entity
 
 import androidx.room.Entity
 import androidx.room.Index
-import androidx.room.PrimaryKey
 
 /**
  * Голос участника в опросе (р250): одна строка на пару «опрос — участник».

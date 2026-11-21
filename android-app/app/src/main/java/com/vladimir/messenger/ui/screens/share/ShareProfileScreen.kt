@@ -24,7 +24,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.vladimir.messenger.ui.components.Avatar
 import com.vladimir.messenger.ui.components.ProfileScreenBackground
 import com.vladimir.messenger.ui.components.MyAvatar
 import com.vladimir.messenger.util.QrCodeGenerator

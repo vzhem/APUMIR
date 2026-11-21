@@ -1074,7 +1074,7 @@ object TransferDiagnostics {
     private const val MEBIBYTE = 1024L * 1024L
 }
 
-/** Hilt-точка входа для чтения очереди передач в фоне (см. BotApiEntryPoint). */
+/** Hilt-точка входа для чтения очереди передач в фоне. */
 @EntryPoint
 @InstallIn(SingletonComponent::class)
 interface DiagnosticsEntryPoint {

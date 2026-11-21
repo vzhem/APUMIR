@@ -14,8 +14,7 @@
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/saved/SavedViewModel.kt": 7,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/MessagesNetworkDialog.kt": 1,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/SettingsViewModel.kt": 2,
-    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/share/ShareProfileScreen.kt": 1,
-    "android-app/app/src/main/java/com/vladimir/messenger/ui/update/UpdateViewModel.kt": 1
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/share/ShareProfileScreen.kt": 1
   },
   "missing_en": 0,
   "data": {

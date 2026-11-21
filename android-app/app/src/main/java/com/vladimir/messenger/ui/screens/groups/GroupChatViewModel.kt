@@ -9,7 +9,6 @@ import com.vladimir.messenger.data.group.GroupRepository
 import com.vladimir.messenger.data.group.GroupRole
 import com.vladimir.messenger.data.group.GroupSummary
 import com.vladimir.messenger.data.group.MemberSummary
-import com.vladimir.messenger.data.group.TopicSummary
 import com.vladimir.messenger.domain.model.Chat
 import com.vladimir.messenger.util.GroupInviteCardSender
 import com.vladimir.messenger.data.local.MessagePinPolicy

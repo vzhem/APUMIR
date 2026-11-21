@@ -1080,30 +1080,6 @@ object RustBridge {
             false
         }
     }
-    fun sendViaTcp(host: String, port: Int, payload: String): Boolean {
-        return try {
-            val socket = java.net.Socket()
-            socket.connect(java.net.InetSocketAddress(host, port), 10000)
-            socket.getOutputStream().write(payload.toByteArray())
-            socket.getOutputStream().flush()
-            val ack = ByteArray(3)
-            socket.getInputStream().read(ack)
-            socket.close()
-            android.util.Log.i("RustBridge", "TCP sent to $host:$port, ACK=${String(ack)}")
-            true
-        } catch (e: Exception) {
-            android.util.Log.w("RustBridge", "TCP failed to $host:$port: ${e.message}")
-            false
-        }
-    }
-    /**
-     * Получить публичный ключ текущего устройства.
-     */
-    fun getPublicKey(nodeId: String): String? {
-        if (isMainThread()) return cachedPublicKey
-        return publicKey()
-    }
-
 
     /**
      * Подтверждение доставки. Уходит в ФОН и не задерживает обработку.

@@ -10,11 +10,8 @@ import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.Box
 import com.vladimir.messenger.ui.components.ApuScrollbar
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
-import com.vladimir.messenger.ui.components.ApuBubbleShape
 import com.vladimir.messenger.ui.components.ApuBubbleSurfaceColor
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuSearchField
@@ -36,12 +33,10 @@ import androidx.compose.material.icons.filled.SortByAlpha
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import com.vladimir.messenger.util.AppShare
 import com.vladimir.messenger.data.link.ShortShare
-import com.vladimir.messenger.util.ContactShareLink
 import com.vladimir.messenger.util.OwnInvite
 import androidx.compose.ui.Alignment
 import com.vladimir.messenger.ui.components.ChatWallpaper

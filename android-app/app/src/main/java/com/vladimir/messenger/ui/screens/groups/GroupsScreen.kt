@@ -120,7 +120,6 @@ import com.vladimir.messenger.data.group.GroupSummary
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.ApuPremiumContentButton
 import com.vladimir.messenger.ui.components.ApuPremiumFloatingActionButton
-import com.vladimir.messenger.ui.components.ApuPremiumCheckbox
 import com.vladimir.messenger.ui.components.ApuPremiumSwitch
 import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 import com.vladimir.messenger.ui.components.ApuGoldInk

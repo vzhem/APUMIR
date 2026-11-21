@@ -6,7 +6,6 @@ import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.local.dao.ContactDao
 import com.vladimir.messenger.data.local.dao.ContactResetDao
 import com.vladimir.messenger.data.local.entity.ContactEntity
-import com.vladimir.messenger.data.security.DeviceIdentityHistory
 import com.vladimir.messenger.domain.model.Contact
 import com.vladimir.messenger.util.NodeIds
 import kotlinx.coroutines.Dispatchers

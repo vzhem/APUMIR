@@ -5599,3 +5599,46 @@ APK для всех ABI; выпуск создан и отмечен Latest:
 выбор остаётся включённым после обновления. Helper/MQTT и другие отдельные пути
 не менялись; физический A/B и причинность нагрева не проверены. Релиз не означает,
 что одна настройка устраняет измеренную нагрузку.
+
+## 2026-11-21. Чистка неиспользуемого кода, логов сборки и потолков god-файлов
+
+Проведена ревизия кодовой базы приложения (Android Kotlin, Rust-ядро, ресурсы,
+Gradle-зависимости, документация и CI-гейты) на ветке `arena/e576e256-apumir`:
+
+- **Удалены неиспользуемые файлы и артефакты (23 файла):**
+  - 4 мёртвых Kotlin-файла без единой ссылки в коде и тестах: `GetChatsUseCase.kt`,
+    `BotApiEntryPoint.kt`, `BatteryOptimizer.kt`, `UpdateViewModel.kt` (обновлён
+    контракт в `scripts/ci/check-ui-return-contracts.py` и очищены записи в
+    `hardcoded-strings-baseline.json` и `silent-catch-baseline.json`).
+  - Некомпилируемый остаток старого бот-PR: `rust-core/src/network/store_and_forward.rs`,
+    `scripts/setup_offline_delivery.ps1`, `create_store_forward.py`, а также
+    разовые черновики `online_files.py`, `online_files2.py`, `icon-design-source.png`
+    и устаревший `scripts/generate-avatar-presets.py` (актуальный генератор —
+    `tools/avatar_presets/generate_avatars.py`).
+  - 12 закоммиченных аварийных/сборочных логов в `android-app/` (`hs_err_pid*.log`,
+    `replay_pid*.log`, `build_log.txt`, `rebuild_hilt_log.txt`); маски добавлены
+    в `.gitignore`.
+- **Удалены неиспользуемые функции, ресурсы, импорты и дубли зависимостей:**
+  - Kotlin/Compose: мёртвые кнопки звонка `ScreenShareCallButton`,
+    `CaptionsCallButton`, `BackgroundsCallButton` в `CallScreen.kt`; невызываемые
+    `RustBridge.sendViaTcp` и `RustBridge.getPublicKey(nodeId)`; устаревшие
+    `BotApi.getLatestVersion`, `UpdateChecker.downloadFailed`,
+    `ChatDetailViewModel.onCallLocked`/`onVideoLocked`,
+    `OnboardingViewModel.onFinishOnboarding`.
+  - Rust: неиспользуемые методы `CoreEngine::on_peer_connected` и `on_peer_lost`
+    в `rust-core/src/engine/core.rs` (не экспортированы в `lib.udl`, 0 вызовов).
+  - Ресурсы и импорты: 34 неиспользуемых строковых ключа синхронно удалены из
+    `values/strings.xml` и `values-en/strings.xml`; удалено 187 неиспользуемых и
+    дублирующихся импортов в 67 Kotlin-файлах.
+  - Gradle: убран дубликат `implementation("com.google.zxing:core:3.5.3")` в
+    `android-app/app/build.gradle.kts` (оставлен `libs.zxing.core`) и неиспользуемая
+    запись `jna` без `@aar` в `android-app/gradle/libs.versions.toml`.
+- **Закрыты расхождения CI-гейтов на `main` и снижены потолки god-файлов:**
+  - В `docs/README.md` добавлены `PUBLICATION_WAVE_1.md` и `THERMAL_CHECK.md`
+    (`check-docs-index.py` снова зелёный).
+  - Вынесены `ApkVersionDialog.kt` (из `SettingsScreen.kt`),
+    `ApuConnectByLinkDialog.kt` (из `ChatListScreen.kt`) и
+    `ApkReceivedScanner.kt` (из `ApkSeeder.kt` с явным логированием ошибок чтения
+    APK); потолки в `god-files-baseline.json`, `silent-catch-baseline.json` и
+    `hardcoded-strings-baseline.json` понижены через `--write`.
+
