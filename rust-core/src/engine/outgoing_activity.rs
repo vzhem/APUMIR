@@ -122,6 +122,8 @@ pub fn is_user_correspondence_send(
     if trimmed.is_empty()
         || AUXILIARY_CHAT_SCOPES.contains(&trimmed)
         || message_id.starts_with("peer-rank:")
+        || message_id.starts_with("push1-")
+        || message_id.starts_with("fh")
     {
         return false;
     }

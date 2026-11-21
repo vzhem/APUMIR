@@ -148,7 +148,9 @@ class AddressBookSwarmBackup @Inject constructor(
     // ── отправка ────────────────────────────────────────────────────────────
 
     private suspend fun send(to: String, text: String): Boolean = withContext(Dispatchers.IO) {
-        runCatching { RustBridge.sendMessage(UUID.randomUUID().toString(), to, to, text) }
+        val kind = text.substringAfter('|', "").substringBefore('|')
+        val slot = "apubk:$kind:${shaHex(text).take(16)}"
+        runCatching { RustBridge.sendMessage(slot, to, to, text) }
             .getOrDefault(false)
     }
 

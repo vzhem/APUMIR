@@ -156,6 +156,22 @@ pub fn held_from_envelope(envelope: &str, now_ms: i64) -> Option<HeldEnvelope> {
     }
 }
 
+/// Является ли удержанный конверт мимолётным служебным сигналом или файловым
+/// пакетом (`is_transient`). Такие кадры хранителям K5 не предлагаются и чужими
+/// телефонами не удерживаются — они живут минуты и не являются перепиской.
+pub fn is_transient_held_envelope(envelope: &str) -> bool {
+    match wire::parse(envelope) {
+        Some(MeshEnvelope::Relay {
+            msg_id,
+            chat_scope,
+            e2e_payload,
+            ..
+        }) => crate::network::relay_queue::message_kind(&msg_id, &chat_scope, &e2e_payload)
+            .is_transient(),
+        _ => false,
+    }
+}
+
 pub fn offer_payload(envelope: &str) -> String {
     format!("{}{}", CUSTODY_OFFER_PREFIX, envelope)
 }
@@ -262,7 +278,7 @@ impl CustodyHold {
     /// если для этого получателя уже держим [`MAX_HOLD_PER_RECIPIENT`] штук.
     /// Повторное предложение того же сообщения - принимаем (это не новый объём).
     pub fn hold(&self, item: HeldEnvelope, enabled: bool) -> CustodyAck {
-        if !enabled {
+        if !enabled || is_transient_held_envelope(&item.envelope) {
             return CustodyAck::Refused;
         }
         let mut held = self.held.lock().unwrap();
@@ -296,6 +312,18 @@ impl CustodyHold {
         let before = held.len();
         held.retain(|known| known.msg_id != msg_id);
         if held.len() != before { self.attempts.lock().unwrap().remove(msg_id); }
+        held.len() != before
+    }
+
+    /// Снять чужую копию по квитанции очистки от получателя (`rcpt|msg_id|recipient`).
+    /// Проверяется совпадение `recipient`, чтобы сторонний узел не стер копию другого адресата.
+    pub fn remove_matching_recipient(&self, msg_id: &str, expected_recipient: &str) -> bool {
+        let mut held = self.held.lock().unwrap();
+        let before = held.len();
+        held.retain(|known| !(known.msg_id == msg_id && known.recipient == expected_recipient));
+        if held.len() != before {
+            self.attempts.lock().unwrap().remove(msg_id);
+        }
         held.len() != before
     }
 
@@ -449,8 +477,11 @@ impl CustodyOffers {
     }
 
     /// Поставить в очередь. Повтор того же сообщения не добавляется.
-    /// `false` - очередь полна.
+    /// `false` - очередь полна или конверт мимолётный.
     pub fn enqueue(&self, item: HeldEnvelope) -> bool {
+        if is_transient_held_envelope(&item.envelope) {
+            return false;
+        }
         let mut tasks = self.tasks.lock().unwrap();
         if tasks.iter().any(|known| known.msg_id == item.msg_id) {
             return true;
@@ -901,5 +932,31 @@ mod tests {
         assert_eq!(offers.purge_expired(1_000 + 20_000), 1);
         assert_eq!(offers.pending_len(), 0);
         assert_eq!(offers.accepted_for("m1"), 0);
+    }
+
+    #[test]
+    fn transient_envelopes_are_refused_by_hold_and_offers() {
+        let hold = CustodyHold::new();
+        let offers = CustodyOffers::new();
+        let eph = held_from_envelope(
+            &envelope("eph1-av1_ready-abcd", "pk_recv", "pk_orig", 120),
+            1_000,
+        )
+        .unwrap();
+        assert_eq!(hold.hold(eph.clone(), true), CustodyAck::Refused);
+        assert_eq!(hold.held_len(), 0);
+        assert!(!offers.enqueue(eph));
+        assert_eq!(offers.pending_len(), 0);
+    }
+
+    #[test]
+    fn remove_matching_recipient_guards_against_wrong_recipient() {
+        let hold = CustodyHold::new();
+        let item = held_from_envelope(&envelope("m1", "pk_recv", "pk_orig", 3600), 1_000).unwrap();
+        assert_eq!(hold.hold(item, true), CustodyAck::Accepted);
+        assert!(!hold.remove_matching_recipient("m1", "pk_other"));
+        assert!(hold.contains("m1"));
+        assert!(hold.remove_matching_recipient("m1", "pk_recv"));
+        assert!(!hold.contains("m1"));
     }
 }

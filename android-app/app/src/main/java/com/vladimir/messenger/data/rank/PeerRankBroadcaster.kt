@@ -109,10 +109,11 @@ class PeerRankBroadcaster @Inject constructor(
             }
 
             var sent = 0
+            val weekBucket = nowMs / (7L * 24 * 3_600_000L)
             for ((target, chatId) in targets) {
                 val ok = runCatching {
                     RustBridge.sendMessage(
-                        UUID.randomUUID().toString(),
+                        "peer-rank-bcast:$qualified:$weekBucket",
                         chatId,
                         target,
                         envelope,
@@ -148,13 +149,15 @@ class PeerRankBroadcaster @Inject constructor(
         val nowMs = System.currentTimeMillis()
         if (nowMs - prefs.getLong(key, 0L) < REPLY_MIN_INTERVAL_MS) return@withContext false
         val chatId = resolveChatId(peerId) ?: return@withContext false
-        val envelope = RankWire.build(own, ReferralRankStore.qualifiedDirectCount(app), nowMs)
+        val qualified = ReferralRankStore.qualifiedDirectCount(app)
+        val envelope = RankWire.build(own, qualified, nowMs)
             ?: return@withContext false
         // Как и в [requestRank]: false от ядра означает «уйдёт из офлайн-очереди»,
         // а не «не дошло». Раньше ответ на запрос считался неудачным и
         // повторялся на каждый запрос, но собеседник при этом ждал рассылку.
+        val hourBucket = nowMs / REPLY_MIN_INTERVAL_MS
         val sent = runCatching {
-            RustBridge.sendMessage("peer-rank:" + UUID.randomUUID(), chatId, peer, envelope)
+            RustBridge.sendMessage("peer-rank-reply:$qualified:$hourBucket", chatId, peer, envelope)
         }
         if (sent.getOrNull() == true) {
             prefs.edit().putLong(key, nowMs).apply()
@@ -209,9 +212,10 @@ class PeerRankBroadcaster @Inject constructor(
         // отправлялся вовсе - знак VIP так и не появлялся. Теперь онемевшая
         // доставка запоминается отдельно и повторяется через [REQUEST_RETRY_MS],
         // а не через сутки.
+        val retryBucket = nowMs / REQUEST_RETRY_MS
         val sent = runCatching {
             RustBridge.sendMessage(
-                UUID.randomUUID().toString(), chatId, peer, RankWire.buildRankRequest(),
+                "peer-rank-req:$retryBucket", chatId, peer, RankWire.buildRankRequest(),
             )
         }
         val ok = sent.getOrDefault(false)

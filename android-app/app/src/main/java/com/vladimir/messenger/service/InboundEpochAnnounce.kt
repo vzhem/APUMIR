@@ -40,7 +40,8 @@ internal fun announceOwnEpoch(context: Context, peerId: String) {
     // эпоха адресована конкретному узлу, а таким «показался в сети» значит
     // только то, что через них прошёл чужой кадр.
     if (peerId.length < 16 || peerId.startsWith("CUSTD") || peerId.startsWith("relay")) return
-    com.vladimir.messenger.data.push.PushEpochPublish.noteCorrespondentIfEnabled(context, peerId)
+    com.vladimir.messenger.data.push.PushEpochPublish
+        .noteCorrespondentIfEnabled(context, peerId, passive = true)
 }
 
 /**
@@ -53,5 +54,6 @@ internal fun announceOwnEpoch(context: Context, peerId: String) {
  */
 internal fun announceGroupCorrespondent(context: Context, senderId: String) {
     if (!com.vladimir.messenger.util.NodeIds.isNodeId(senderId)) return
-    com.vladimir.messenger.data.push.PushEpochPublish.noteCorrespondentIfEnabled(context, senderId)
+    com.vladimir.messenger.data.push.PushEpochPublish
+        .noteCorrespondentIfEnabled(context, senderId, passive = true)
 }

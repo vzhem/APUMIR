@@ -7,43 +7,46 @@ object EphemeralControl {
     /** Префикс транспортного ID служебного кадра (см. [transportId]). */
     private const val TRANSPORT_PREFIX = "eph1-"
 
+    private val REPLACEABLE_GROUP_KINDS = setOf(
+        "typ", "avv1", "dir1", "dva1",
+        // Запросы синхронизации и выборки
+        "treq", "rreq", "who", "preq", "pkreq",
+        "pwant", "mwant", "mreq", "fwant", "fhave", "fnone",
+        "pcreq", "pcnt", "creq", "cids", "cinf", "peers", "jsq",
+        // Общесетевой и статусный gossip профилей/пакетов
+        "dir", "nick", "avat", "bday", "emst", "cap",
+        "upk", "upwant", "upnone", "upask", "uppk", "uppwant",
+        "fpk", "fpwant", "fpnone", "fpask",
+    )
+
     fun isReplaceable(text: String): Boolean {
         // Periodic game snapshots are disposable; never grow the durable chat backlog.
         if (text.startsWith(com.vladimir.messenger.data.contactreset.ContactResetWire.PREFIX)) return true
         if (text.startsWith("APUTYP1|APUGAME1|")) return true
+        if (com.vladimir.messenger.data.rank.RankWire.isRankPacket(text) ||
+            com.vladimir.messenger.data.rank.RankWire.isRankRequest(text)
+        ) return true
         if (text == "APUTYP1|0" || text == "APUTYP1|1") return true
-        if (text.startsWith("APUGRP1|typ|")) {
-            val parts = text.split('|', limit = 6)
-            return parts.size == 5 && parts[4] in setOf("0", "1")
-        }
-        // Анонсы и просьбы видеоаватаров — служебный конверт (avv1), как контакт-
-        // сброс: не растят долгий журнал и не теснят сообщения при повторах.
         if (text.startsWith("APUGRP1|avv1|")) return true
+        if (text.startsWith("APUBK1|") ||
+            text.startsWith("APUINVREJ1|") ||
+            text.startsWith("APUVIEW1|") ||
+            text.startsWith("APUHEART1|") ||
+            text.startsWith("APUREAD1|") ||
+            text.startsWith("APUREACT1|")
+        ) return true
+        if (text.startsWith("APUGRP1|")) {
+            val parts = text.split('|', limit = 6)
+            val kind = parts.getOrNull(1) ?: return false
+            if (kind == "typ") {
+                return parts.size == 5 && parts[4] in setOf("0", "1")
+            }
+            return kind in REPLACEABLE_GROUP_KINDS
+        }
         // Привязка и замена профиля на том же устройстве (dva1) — заменяемый служебный пакет.
         if (text.startsWith(DeviceProfileAnchor.Wire.PREFIX)) return true
-        // Истории и отклики на них (реакция, комментарий, сводка) — `APUSTORY1:`
-        // и `APUSTORY1:FB1|` (StoryStore.PREFIX / StoryFeedbackWire.MARKER).
-        //
-        // Зачем. Владелец (2026-11-15): «нужно сделать так чтобы эти очереди не
-        // плодились и не копились… это может копится от чего угодно… от сообщений
-        // историй лайков дизлайков видиоисторий фото профиля вип статус». Его
-        // отчёт с телефона: склад пересылки держит 17099 записей, RAM-очередь
-        // 3621, а в самом телефоне ожидает отправки шесть сообщений.
-        //
-        // Пакет истории и отклик НЕ имеют строки в переписке — они поглощаются до
-        // записи (`ChatRepository.saveIncomingMessage`, ветка `isStoryPacket`),
-        // живут сутки и повторяются, пока у собеседника нет прямого пути. Но
-        // транспортный ID им выдавал `StoryOutbox.transportId` — обычный UUID без
-        // отметки. Ядро такой ID не может отличить от переписки (тело запечатано,
-        // префикс не виден), поэтому каждый пакет лёг в резерв ПЕРЕПИСКИ: общий
-        // предел 500 на получателя и 1000 своих, срок хранения неделя. Служебный
-        // трафик занимал место писем и копился.
-        //
-        // С отметкой `message_kind` узнаёт его как сигнал: срок 5 минут, отдельный
-        // маленький резерв, уборка при восстановлении, а квитанция доставки
-        // снимает удержание (см. `serviceFrameWithoutRow`). Сама история не
-        // теряется: её досылка идёт из своего хранилища на телефоне и повторяется
-        // сама.
+        // Истории и отклики на них (`APUSTORY1:` и `APUSTORY1:FB1|`) досылаются
+        // собственной очередью StoryOutbox и не имеют строки в переписке.
         if (text.startsWith("APUSTORY1:")) return true
         val parts = text.split('|', limit = 3)
         return parts.size >= 2 && parts[0] in setOf("APUGIF1", "APUSTK1") &&
