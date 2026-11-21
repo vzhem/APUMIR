@@ -774,14 +774,15 @@ impl RelayQueue {
         self.enqueue_foreign(msg, false)
     }
 
-    /// Явно повторно поставить СВОЁ сообщение в очередь, обновив его абсолютный TTL.
-    ///
-    /// В отличие от обычного `enqueue_own`, повтор с тем же ID заменяет старую
-    /// RAM-копию, если она ещё есть, и добавляет запись заново, если её уже
-    /// очистил expiry sweeper. Чужие записи с тем же ID не трогаем.
-    pub fn refresh_own(&self, msg: RelayMessage) -> Result<bool, RelayQueueError> {
+    /// Явно повторно поставить СВОЁ сообщение в очередь, обновив его абсолютный TTL,
+    /// и вернуть ID старых своих записей, снятых склейкой (чтобы вызывающий мог
+    /// синхронно убрать их из durable-склада и K5-предложений).
+    pub fn refresh_own_returning_coalesced(
+        &self,
+        msg: RelayMessage,
+    ) -> Result<(bool, Vec<String>), RelayQueueError> {
         if msg.hops_exceeded() {
-            return Ok(false);
+            return Ok((false, Vec::new()));
         }
 
         let msg_id = msg.msg_id.clone();
@@ -794,7 +795,25 @@ impl RelayQueue {
                 || existing.message.origin_sender != msg.origin_sender
                 || existing.message.chat_scope != msg.chat_scope
             {
-                return Ok(false);
+                return Ok((false, Vec::new()));
+            }
+            let mut coalesced = Vec::new();
+            if let Some(key) = coalesce_key(&msg) {
+                coalesced = entries
+                    .values()
+                    .filter(|entry| {
+                        entry.own
+                            && entry.message.msg_id != msg_id
+                            && coalesce_key(&entry.message).as_deref() == Some(key.as_str())
+                    })
+                    .map(|entry| entry.message.msg_id.clone())
+                    .collect();
+                for id in &coalesced {
+                    entries.remove(id);
+                }
+                if !coalesced.is_empty() {
+                    self.own_coalesced.fetch_add(coalesced.len(), Ordering::Relaxed);
+                }
             }
             entries.insert(
                 msg_id,
@@ -805,28 +824,32 @@ impl RelayQueue {
                     class,
                 },
             );
-            return Ok(true);
+            return Ok((true, coalesced));
         }
         drop(entries);
 
         // The missing-ID path keeps the same own-reserve and eviction policy as
         // a first send. A concurrent enqueue is safely handled by the normal
         // deduplication in `enqueue_own`.
-        self.enqueue_own(msg)
+        self.enqueue_own_returning_coalesced(msg)
     }
 
-    /// Поставить СВОЁ сообщение (переписка этого узла).
+    /// Явно повторно поставить СВОЁ сообщение в очередь, обновив его абсолютный TTL.
     ///
-    /// Отличие от [`RelayQueue::enqueue`]: свой запас (`max_own_total` /
-    /// `max_own_per_recipient`) и НИКАКИХ отказов из-за чужих лимитов. Если свой
-    /// запас исчерпан, вытесняется самое старое СВОЁ сообщение (для того же
-    /// получателя, иначе по всей очереди): сама копия остаётся в durable-сторе и
-    /// в очереди досылки телефона, поэтому это не потеря, а разгрузка RAM.
-    ///
-    /// `Err(OwnQueueFull)` возможен только при `max_own_total == 0` (тесты).
-    pub fn enqueue_own(&self, msg: RelayMessage) -> Result<bool, RelayQueueError> {
+    /// В отличие от обычного `enqueue_own`, повтор с тем же ID заменяет старую
+    /// RAM-копию, если она ещё есть, и добавляет запись заново, если её уже
+    /// очистил expiry sweeper. Чужие записи с тем же ID не трогаем.
+    pub fn refresh_own(&self, msg: RelayMessage) -> Result<bool, RelayQueueError> {
+        self.refresh_own_returning_coalesced(msg).map(|(inserted, _)| inserted)
+    }
+
+    /// Поставить СВОЁ сообщение и вернуть ID старых своих записей, снятых склейкой.
+    pub fn enqueue_own_returning_coalesced(
+        &self,
+        msg: RelayMessage,
+    ) -> Result<(bool, Vec<String>), RelayQueueError> {
         if msg.hops_exceeded() {
-            return Ok(false);
+            return Ok((false, Vec::new()));
         }
 
         let mut entries = self.entries.lock().unwrap();
@@ -859,17 +882,18 @@ impl RelayQueue {
                     class,
                 },
             );
-            return Ok(true);
+            return Ok((true, Vec::new()));
         }
 
         if entries.contains_key(&msg.msg_id) {
-            return Ok(false); // дедупликация
+            return Ok((false, Vec::new())); // дедупликация
         }
 
         // Склейка повторов: на один адрес побудки нужна одна запись, а не все
         // объявления подряд (см. `coalesce_key`).
+        let mut stale = Vec::new();
         if let Some(key) = coalesce_key(&msg) {
-            let stale: Vec<String> = entries
+            stale = entries
                 .values()
                 .filter(|entry| {
                     entry.own && coalesce_key(&entry.message).as_deref() == Some(key.as_str())
@@ -914,7 +938,7 @@ impl RelayQueue {
             {
                 // Уступать некому: запас служебного занят пробуждением. Тогда
                 // теряется входящий служебный пакет, а не адрес собеседника.
-                return Ok(false);
+                return Ok((false, stale));
             }
         } else {
             // Свой запас класса: группа не может занять долю личной переписки,
@@ -928,7 +952,7 @@ impl RelayQueue {
             {
                 // Класс переполнен, вытеснять внутри него нечего: входящее не
                 // принято. «Принято» не должно оказаться ложью.
-                return Ok(false);
+                return Ok((false, stale));
             }
 
             if self.own_for_locked(&entries, &msg.recipient) >= self.max_own_per_recipient
@@ -968,7 +992,20 @@ impl RelayQueue {
                 class,
             },
         );
-        Ok(true)
+        Ok((true, stale))
+    }
+
+    /// Поставить СВОЁ сообщение (переписка этого узла).
+    ///
+    /// Отличие от [`RelayQueue::enqueue`]: свой запас (`max_own_total` /
+    /// `max_own_per_recipient`) и НИКАКИХ отказов из-за чужих лимитов. Если свой
+    /// запас исчерпан, вытесняется самое старое СВОЁ сообщение (для того же
+    /// получателя, иначе по всей очереди): сама копия остаётся в durable-сторе и
+    /// в очереди досылки телефона, поэтому это не потеря, а разгрузка RAM.
+    ///
+    /// `Err(OwnQueueFull)` возможен только при `max_own_total == 0` (тесты).
+    pub fn enqueue_own(&self, msg: RelayMessage) -> Result<bool, RelayQueueError> {
+        self.enqueue_own_returning_coalesced(msg).map(|(inserted, _)| inserted)
     }
 
     fn enqueue_foreign(&self, msg: RelayMessage, free_expired: bool) -> Result<bool, RelayQueueError> {
@@ -1256,11 +1293,17 @@ impl RelayQueue {
             .map(|(msg_id, recipient)| (msg_id.as_str(), recipient.as_str()))
             .collect();
         let entries = self.entries.lock().unwrap();
+        // Служебные сигналы и файловые пакеты (`is_transient`) в роевой обмен
+        // не выходят: их отправляет сам автор напрямую или через брокера, а
+        // пересказ мимолётных сигналов между ретрансляторами раздувал трафик.
         let mut missing: Vec<&QueueEntry> = entries
             .values()
             .filter(|entry| {
-                !peer_items
-                    .contains(&(entry.message.msg_id.as_str(), entry.message.recipient.as_str()))
+                !entry.kind.is_transient()
+                    && !peer_items.contains(&(
+                        entry.message.msg_id.as_str(),
+                        entry.message.recipient.as_str(),
+                    ))
             })
             .collect();
         missing.sort_by(|a, b| {
@@ -1282,12 +1325,13 @@ impl RelayQueue {
         (candidates, total_missing)
     }
 
-    /// Сводка очереди: `(msg_id, recipient)` для gossip-обмена.
+    /// Сводка очереди: `(msg_id, recipient)` для gossip-обмена (без мимолётных сигналов).
     pub fn digest(&self) -> Vec<(String, String)> {
         self.entries
             .lock()
             .unwrap()
             .values()
+            .filter(|e| !e.kind.is_transient())
             .map(|e| (e.message.msg_id.clone(), e.message.recipient.clone()))
             .collect()
     }
@@ -1298,6 +1342,21 @@ impl RelayQueue {
     /// Возвращает `true` если найдено и удалено.
     pub fn remove(&self, msg_id: &str) -> bool {
         self.entries.lock().unwrap().remove(msg_id).is_some()
+    }
+
+    /// Удалить ЧУЖУЮ запись по `msg_id` (по сетевому сигналу очистки от получателя).
+    /// Свои записи этим путём никогда не трогаем — их закрывает только наш
+    /// подтверждённый ACK приложения (`remove_delivered_own`).
+    pub fn remove_foreign(&self, msg_id: &str) -> bool {
+        let mut entries = self.entries.lock().unwrap();
+        let is_foreign = match entries.get(msg_id) {
+            Some(entry) => !entry.own,
+            None => return false,
+        };
+        if !is_foreign {
+            return false;
+        }
+        entries.remove(msg_id).is_some()
     }
 
     /// Снять с удержания ПОДТВЕРЖДЁННОЕ сообщение: получатель ответил

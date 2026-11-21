@@ -46,7 +46,8 @@ internal suspend fun routeOutgoingDeliveryAck(
     // строки нет и не будет, поэтому его резервная копия жила до истечения срока и
     // пере-предлагалась соседям и брокеру, хотя получатель кадр уже получил.
     val serviceFrame =
-        com.vladimir.messenger.data.security.EphemeralControl.isTransportId(messageId)
+        com.vladimir.messenger.data.security.EphemeralControl.isTransportId(messageId) ||
+            messageId.startsWith("push1-")
     if (senderId == null) {
         val changed = applyOutgoingDeliveryAck(messageId, update, database.messageDao()::getMessageById, release)
         if (serviceFrame) release(messageId)

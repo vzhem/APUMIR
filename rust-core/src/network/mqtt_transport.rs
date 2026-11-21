@@ -1284,6 +1284,8 @@ impl MqttTransport {
         #[cfg(feature = "mqtt-dual-broker")]
         let secondary_connection = Arc::clone(&self.secondary_connection);
         #[cfg(feature = "mqtt-dual-broker")]
+        let eventloop_primary_for_secondary = Arc::clone(&self.primary_connection);
+        #[cfg(feature = "mqtt-dual-broker")]
         let mut secondary_eventloop = self
             .secondary_eventloop
             .take()
@@ -1382,7 +1384,13 @@ impl MqttTransport {
                         }
                         Err(error) => {
                             secondary_connection.disconnected();
-                            mqtt_link_set_error(format!("вторичный: {}", error));
+                            // Не затираем последнюю ошибку основного брокера, если основной
+                            // канал сейчас жив: вторичный TCP (1883) на мобильной сети часто
+                            // режется оператором, и эта помеха не должна выглядеть в настройках
+                            // как отказ основного соединения.
+                            if !eventloop_primary_for_secondary.is_ready() {
+                                mqtt_link_set_error(format!("вторичный: {}", error));
+                            }
                             secondary_liveness.mark_poll_error();
                             secondary_liveness.mark_backoff();
                             tracing::warn!(
@@ -1853,6 +1861,13 @@ impl MqttTransport {
     /// Только локальный origin имеет право очистить свой retained receipt.
     pub fn is_own_mesh_receipt_topic(&self, topic: &str, msg_id: &str) -> bool {
         mesh_receipt_topic(&self.node_id, msg_id)
+            .map(|expected| expected == topic)
+            .unwrap_or(false)
+    }
+
+    /// Совпадает ли входящий cleanup-topic с точным SHA-256 ключом `msg_id`.
+    pub fn is_mesh_cleanup_receipt_topic(topic: &str, msg_id: &str) -> bool {
+        mesh_cleanup_receipt_topic(msg_id)
             .map(|expected| expected == topic)
             .unwrap_or(false)
     }

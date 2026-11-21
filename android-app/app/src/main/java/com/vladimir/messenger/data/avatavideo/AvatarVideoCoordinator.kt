@@ -184,20 +184,30 @@ class AvatarVideoCoordinator @Inject constructor(
         val now = System.currentTimeMillis()
         val key = "$READY_AT_PREFIX$ownerId:$sha256"
         val last = prefs.getLong(key, 0L)
-        if (last > 0L && now >= last && now - last < READY_THROTTLE_MS) return@withLock
+        if (last > 0L && now >= last) {
+            val canSealNow = MessageSealer.canSeal(context, ownerId)
+            val cooldown = if (canSealNow) ANNOUNCE_THROTTLE_MS else READY_THROTTLE_MS
+            if (now - last < cooldown) return@withLock
+        }
+        val canSeal = MessageSealer.canSeal(context, ownerId)
+        if (!canSeal) {
+            prefs.edit().putLong(key, now).apply()
+            PeerVideoAvatarStore.bump(context, "ready-deferred")
+            requestMissingMessageBinding(ownerId)
+            return@withLock
+        }
         // Поле «владелец» — ЧЕЙ ролик просим. До этого исправления здесь
         // отправлялся id просителя, и владелец молча отбрасывал просьбу.
         val wire = AvatarVideoWire.ready(ownerId, sha256)
         val accepted = try {
             RustBridge.sendMessage(messageId("avatar-video-ready"), ownerId, ownerId, wire)
+            RustBridge.isRunningCached()
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
             Log.w(TAG, "video avatar ready send failed", failure)
             false
         }
-        // false может означать отсутствие ключа или прямого маршрута: это не
-        // успех. Следующая попытка ограничена по времени, но не потеряна.
         prefs.edit().putLong(key, now).apply()
         PeerVideoAvatarStore.bump(context, if (accepted) "ready-out" else "ready-deferred")
         if (!accepted) requestMissingMessageBinding(ownerId)
@@ -281,16 +291,22 @@ class AvatarVideoCoordinator @Inject constructor(
             if (peer.isBlank() || peer == myId) continue
             val key = "$ANNOUNCE_AT_PREFIX$peer"
             if (!force && now < prefs.getLong(key, 0L)) continue
-            val accepted = try {
-                RustBridge.sendMessage(messageId("avatar-video-announce"), peer, peer, wire)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failure: Exception) {
-                Log.w(TAG, "video avatar announce failed for $peer", failure)
+            val accepted = if (!MessageSealer.canSeal(context, peer)) {
                 false
+            } else {
+                try {
+                    RustBridge.sendMessage(messageId("avatar-video-announce"), peer, peer, wire)
+                    RustBridge.isRunningCached()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    Log.w(TAG, "video avatar announce failed for $peer", failure)
+                    false
+                }
             }
-            // Неуспех одного контакта не задерживает остальных на полчаса.
-            val retry = if (accepted) ANNOUNCE_THROTTLE_MS else READY_THROTTLE_MS
+            // Ядро приняло конверт (прямая доставка или очередь пересылки) —
+            // следующий анонс через 30 минут; без ключа шифрования — через 15 минут.
+            val retry = if (accepted) ANNOUNCE_THROTTLE_MS else MISSING_KEY_RETRY_MS
             prefs.edit().putLong(key, now + retry).apply()
             PeerVideoAvatarStore.bump(context, if (accepted) "announce-out" else "announce-deferred")
             if (!accepted) requestMissingMessageBinding(peer)
@@ -406,8 +422,9 @@ class AvatarVideoCoordinator @Inject constructor(
         const val MY_SHA_KEY = "myVideoSha"
         const val MY_SHA_FOR_KEY = "myVideoShaForMtime"
         const val ANNOUNCE_THROTTLE_MS = 30L * 60 * 1000
+        const val MISSING_KEY_RETRY_MS = 15L * 60 * 1000
         const val READY_THROTTLE_MS = 2L * 60 * 1000
-        const val RETRY_PUMP_MS = 60_000L
+        const val RETRY_PUMP_MS = 5L * 60_000L
         /** Срок строки передачи — сутки, как у файла видеоистории. */
         const val TRANSFER_TTL_MS = 24L * 60 * 60 * 1000
     }

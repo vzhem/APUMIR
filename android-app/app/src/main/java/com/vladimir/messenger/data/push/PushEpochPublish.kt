@@ -40,12 +40,15 @@ internal object PushEpochPublish {
      */
     private const val OFFER_INTERVAL_MS = 15 * 60_000L
 
+    /** Уже объявленную эпоху пере-предлагаем в фоне не чаще раза в 6 часов. */
+    private const val PASSIVE_REFRESH_INTERVAL_MS = 6 * 60 * 60_000L
+
     /** id-подсказка ядру: анонс эпохи — пробуждение и адрес (высший класс). */
     private const val PUSH_WAKE_ID_PREFIX = "push1-"
 
     /** Bounded per-pass quotas so large channels never flood the durable relay queue. */
     private const val MAX_UNANNOUNCED_OFFERS_PER_PASS = 48
-    private const val MAX_REFRESH_OFFERS_PER_PASS = 16
+    private const val MAX_REFRESH_OFFERS_PER_PASS = 8
 
     /** Process-lifetime throttle per peer; a restart may re-offer once. */
     private val lastOfferAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
@@ -58,19 +61,31 @@ internal object PushEpochPublish {
      * has a live pin and an accepted registration. Otherwise it does nothing: a
      * pin is never created here, and an unregistered epoch cannot be offered.
      */
-    suspend fun noteCorrespondent(context: Context, peerId: String) {
+    suspend fun noteCorrespondent(context: Context, peerId: String, passive: Boolean = false) {
         if (peerId.isBlank()) return
         val app = context.applicationContext
         if (!PushServiceLocator.enabled(app)) return
         val now = System.currentTimeMillis()
+        val minInterval = if (passive) PASSIVE_REFRESH_INTERVAL_MS else OFFER_INTERVAL_MS
         val previous = lastOfferAtMs[peerId]
-        if (previous != null && now >= previous && now - previous < OFFER_INTERVAL_MS) return
-        lastOfferAtMs[peerId] = now
+        if (previous != null && now >= previous && now - previous < minInterval) return
         try {
             val shared = PushServiceLocator.shared(app)
             shared.resolver.resolveForRegistration(peerId)?.use { pass ->
                 val state = pass.registration ?: return@use
                 if (state.phase != PushRegistrationState.Phase.ACTIVE || state.registeredAtMs <= 0) return@use
+                val alreadyAnnounced = state.announcedGeneration >= state.generation
+                if (passive && alreadyAnnounced &&
+                    previous != null && now >= previous && now - previous < PASSIVE_REFRESH_INTERVAL_MS
+                ) return@use
+                if (!passive && !alreadyAnnounced) {
+                    // First offer for a new generation goes out immediately unless just offered.
+                } else if (alreadyAnnounced && previous != null && now >= previous &&
+                    now - previous < PASSIVE_REFRESH_INTERVAL_MS
+                ) {
+                    return@use
+                }
+                lastOfferAtMs[peerId] = now
                 val mailbox = shared.epochs?.let { delivery ->
                     delivery.offer(
                         state, peerId,
@@ -146,13 +161,19 @@ internal object PushEpochPublish {
         val effectiveChatId = chatFor(app, peerId)
             ?: peerId.takeIf { com.vladimir.messenger.util.NodeIds.isNodeId(it) }
         if (effectiveChatId != null) {
+            if (!com.vladimir.messenger.data.security.MessageSealer.canSeal(app, peerId)) {
+                return false
+            }
+            val slotId = PUSH_WAKE_ID_PREFIX + java.util.UUID.nameUUIDFromBytes(
+                "apu-push-epoch:$peerId:${state.generation}".toByteArray(Charsets.UTF_8),
+            )
             val accepted = try {
                 com.vladimir.messenger.data.RustBridge.sendMessage(
                     // Подсказка ядру: это пробуждение и адрес, самый важный
                     // класс трафика (см. `rust-core/src/network/traffic_priority.rs`).
-                    // Анонс запечатан, по телу его не отличить, поэтому класс
-                    // передаётся в id; получателю и ACK id безразличен.
-                    PUSH_WAKE_ID_PREFIX + java.util.UUID.randomUUID(),
+                    // Детерминированный ID по (peerId, generation) исключает
+                    // накопление дублей одного и того же поколения эпохи.
+                    slotId,
                     effectiveChatId,
                     peerId,
                     text,
@@ -161,13 +182,13 @@ internal object PushEpochPublish {
                 throw cancelled
             } catch (_: Exception) {
                 diag("Epoch transport announce failed")
-                false
+                return false
             }
             // `false` here means "not delivered by a direct channel", not "lost":
             // the core still owns the frame and relays it. Counting it as a
             // failure would send a second copy over the direct path every time.
             if (!accepted) diag("Epoch announce queued for relay")
-            return true
+            return com.vladimir.messenger.data.RustBridge.isRunningCached()
         }
         return try {
             com.vladimir.messenger.data.RustBridge.sendDirectPayload(peerId, text)
@@ -239,7 +260,7 @@ internal object PushEpochPublish {
                 noteCorrespondent(app, peerId)
             }
             for (peerId in announced.take(MAX_REFRESH_OFFERS_PER_PASS)) {
-                noteCorrespondent(app, peerId)
+                noteCorrespondent(app, peerId, passive = true)
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -290,12 +311,12 @@ internal object PushEpochPublish {
      * a background scope when the gate is open, so a caller on a hot path never
      * waits for the network and never sees its failure.
      */
-    fun noteCorrespondentIfEnabled(context: Context, peerId: String) {
+    fun noteCorrespondentIfEnabled(context: Context, peerId: String, passive: Boolean = false) {
         if (peerId.isBlank()) return
         val app = context.applicationContext
         if (!PushServiceLocator.enabled(app)) return
         publishScope.launch {
-            noteCorrespondent(app, peerId)
+            noteCorrespondent(app, peerId, passive = passive)
         }
     }
 

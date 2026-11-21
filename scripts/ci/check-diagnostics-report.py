@@ -1064,10 +1064,10 @@ class DiagnosticsContractsTest(unittest.TestCase):
                 self.assertTrue(marker in queue, f"нет маркера {marker} в relay_queue.rs")
         core = source(ROOT / "rust-core/src/engine/core.rs")
         for marker in (
-            "enqueue_own(prepared.message)",
-            "q.enqueue_own(next_hop_message)",
+            "enqueue_own_returning_coalesced(prepared.message)",
+            "q.enqueue_own_returning_coalesced(next_hop_message)",
             "let is_own_origin = next_hop_message.origin_sender == node_id;",
-            "queue.enqueue_own(record)",
+            "queue.enqueue_own_returning_coalesced(record)",
             "Always emit a startup snapshot",
             "own_capacity_evictions={})",
             # Сигналы отдельно от переписки: в журнале и в отчёте видно, чем

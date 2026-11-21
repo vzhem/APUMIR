@@ -815,6 +815,49 @@ impl RelayStore {
         Ok(removed > 0)
     }
 
+    /// Удалить ЧУЖУЮ зашифрованную запись по сетевому сигналу очистки (`p2pm2/receipt/cleanup/…`),
+    /// если её `recipient` совпадает с получателем из квитанции, а `origin_sender` НЕ является
+    /// нашим собственным узлом. Собственные записи этим путём никогда не трогаем.
+    pub fn remove_encrypted_foreign_matching_recipient(
+        &self,
+        keys: &dyn RelayAtRestKeySource,
+        msg_id: &str,
+        expected_recipient: &str,
+        local_node: &str,
+        now_ms: i64,
+    ) -> Result<bool, RelayStoreError> {
+        if msg_id.is_empty() || expected_recipient.is_empty() || local_node.is_empty() {
+            return Ok(false);
+        }
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let row: Option<(String, i64, Vec<u8>)> = tx.query_row(
+            "SELECT recipient, expires_at_ms, envelope FROM relay_records_enc WHERE msg_id = ?1",
+            params![msg_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).optional()?;
+        let Some((stored_recipient, expires_at_ms, envelope)) = row else { return Ok(false); };
+        if stored_recipient != expected_recipient {
+            return Ok(false);
+        }
+        let record = match decrypt_and_assemble(keys, msg_id, &stored_recipient, expires_at_ms, &envelope, now_ms) {
+            Ok(record) => record,
+            Err(reason) => {
+                tracing::warn!("MESH cleanup: encrypted foreign check deferred: {}", reason);
+                return Ok(false);
+            }
+        };
+        if record.origin_sender == local_node {
+            return Ok(false);
+        }
+        let removed = tx.execute(SQL_REMOVE_ENC, params![msg_id])?;
+        if removed > 0 {
+            tx.execute(SQL_TOMBSTONE_ADD, params![msg_id, now_ms])?;
+        }
+        tx.commit()?;
+        Ok(removed > 0)
+    }
+
     /// Удалить все зашифрованные записи получателя. Число удалённых.
     pub fn remove_for_recipient_encrypted(&self, recipient: &str) -> Result<usize, RelayStoreError> {
         let conn = self.conn.lock().unwrap();

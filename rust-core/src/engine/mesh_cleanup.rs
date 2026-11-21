@@ -29,6 +29,51 @@ pub(super) fn confirmed_local(
     removed_durable || removed_memory
 }
 
+/// Cleanup foreign relay custody after an online recipient published a
+/// room-committed `p2pm2/receipt/cleanup/<sha256(msg_id)>` fanout.
+///
+/// Local origin copies are never removed here: those wait for the explicit
+/// Android app ACK (`confirmed_local`). Foreign copies are removed only when
+/// the stored `recipient` matches the receipt's claimed `recipient`.
+pub(super) fn cleanup_foreign_on_receipt(
+    queue: Option<&RelayQueue>,
+    custody: Option<&RelayCustody>,
+    local_node: &str,
+    message_id: &str,
+    receipt_recipient: &str,
+) -> bool {
+    if local_node.is_empty() || message_id.is_empty() || receipt_recipient.is_empty() {
+        return false;
+    }
+    let matches_ram_foreign = queue.is_some_and(|q| {
+        q.for_recipient(receipt_recipient)
+            .iter()
+            .any(|m| m.msg_id == message_id && m.origin_sender != local_node)
+    });
+    let removed_memory = if matches_ram_foreign {
+        queue.is_some_and(|q| q.remove_foreign(message_id))
+    } else {
+        false
+    };
+    let removed_durable = match custody {
+        None => false,
+        Some(custody) => match custody.store.remove_encrypted_foreign_matching_recipient(
+            &*custody.keys,
+            message_id,
+            receipt_recipient,
+            local_node,
+            utc_now_ms(),
+        ) {
+            Ok(removed) => removed,
+            Err(error) => {
+                tracing::warn!("MESH cleanup: durable foreign check failed: {}", error);
+                false
+            }
+        },
+    };
+    removed_durable || removed_memory
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,5 +170,49 @@ mod tests {
         assert!(confirmed_local(Some(&q), Some(&c), "pk_local", "ours"));
         assert!(!c.store.contains_encrypted("ours").unwrap());
         assert!(c.store.has_tombstone("ours").unwrap());
+    }
+
+    #[test]
+    fn foreign_receipt_cleans_matching_foreign_copy_and_never_touches_own() {
+        let q = RelayQueue::new();
+        let c = custody();
+        let now = utc_now_ms();
+        let ours = message("ours", "pk_local");
+        let foreign = message("foreign", "pk_other");
+        c.store.store_encrypted(&*c.keys, &ours, now).unwrap();
+        c.store.store_encrypted(&*c.keys, &foreign, now).unwrap();
+        assert!(q.enqueue_own(ours).unwrap());
+        assert!(q.enqueue(foreign).unwrap());
+
+        assert!(!cleanup_foreign_on_receipt(
+            Some(&q),
+            Some(&c),
+            "pk_local",
+            "ours",
+            "pk_recipient",
+        ));
+        assert!(q.contains("ours"));
+        assert!(c.store.contains_encrypted("ours").unwrap());
+
+        assert!(!cleanup_foreign_on_receipt(
+            Some(&q),
+            Some(&c),
+            "pk_local",
+            "foreign",
+            "pk_wrong_recipient",
+        ));
+        assert!(q.contains("foreign"));
+        assert!(c.store.contains_encrypted("foreign").unwrap());
+
+        assert!(cleanup_foreign_on_receipt(
+            Some(&q),
+            Some(&c),
+            "pk_local",
+            "foreign",
+            "pk_recipient",
+        ));
+        assert!(!q.contains("foreign"));
+        assert!(!c.store.contains_encrypted("foreign").unwrap());
+        assert!(c.store.has_tombstone("foreign").unwrap());
     }
 }
