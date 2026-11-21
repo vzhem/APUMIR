@@ -9,7 +9,7 @@ import org.junit.Test
 class PowerActivityReportTest {
 
     @Test
-    fun `parses latest APU_POWER line from logcat and renders radio and operation breakdown`() {
+    fun parsesLatestPowerLineFromLogcatAndRendersBreakdown() {
         val logcat = listOf(
             "11-21 12:00:00.000 1234 1250 I p2p_core: APU_POWER: window_active=false windows=1 stun=1 mdns_scan=1 mdns_pub=1 pex=2 ppres=0 mqtt_pres=3 mqtt_gossip=0 mqtt_relay_out=0 mqtt_in=5 quic_conn_out=1 quic_conn_in=0 quic_out=2 quic_in=1 quic_idle_closed=1",
             "11-21 12:05:00.000 1234 1250 I p2p_core: APU_POWER: window_active=true windows=2 stun=2 mdns_scan=2 mdns_pub=2 pex=4 ppres=3 mqtt_pres=8 mqtt_gossip=1 mqtt_relay_out=2 mqtt_in=19 quic_conn_out=3 quic_conn_in=1 quic_out=11 quic_in=7 quic_idle_closed=2",
@@ -78,7 +78,7 @@ class PowerActivityReportTest {
     }
 
     @Test
-    fun `empty logcat produces honest fallback message without fabricating counters`() {
+    fun emptyLogcatProducesHonestFallbackWithoutFabricatingCounters() {
         val parsed = PowerActivitySnapshot.parseLatest(emptyList())
         assertFalse(parsed.nativePresent)
         val rendered = parsed.render(
