@@ -22,9 +22,11 @@ class CloudflareRelay(
 ) {
     companion object {
         private const val TAG = "CloudflareRelay"
-        private const val POLL_INTERVAL_OK = 10000L      // 10 сек при успехе
-        private const val POLL_INTERVAL_ERR = 30000L     // 30 сек при ошибке (start)
-        private const val POLL_INTERVAL_MAX = 60000L     // 60 сек максимум
+        private const val POLL_INTERVAL_ACTIVE = 10_000L // 10 сек в окне отправки
+        private const val POLL_INTERVAL_OK = 60_000L     // 60 сек в покое
+        private const val POLL_INTERVAL_ERR = 60_000L    // 60 сек при ошибке
+        private const val POLL_INTERVAL_MAX = 180_000L   // 3 мин максимум
+        private const val HTTP_TIMEOUT_MS = 8_000
         private const val DEDUP_CACHE_SIZE = 100
 
         @Volatile
@@ -51,14 +53,18 @@ class CloudflareRelay(
             Log.i(TAG, "Cloudflare relay v2 started: $baseUrl for $myNodeId")
             while (running && isActive) {
                 if (!RustBridge.externalTransportAllowed()) {
-                    delay(1_000)
+                    delay(5_000)
                     continue
                 }
                 try {
                     val ok = pollMessages()
                     if (ok) {
                         consecutiveErrors = 0
-                        currentInterval = POLL_INTERVAL_OK
+                        currentInterval = if (OutgoingPiggybackCoordinator.isWindowActive()) {
+                            POLL_INTERVAL_ACTIVE
+                        } else {
+                            POLL_INTERVAL_OK
+                        }
                     } else {
                         consecutiveErrors++
                         // Exponential backoff
@@ -97,8 +103,8 @@ class CloudflareRelay(
                     conn.requestMethod = "POST"
                     conn.setRequestProperty("Content-Type", "application/json")
                     conn.doOutput = true
-                    conn.connectTimeout = 30000
-                    conn.readTimeout = 30000
+                    conn.connectTimeout = HTTP_TIMEOUT_MS
+                    conn.readTimeout = HTTP_TIMEOUT_MS
 
                     val body = JSONObject().apply {
                         put("to", recipientNodeId)
@@ -132,8 +138,8 @@ class CloudflareRelay(
             Log.w(TAG, "Poll connect failed: ${e.message}")
             return false
         }
-        conn.connectTimeout = 30000
-        conn.readTimeout = 30000
+        conn.connectTimeout = HTTP_TIMEOUT_MS
+        conn.readTimeout = HTTP_TIMEOUT_MS
 
         if (conn.responseCode != 200) {
             Log.w(TAG, "Poll HTTP ${conn.responseCode}")
@@ -190,7 +196,7 @@ class CloudflareRelay(
             if (!RustBridge.externalTransportAllowed()) return@withContext false
             try {
                 val conn = URL("$baseUrl/health").openConnection() as HttpURLConnection
-                conn.connectTimeout = 15000
+                conn.connectTimeout = HTTP_TIMEOUT_MS
                 val ok = conn.responseCode == 200
                 conn.disconnect()
                 ok

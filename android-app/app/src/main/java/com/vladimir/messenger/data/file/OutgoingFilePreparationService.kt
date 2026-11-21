@@ -103,14 +103,17 @@ class OutgoingFilePreparationService private constructor(
         recipientNodeId: String,
         qualifiedDirectReferrals: Int,
         nowMs: Long = System.currentTimeMillis(),
-    ): PreparedTransfer = prepareSource(
-        Source.Content(source),
-        messageId,
-        chatId,
-        recipientNodeId,
-        qualifiedDirectReferrals,
-        nowMs,
-    )
+    ): PreparedTransfer {
+        com.vladimir.messenger.service.OutgoingPiggybackCoordinator.onUserOutgoing(nowMs)
+        return prepareSource(
+            Source.Content(source),
+            messageId,
+            chatId,
+            recipientNodeId,
+            qualifiedDirectReferrals,
+            nowMs,
+        )
+    }
 
     /**
      * То же для файла из своей папки приложения (рой, этап 9: автор раздаёт

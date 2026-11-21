@@ -23,7 +23,6 @@ coroutines = "1.9.0"
 okhttp = "4.12.0"
 coil = "2.7.0"
 zxing = "3.5.3"
-jna = "5.14.0"
 # FCM SDK is installed but auto-init remains disabled until the wake protocol is ready.
 firebaseMessaging = "24.1.2"
 googleServices = "4.4.2"
@@ -79,7 +78,6 @@ okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhtt
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 coil-gif = { group = "io.coil-kt", name = "coil-gif", version.ref = "coil" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
-jna = { group = "net.java.dev.jna", name = "jna", version.ref = "jna" }
 firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging", version.ref = "firebaseMessaging" }
 # Ed25519 на чистой Java (RFC 8032): подпись манифестов постов канала тем же
 # семенем, что установлено в ядро. Убирается, когда ядро получит FFI подписи.

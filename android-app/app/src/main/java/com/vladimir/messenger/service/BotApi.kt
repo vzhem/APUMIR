@@ -350,20 +350,6 @@ class BotApi @Inject constructor(
         }
     }
 
-    /**
-     * Получить последнюю версию APK (для Phase 7).
-     */
-    suspend fun getLatestVersion(): String? = withContext(Dispatchers.IO) {
-        try {
-            val response = getJson("$REGISTRY_URL/version") ?: return@withContext null
-            val json = JSONObject(response)
-            json.optString("version", null)
-        } catch (e: Exception) {
-            Log.e(TAG, "Get version failed", e)
-            null
-        }
-    }
-
     private fun postJson(url: String, body: String, timeoutMs: Int = HTTP_TIMEOUT): String? {
         if (!RustBridge.externalTransportAllowed()) return null
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {

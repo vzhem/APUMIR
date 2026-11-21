@@ -38,13 +38,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.transform
 import java.time.Instant
@@ -1244,16 +1242,9 @@ class GroupRepository(
         topicId: String,
         text: String,
         photos: List<String> = emptyList(),
-        /**
-         * р250: это сообщение - ответ на другое. Цитата уедет отдельным
-         * конвертом `mrep`, поэтому старые телефоны увидят обычное сообщение.
-         */
+        /** р250: сообщение с цитатой ответа (старые клиенты видят обычное сообщение). */
         reply: ReplyTarget? = null,
-        /**
-         * р250: опрос, приклеенный к этому сообщению (посту канала). Текст
-         * сообщения остаётся текстом - карточка опроса просто надстраивается
-         * над ним у тех, кто умеет её показывать.
-         */
+        /** р250: опрос, приклеенный к сообщению или посту канала. */
         poll: PollDraft? = null,
         /**
          * Тревожное сообщение SOS (см. [sendSos]): не подчиняется тихому
@@ -1377,6 +1368,7 @@ class GroupRepository(
             )
         )
         registerOutgoing(groupId, topic, body, me, now)
+        com.vladimir.messenger.service.OutgoingPiggybackCoordinator.onUserOutgoing(now)
         // Куски текста и фотографий ложатся в базу СРАЗУ: лента автора
         // показывает пост целиком, не дожидаясь, пока веер уйдёт по сети.
         // Сначала текст, потом фото - в таком же порядке они и уходят.

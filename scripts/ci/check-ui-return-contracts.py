@@ -206,7 +206,7 @@ class SiteFirstUpdateTest(unittest.TestCase):
         self.worker = read(JAVA / "worker/OfficialUpdateMonitorWorker.kt")
 
     def test_update_dialog_and_settings_choose_the_official_coordinator(self):
-        for name in ("MainActivity.kt", "ui/update/UpdateViewModel.kt", "ui/screens/settings/SettingsViewModel.kt"):
+        for name in ("MainActivity.kt", "ui/screens/settings/SettingsViewModel.kt"):
             self.assertRegex(read(JAVA / name), r"downloadApk\([^\n]*preferOfficial\s*=\s*true")
         self.assertIn("UpdateSiteMirror.currentCopy(releaseInfo", self.checker)
         self.assertIn("officialDownloads.start(releaseInfo, site)", self.checker)

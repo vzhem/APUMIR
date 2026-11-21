@@ -11,9 +11,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Досылка офлайн-очереди в своём ритме.
@@ -40,6 +42,8 @@ class ChatOutboxPump(
 ) {
     private val unconfirmedOutbox = UnconfirmedOutboxPump(messageDao, chatDao, chatRepository.replyAwareOutboxSender::send)
     private val custodyReconciler = RelayCustodyReconciler(RustBridge::relayCustodySnapshot, messageDao::terminalOutgoingIds)
+    private val wakeSignal = Channel<Unit>(Channel.CONFLATED)
+    private var unregisterWake: (() -> Unit)? = null
     private var job: Job? = null
     private var unconfirmedJob: Job? = null
     private var reconciliationJob: Job? = null
@@ -50,17 +54,26 @@ class ChatOutboxPump(
      */
     fun start(scope: CoroutineScope) {
         if (job?.isActive == true) return
+        unregisterWake?.invoke()
+        unregisterWake = OutgoingPiggybackCoordinator.registerWakeListener {
+            wakeSignal.trySend(Unit)
+        }
         // Repair the window between a Room ACK commit and native cleanup,
         // including after restart, without scanning all historical messages.
         reconciliationJob = scope.launch(Dispatchers.IO) {
             var nextDelay = RECONCILE_INITIAL_DELAY_MS
             while (isActive) {
                 delay(nextDelay)
-                nextDelay = RECONCILE_SWEEP_DELAY_MS
+                nextDelay = RECONCILE_IDLE_SWEEP_DELAY_MS
                 try {
-                    val more = if (wakeLock != null) wakeLock.withLock { custodyReconciler.reconcile() }
+                    val more = com.vladimir.messenger.data.diagnostics.RuntimeDiagnostics.measure(
+                        com.vladimir.messenger.data.diagnostics.DiagnosticOperation.CUSTODY_RECONCILE,
+                    ) {
+                        if (wakeLock != null) wakeLock.withLock { custodyReconciler.reconcile() }
                         else custodyReconciler.reconcile()
+                    }
                     if (more) nextDelay = RECONCILE_PAGE_DELAY_MS
+                    else if (OutgoingPiggybackCoordinator.isWindowActive()) nextDelay = RECONCILE_SWEEP_DELAY_MS
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
@@ -75,16 +88,24 @@ class ChatOutboxPump(
             var nextDelay = UNCONFIRMED_INITIAL_DELAY_MS
             while (isActive) {
                 delay(nextDelay)
-                nextDelay = UNCONFIRMED_SWEEP_DELAY_MS
+                nextDelay = UNCONFIRMED_IDLE_SWEEP_DELAY_MS
                 try {
-                    val pending = messageDao.countPendingOutgoing() > 0
-                    val progress = if (wakeLock != null) wakeLock.withLock { unconfirmedOutbox.pump(20) }
-                        else unconfirmedOutbox.pump(20)
-                    if (progress.moreToScan) {
-                        // Still make progress if another chat is permanently
-                        // queued, but give new messages most network turns.
-                        nextDelay = if (progress.attempted == 0) UNCONFIRMED_SCAN_ONLY_PAGE_DELAY_MS
-                            else if (pending) UNCONFIRMED_BUSY_PAGE_DELAY_MS else UNCONFIRMED_PAGE_DELAY_MS
+                    if (messageDao.countUnconfirmedPersonalSent() > 0) {
+                        val pending = messageDao.countPendingOutgoing() > 0
+                        val progress = com.vladimir.messenger.data.diagnostics.RuntimeDiagnostics.measure(
+                            com.vladimir.messenger.data.diagnostics.DiagnosticOperation.UNCONFIRMED_OUTBOX_PUMP,
+                        ) {
+                            if (wakeLock != null) wakeLock.withLock { unconfirmedOutbox.pump(20) }
+                            else unconfirmedOutbox.pump(20)
+                        }
+                        nextDelay = if (progress.moreToScan) {
+                            // Still make progress if another chat is permanently
+                            // queued, but give new messages most network turns.
+                            if (progress.attempted == 0) UNCONFIRMED_SCAN_ONLY_PAGE_DELAY_MS
+                                else if (pending) UNCONFIRMED_BUSY_PAGE_DELAY_MS else UNCONFIRMED_PAGE_DELAY_MS
+                        } else {
+                            UNCONFIRMED_SWEEP_DELAY_MS
+                        }
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -102,10 +123,14 @@ class ChatOutboxPump(
                 try {
                     queued = messageDao.countPendingOutgoing()
                     if (queued > 0) {
-                        val progress = if (wakeLock != null) {
-                            wakeLock.withLock { chatRepository.pumpQueuedOffline() }
-                        } else {
-                            chatRepository.pumpQueuedOffline()
+                        val progress = com.vladimir.messenger.data.diagnostics.RuntimeDiagnostics.measure(
+                            com.vladimir.messenger.data.diagnostics.DiagnosticOperation.OUTBOX_PUMP,
+                        ) {
+                            if (wakeLock != null) {
+                                wakeLock.withLock { chatRepository.pumpQueuedOffline() }
+                            } else {
+                                chatRepository.pumpQueuedOffline()
+                            }
                         }
                         sent = progress.sent
                         moreToScan = progress.moreToScan
@@ -117,21 +142,28 @@ class ChatOutboxPump(
                     Log.w(TAG, "Outbox pump cycle failed: ${error.message}")
                 }
                 failures = OutboxCadence.nextFailures(failures, sent, moreToScan)
-                delay(
-                    OutboxCadence.nextDelayMs(
-                        hasQueued = queued > 0,
-                        sent = sent,
-                        failures = failures,
-                        onScreen = DeliveryCadence.isForeground(),
-                        moreToScan = moreToScan,
-                    ),
+                val baseDelay = OutboxCadence.nextDelayMs(
+                    hasQueued = queued > 0,
+                    sent = sent,
+                    failures = failures,
+                    onScreen = DeliveryCadence.isForeground(),
+                    moreToScan = moreToScan,
                 )
+                if (queued > 0 || OutgoingPiggybackCoordinator.isWindowActive()) {
+                    delay(baseDelay)
+                } else {
+                    withTimeoutOrNull(OUTBOX_QUIET_IDLE_WAIT_MS) {
+                        wakeSignal.receive()
+                    }
+                }
             }
         }
     }
 
     /** Остановить цикл при остановке службы. */
     fun stop() {
+        unregisterWake?.invoke()
+        unregisterWake = null
         job?.cancel()
         unconfirmedJob?.cancel()
         reconciliationJob?.cancel()
@@ -145,10 +177,13 @@ class ChatOutboxPump(
         const val RECONCILE_INITIAL_DELAY_MS = 15_000L
         const val RECONCILE_PAGE_DELAY_MS = 1_000L
         const val RECONCILE_SWEEP_DELAY_MS = 60_000L
+        const val RECONCILE_IDLE_SWEEP_DELAY_MS = 10 * 60_000L
         const val UNCONFIRMED_INITIAL_DELAY_MS = 15_000L
         const val UNCONFIRMED_SCAN_ONLY_PAGE_DELAY_MS = 100L
         const val UNCONFIRMED_PAGE_DELAY_MS = 3_000L
         const val UNCONFIRMED_BUSY_PAGE_DELAY_MS = 15_000L
         const val UNCONFIRMED_SWEEP_DELAY_MS = 60_000L
+        const val UNCONFIRMED_IDLE_SWEEP_DELAY_MS = 10 * 60_000L
+        const val OUTBOX_QUIET_IDLE_WAIT_MS = 5 * 60_000L
     }
 }

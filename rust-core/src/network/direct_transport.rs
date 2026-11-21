@@ -73,10 +73,12 @@ pub const POOL_CAPACITY: usize = 256;
 
 /// Соединение, по которому давно ничего не ходило, закрываем сами -
 /// keep-alive иначе держал бы его вечно.
-pub const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// 20 секунд достаточно для немедленного ответа собеседника и сопутствующих
+/// служебных кадров окна отправки (~15 с), после чего радио засыпает.
+pub const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Полоса узла без работы столько времени сворачивается.
-const LANE_IDLE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+const LANE_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Рукопожатие входящего соединения дольше этого - обрываем.
 const INBOUND_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -570,6 +572,9 @@ async fn run_accept_loop(shared: Arc<Shared>) {
                         conn.close(b"relay only");
                         return;
                     }
+                    crate::engine::outgoing_activity::POWER_COUNTERS
+                        .quic_accepts_in
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     tracing::info!("QUIC: incoming connection from {}", conn.remote_address());
                     read_loop(conn, shared, true).await;
                 }
@@ -598,6 +603,9 @@ async fn read_loop(conn: QuicConnection, shared: Arc<Shared>, inbound: bool) {
         let payload = match conn.receive_message().await {
             Ok(p) => {
                 consecutive_errors = 0;
+                crate::engine::outgoing_activity::POWER_COUNTERS
+                    .quic_frames_in
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 p
             }
             // Ошибка уровня соединения (таймаут, закрытие) - выходим.
@@ -673,7 +681,8 @@ struct PeerLane {
 /// Главный цикл: раскладывает команды по полосам узлов, убирает простой.
 async fn run_command_loop(mut rx: mpsc::Receiver<Command>, shared: Arc<Shared>) {
     let mut lanes: HashMap<String, PeerLane> = HashMap::new();
-    let mut cleanup = tokio::time::interval(Duration::from_secs(60));
+    let mut cleanup = tokio::time::interval(Duration::from_secs(15));
+    cleanup.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     cleanup.tick().await; // первый тик срабатывает сразу - пропускаем
     loop {
         tokio::select! {
@@ -728,6 +737,9 @@ async fn run_command_loop(mut rx: mpsc::Receiver<Command>, shared: Arc<Shared>) 
                 lanes.retain(|_, lane| lane.last_used.elapsed() < LANE_IDLE_TIMEOUT);
                 let removed = shared.pool.cleanup_idle().await;
                 if removed > 0 {
+                    crate::engine::outgoing_activity::POWER_COUNTERS
+                        .quic_idle_closed
+                        .fetch_add(removed as u64, std::sync::atomic::Ordering::Relaxed);
                     tracing::info!("DIRECT: closed {} idle connection(s)", removed);
                 }
             }
@@ -844,6 +856,9 @@ async fn send_one(
         };
         match tokio::time::timeout(STREAM_TIMEOUT, write).await {
             Ok(Ok(())) => {
+                crate::engine::outgoing_activity::POWER_COUNTERS
+                    .quic_frames_out
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 tracing::info!(
                     "DIRECT: sent {} bytes to {} at {} ({})",
                     bytes.len(),
@@ -965,6 +980,9 @@ async fn acquire(
     let Some((conn, addr)) = connected else {
         return None;
     };
+    crate::engine::outgoing_activity::POWER_COUNTERS
+        .quic_connects_out
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     tracing::info!("QUIC connect ok to {}", addr);
 
     // Читаем и исходящее соединение: собеседник может отвечать по нему.

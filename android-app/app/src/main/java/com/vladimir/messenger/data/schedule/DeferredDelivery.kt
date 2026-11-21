@@ -252,7 +252,8 @@ class DeferredDelivery @Inject constructor(
     }
 
     /** Foreground-service assist: do not wait for a long WorkManager backoff after connectivity returns. */
-    suspend fun pumpPending() {
+    /** Returns true when there are pending early/due scheduled letters or due hidden letters. */
+    suspend fun pumpPending(): Boolean {
         ScheduledSendStore.load(context)
         val pending = ScheduledSendStore.items.value.filter { it.preDeliver }
         val start = if (pending.isEmpty()) 0 else assistCursor % pending.size
@@ -267,8 +268,10 @@ class DeferredDelivery @Inject constructor(
                 ScheduledSendStore.update(context, item.id) { it.copy(lastError = error.message?.take(180).orEmpty()) }
             }
         }
-        for ((key, at) in DeferredInboxStore.pending(context)) {
-            if (DeferredWire.due(at, System.currentTimeMillis())) {
+        val inboxPending = DeferredInboxStore.pending(context)
+        val now = System.currentTimeMillis()
+        for ((key, at) in inboxPending) {
+            if (DeferredWire.due(at, now)) {
                 try { reveal(key) } catch (cancelled: kotlinx.coroutines.CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
@@ -276,6 +279,7 @@ class DeferredDelivery @Inject constructor(
                 }
             }
         }
+        return pending.isNotEmpty() || inboxPending.any { (_, at) -> at - now <= 15 * 60_000L }
     }
 
     private fun send(id: String, chatId: String, peer: String, text: String, renewRetention: Boolean = false): Boolean {

@@ -62,7 +62,8 @@ cd android-app || exit 1
     --tests '*GroupPushWakePolicyTest*' --tests '*FileHandshakeCandidatesTest*' \
     --tests '*MirrorPendingOutgoingTest*' --tests '*MirrorPendingScheduleIntegrationTest*' --tests '*MirrorPendingFlusherTest*' \
     --tests '*MirrorOutgoingFrameTest*' --tests '*MirrorOutgoingDispatcherTest*' --tests '*ReplyAwareOutboxSenderTest*' --tests '*DeletionOutboxTest*' \
-    --tests '*IncomingNotificationProcessorTest*' --tests '*IncomingNotificationSweepTest*' --tests '*NotificationRecoveryScheduleGateTest*' --tests '*NotificationRecoveryOperationObserverTest*'
+    --tests '*IncomingNotificationProcessorTest*' --tests '*IncomingNotificationSweepTest*' --tests '*NotificationRecoveryScheduleGateTest*' --tests '*NotificationRecoveryOperationObserverTest*' \
+    --tests '*OutgoingPiggybackPolicyTest*' --tests '*PowerActivityReportTest*'
 TESTS_STATUS=$?
 
 # ---- почему тесты упали: словами в лог, а не «красный шаг без причины» -------

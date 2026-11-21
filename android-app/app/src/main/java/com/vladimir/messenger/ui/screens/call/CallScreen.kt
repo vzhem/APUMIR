@@ -684,64 +684,7 @@ private fun CameraCallButton(
     }
 }
 
-@Composable
-private fun ScreenShareCallButton(
-    state: com.vladimir.messenger.data.call.CallManager.CallUiState,
-    onScreenShare: () -> Unit,
-) {
-    RoundCallButton(
-        background = if (state.screenSharing) MaterialTheme.colorScheme.primary
-        else Color(0xFFF5F7FA).copy(alpha = 0.95f),
-        description = if (state.screenSharing) stringResource(R.string.call_stop_share)
-        else stringResource(R.string.call_share_screen),
-        onClick = onScreenShare,
-    ) {
-        Icon(
-            if (state.screenSharing) Icons.Default.StopScreenShare else Icons.Default.ScreenShare,
-            if (state.screenSharing) stringResource(R.string.call_stop_share)
-            else stringResource(R.string.call_share_screen),
-            tint = if (state.screenSharing) MaterialTheme.colorScheme.onPrimary
-            else ApuBubbleMutedColor,
-        )
-    }
-}
-
-@Composable
-private fun CaptionsCallButton(
-    state: com.vladimir.messenger.data.call.CallManager.CallUiState,
-    onCaptions: () -> Unit,
-) {
-    val active = state.captionsOn || state.captionsPreparing
-    RoundCallButton(
-        background = if (active) MaterialTheme.colorScheme.primary
-        else Color(0xFFF5F7FA).copy(alpha = 0.95f),
-        description = stringResource(R.string.call_captions),
-        onClick = onCaptions,
-    ) {
-        Icon(
-            Icons.Default.Subtitles,
-            stringResource(R.string.call_captions),
-            tint = if (active) MaterialTheme.colorScheme.onPrimary else ApuBubbleMutedColor,
-        )
-    }
-}
-
-@Composable
-private fun BackgroundsCallButton(onBackgrounds: () -> Unit) {
-    RoundCallButton(
-        background = Color(0xFFF5F7FA).copy(alpha = 0.95f),
-        description = stringResource(R.string.call_background),
-        onClick = onBackgrounds,
-    ) {
-        Icon(
-            Icons.Default.Wallpaper,
-            stringResource(R.string.call_background),
-            tint = ApuBubbleMutedColor,
-        )
-    }
-}
-
-/** Подписанная кнопка-пилюля второго ряда звонка: значок + слово, чтобы не угадывать. */
+// Подписанная кнопка-пилюля второго ряда звонка: значок + слово, чтобы не угадывать.
 @Composable
 private fun LabeledCallChip(
     icon: androidx.compose.ui.graphics.vector.ImageVector,

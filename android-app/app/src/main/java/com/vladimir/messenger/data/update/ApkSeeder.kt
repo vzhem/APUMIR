@@ -337,16 +337,6 @@ class ApkSeeder @Inject constructor(
     // ── Автоматический забор скачанного файла (docs/UPDATE_SEEDING.md) ──────
 
     /**
-     * Версия, вшитая в сам APK (`versionName` из AndroidManifest). Это
-     * надёжнее угадывания по имени файла: человек не вводит ничего.
-     * null — архив не читается (не APK или манифест не разобран).
-     */
-    private fun archiveVersion(file: File): String? = runCatching {
-        val info = appContext.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
-        info?.versionName?.takeIf { version -> version.isNotBlank() }
-    }.getOrNull()
-
-    /**
      * Скачанный файл обновления сам встаёт в раздел «Обновления»:
      * версия читается из APK (fallback — из имени файла), файл проверяется,
      * ставится в раздачу соседям и появляется карточка «Обновить до vX»
@@ -380,7 +370,7 @@ class ApkSeeder @Inject constructor(
             // Уже раздаём именно этот файл — просто помним, что взяли его.
             return forget("")
         }
-        val rawVersion = archiveVersion(file)
+        val rawVersion = ApkReceivedScanner.archiveVersion(appContext, file)
             ?: ApkUpdate.versionFromName(name)
             ?: return forget("Не удалось определить версию файла")
         val version = ApkUpdate.normalize(rawVersion)
@@ -689,10 +679,10 @@ class ApkSeeder @Inject constructor(
      * то же, что кнопка «Проверить», но тихо и по расписанию: раз в 2 часа,
      * пятерым известным узлам (веер ограничен - рой любого размера). Ответы -
      * обычные `upk`, карточки в настройках появляются сами. Так рой узнаёт
-     * о релизах даже при недоступном relay-воркере; сайт остаётся
-     * ускорителем, а не источником истины.
+     * о релизах при недоступном relay-воркере; сайт — ускоритель.
      */
     private suspend fun askPeersPeriodically(now: Long) {
+        if (!com.vladimir.messenger.service.OutgoingPiggybackCoordinator.isWindowActive(now)) return
         if (now - lastAutoAskAtMs < AUTO_ASK_INTERVAL_MS) return
         if (pending != null || patchPending != null) return
         if (_offers.value.isNotEmpty() || _patchOffers.value.isNotEmpty()) return
@@ -853,7 +843,7 @@ class ApkSeeder @Inject constructor(
                 clearPendingIfMatches(fileSha256)
                 val version = pendingVersionFor(fileSha256)
                     ?: store.loadOffers().firstOrNull { it.sha256 == fileSha256 }?.version
-                    ?: guessVersionFromName(row.displayName)
+                    ?: ApkReceivedScanner.guessVersionFromName(row.displayName)
                     ?: ApkUpdate.normalize(currentAppVersion())
                 _ready.value = Ready(version, row.displayName, row.totalBytes, row.fileSha256, row.transferId)
                 _download.value = null
@@ -1173,7 +1163,7 @@ class ApkSeeder @Inject constructor(
             completed.firstOrNull()?.let { row ->
                 val version = store.loadPending()?.takeIf { it.sha256 == row.fileSha256 }?.version
                     ?: store.loadOffers().firstOrNull { it.sha256 == row.fileSha256 }?.version
-                    ?: guessVersionFromName(row.displayName)
+                    ?: ApkReceivedScanner.guessVersionFromName(row.displayName)
                     ?: ApkUpdate.normalize(currentAppVersion())
                 if (_ready.value == null) {
                     _ready.value = Ready(version, row.displayName, row.totalBytes, row.fileSha256, row.transferId)
@@ -1702,9 +1692,9 @@ class ApkSeeder @Inject constructor(
             served = row?.let { router.groupSeeder.servedCount(it.transferId) } ?: 0,
             preparing = row == null,
         )
-        if (row != null && now - lastAnnounceAtMs >= ANNOUNCE_INTERVAL_MS) {
-            runCatching { announce() }
-        }
+        if (row != null && now - lastAnnounceAtMs >= ANNOUNCE_INTERVAL_MS &&
+            com.vladimir.messenger.service.OutgoingPiggybackCoordinator.isWindowActive(now)
+        ) { runCatching { announce() } }
     }
 
     /** Давние объявления и не более новые, чем моя версия — долой. */
@@ -1719,41 +1709,14 @@ class ApkSeeder @Inject constructor(
         }
     }
 
-    /**
-     * Угадать версию из имени файла: первое числовое `11.70.29` в строке
-     * (APU-v11.70.29.apk, «APU 11.70.29 beta.apk»). null — не найдено,
-     * попросим у человека.
-     */
-    private fun guessVersionFromName(fileName: String): String? = ApkUpdate.versionFromName(fileName)
-
     private suspend fun scanReceivedApks() {
-        val rows = runCatching { transferDao.getCompleted() }.getOrDefault(emptyList())
-            .filter { it.direction == "INCOMING" && it.chatId != ApkUpdate.CHAT_ID && it.displayName.lowercase().endsWith(".apk") }
-        val current = ApkUpdate.normalize(currentAppVersion())
-        val list = rows.mapNotNull { row ->
-            val file = router.receivedFileFor(row) ?: return@mapNotNull null
-            if (!file.isFile) return@mapNotNull null
-            // Сначала версия из самого APK; если не читается — из имени.
-            val versionGuess = archiveVersion(file) ?: guessVersionFromName(row.displayName)
-            // Прошлые версии обновлением уже не станут: карточки-призраки
-            // вроде «11.70.22 получен» болтаться не должны (владелец,
-            // 2026-09-19). Нераспознанные не трогаем — вдруг это APK.
-            if (versionGuess != null) {
-                val vsCurrent = ApkUpdate.compareVersions(ApkUpdate.normalize(versionGuess), current)
-                if (vsCurrent != null && vsCurrent <= 0) return@mapNotNull null
-            }
-            ReceivedApk(
-                transferId = row.transferId,
-                chatId = row.chatId,
-                fromNodeId = row.peerNodeId,
-                displayName = row.displayName,
-                sizeBytes = row.totalBytes,
-                atMs = row.updatedAtMs,
-                versionGuess = versionGuess,
-            )
-        }.sortedByDescending { it.atMs }
-            .take(MAX_RECEIVED_LIST)
-        _receivedApks.value = list
+        _receivedApks.value = ApkReceivedScanner.scan(
+            context = appContext,
+            transferDao = transferDao,
+            router = router,
+            currentVersionRaw = currentAppVersion(),
+            maxItems = MAX_RECEIVED_LIST,
+        )
     }
 
     companion object {

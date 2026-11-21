@@ -1,7 +1,5 @@
 package com.vladimir.messenger.ui.components
 
-import android.graphics.BitmapFactory
-import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box

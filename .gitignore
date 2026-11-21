@@ -59,8 +59,12 @@ tools/worker/push/node_modules/
 Thumbs.db
 .DS_Store
 
-# Артефакты локальных прогонов (лог проверки ядра и т.п.)
+# Артефакты локальных прогонов и аварийных логов JVM/Gradle
 target/
+hs_err_pid*.log
+replay_pid*.log
+android-app/build_log.txt
+android-app/rebuild_hilt_log.txt
 
 # Монтажка-превью генератора пресетов (регенерируется скриптом)
 tools/avatar_presets/preview.png

@@ -22,6 +22,7 @@ class RuntimeHealthTest {
         assertEquals(3L, state.completed)
         assertEquals(1L, state.failed)
         assertEquals(1L, state.cancelled)
+        assertEquals(70L, state.totalMs)
         assertEquals(5L, state.lastMs)
         assertEquals(40L, state.maxMs)
         assertEquals(1, state.inFlight)

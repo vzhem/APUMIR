@@ -4,7 +4,8 @@ package com.vladimir.messenger.data.diagnostics
 enum class DiagnosticOperation {
     CORE_EVENTS, FILE_PUMP, GROUP_FILE_PUMP, APK_PUMP, DIRECT_DELETE_PUMP, GROUP_DELETE_PUMP,
     CHAT_RETRY_PUMP, STORY_PUMP, REPORT_FACTS, LOGCAT_READ, STORAGE_AUDIT, KEY_MODE_PROBE,
-    FEATURE_PACK_PUMP,
+    FEATURE_PACK_PUMP, OUTBOX_PUMP, UNCONFIRMED_OUTBOX_PUMP, CUSTODY_RECONCILE,
+    DEFERRED_DELIVERY_PUMP, PIGGYBACK_FLUSH,
 }
 
 enum class DiagnosticOutcome { OK, FAILED, CANCELLED }
@@ -19,13 +20,14 @@ data class OperationHealth(
     val inFlight: Int,
     val oldestInFlightMs: Long?,
     val lastFinishedAgoMs: Long?,
+    val totalMs: Long = 0,
 )
 
 class OperationHealthTracker(private val clock: () -> Long) {
     data class Ticket internal constructor(internal val id: Long, internal val operation: DiagnosticOperation)
     private data class Running(val ticket: Ticket, val at: Long)
     private data class Totals(var completed: Long = 0, var failed: Long = 0, var cancelled: Long = 0,
-        var last: Long = 0, var max: Long = 0, var finished: Long? = null)
+        var last: Long = 0, var max: Long = 0, var total: Long = 0, var finished: Long? = null)
     private val active = LinkedHashMap<Long, Running>()
     private val totals = LinkedHashMap<DiagnosticOperation, Totals>()
     private var sequence = 0L
@@ -52,6 +54,7 @@ class OperationHealthTracker(private val clock: () -> Long) {
         if (outcome == DiagnosticOutcome.CANCELLED) total.cancelled++
         total.last = duration
         total.max = maxOf(total.max, duration)
+        total.total = (total.total + duration).coerceAtLeast(total.total)
         total.finished = now
     }
 
@@ -64,7 +67,7 @@ class OperationHealthTracker(private val clock: () -> Long) {
             OperationHealth(operation, total?.completed ?: 0, total?.failed ?: 0, total?.cancelled ?: 0,
                 total?.last ?: 0, total?.max ?: 0, running.size,
                 running.minOfOrNull { it.at }?.let { (now - it).coerceAtLeast(0) },
-                total?.finished?.let { (now - it).coerceAtLeast(0) })
+                total?.finished?.let { (now - it).coerceAtLeast(0) }, total?.total ?: 0)
         }
     }
 }
@@ -139,7 +142,7 @@ data class RuntimeHealthSnapshot(
         appendLine("native_heap_bytes=${nativeHeapBytes ?: -1} · process_pss_kib=${pssKiB ?: -1}")
         appendLine("memory_trim_callbacks=$trimCallbacks · last_trim_level=${lastTrimLevel ?: -1} (включает уход UI в фон, не только нехватку памяти)")
         appendLine("operation_timing_dropped=$droppedTimings")
-        for (op in operations) appendLine("op=${op.operation.name.lowercase()} · completed=${op.completed} · failed=${op.failed} · cancelled=${op.cancelled} · last_ms=${op.lastMs} · max_ms=${op.maxMs} · in_flight=${op.inFlight} · oldest_in_flight_ms=${op.oldestInFlightMs ?: -1} · last_finished_ago_ms=${op.lastFinishedAgoMs ?: -1}")
+        for (op in operations) appendLine("op=${op.operation.name.lowercase()} · completed=${op.completed} · failed=${op.failed} · cancelled=${op.cancelled} · total_ms=${op.totalMs} · last_ms=${op.lastMs} · max_ms=${op.maxMs} · in_flight=${op.inFlight} · oldest_in_flight_ms=${op.oldestInFlightMs ?: -1} · last_finished_ago_ms=${op.lastFinishedAgoMs ?: -1}")
         appendLine("Время операции включает ожидание IO/очередей; задержка не доказывает причину и не подтверждает доставку.")
         appendLine("[предыдущие завершения]")
         appendLine("os_exit_history=${exitStatus.name.lowercase()}")

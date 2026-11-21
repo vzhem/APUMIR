@@ -9,7 +9,6 @@ import com.vladimir.messenger.data.local.entity.NicknameEntity
 import com.vladimir.messenger.data.local.entity.NicknameSuppressionEntity
 import com.vladimir.messenger.data.repository.ChatRepository
 import com.vladimir.messenger.data.security.DeviceIdentityGossip
-import com.vladimir.messenger.data.security.DeviceIdentityHistory
 import com.vladimir.messenger.data.security.DeviceProfileBinding
 import com.vladimir.messenger.data.repository.ContactRepository
 import com.vladimir.messenger.data.referral.ReferralAttributionSender

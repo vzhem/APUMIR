@@ -305,7 +305,7 @@ const WSS_BRIDGE_PORT: u16 = 443;
 /// раньше 20-секундного окна ядра (MQTT_START_CONNACK_TIMEOUT).
 const WSS_BRIDGE_CONNECT_TIMEOUT_SECS: u64 = 10;
 const MQTT_REQUEST_ENQUEUE_TIMEOUT: Duration = Duration::from_secs(5);
-const MQTT_LIVENESS_WATCHDOG_INTERVAL: Duration = Duration::from_secs(15);
+const MQTT_LIVENESS_WATCHDOG_INTERVAL: Duration = Duration::from_secs(45);
 const MQTT_LIVENESS_STALL_AFTER: Duration = Duration::from_secs(90);
 const MQTT_LIVENESS_WARNING_REPEAT: Duration = Duration::from_secs(60);
 const MQTT_LIVENESS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(120);

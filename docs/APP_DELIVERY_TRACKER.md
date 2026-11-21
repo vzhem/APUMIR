@@ -5,6 +5,52 @@
 >
 > **Текущий выпуск:** [v11.74.541](https://github.com/vzhem/APUMIR/releases/tag/v11.74.541) (GitHub Latest, релиз `449970418`, коммит `37720f5`) — удалённый push для групп и каналов (рукопожатие ключей, инкрементальная дорегистрация маршрутов, обмен эпохами без личного чата, ограниченное пробуждение недоступных участников) и значок VIP рядом с именем в шапке личного чата. Проверено в CI: Build Release APK `44303030322` — success (13 файлов релиза, 303 класса / 2255 JVM-тестов), выкладка на сайт `44306779171` — success (включая `Verify actual public site bytes`), проектный бандл `44306779134` — success (итого 15 активов в релизе); веточные прогоны на `d935779` (Build Release APK `44296454210`, Unit tests `44296454322`, Android storage and navigation tests `44296454238`, Remote push prototype tests `44296454250`, Firebase preflight `44296454227`) — все success. Поведение на физических телефонах не проверено: телефонов в песочнице нет.
 
+### 2026-11-21: тихий простой и попутное 15-секундное окно после отправки
+
+По задаче минимизации фонового сетевого шума и расхода ресурсов в покое:
+
+- **Приём входящих сохранён без компромиссов:** слушатель QUIC, подписка MQTT
+  (включая маяк присутствия раз в 60 с для малых сетей в пределах 200-секундного
+  окна живости), FCM-пробуждение, `EmergencyKeepAlive` и `RelayWakeWorker`
+  продолжают работать штатно.
+- **Короткое попутное окно (~15 с) после отправки сообщения:** добавлены
+  `rust-core/src/engine/outgoing_activity.rs` (`OutgoingActivityGate`,
+  `PIGGYBACK_WINDOW_MS = 15_000`) и
+  `service/OutgoingPiggybackCoordinator.kt` (`OutgoingPiggybackPolicy`,
+  `WINDOW_MS = 15_000L` + unit-тесты `OutgoingPiggybackPolicyTest`). Окно
+  открывается только при настоящей пользовательской отправке (личное сообщение,
+  ручной повтор, групповое сообщение/пост канала, отправка файла, публикация
+  истории); служебные пакеты, `eph1-*` и `peer-rank:*` окно не продлевают.
+- **Побочный сетевой шум убран из покоя в попутное окно:**
+  - QUIC-соединения больше не держатся вечно 5-секундными keep-alive пингами
+    (`MAX_IDLE_TIMEOUT_SECS = 20`, `POOL_IDLE_TIMEOUT = 20s`,
+    `KEEP_ALIVE_INTERVAL_SECS = 10`);
+  - STUN в покое опрашивается раз в 30 мин вместо ~60 с, но мгновенно обновляется
+    при смене сети или в 15-секундном окне отправки (если старше 2 мин);
+  - повторный поиск mDNS растянут до 20 мин в покое; прямой обмен PEX, личная
+    рассылка `ppres|`, `gossip`-объявления в MQTT, стартовые рассылки профиля,
+    стикеров, гифок, сердечек, VIP-ранга, адресной книги, прокси-автопилота,
+    фоновые анонсы пакетов функций / APK и адресные `whois`/ранг-запросы к
+    появившимся контактам привязаны к 15-секундному окну после отправки
+    (ручные изменения профиля с `force = true` по-прежнему уходят сразу);
+  - фоновые таймеры в покое успокоены (`ChatOutboxPump` ждёт сигнал отправки при
+    пустой очереди, `ObserveNetworkStatusUseCase` 15 с в покое / 3 с в окне,
+    одиночное зеркало `MirrorSync` шлёт пульс раз в 120 с вместо 20 с,
+    `DeferredDelivery` и счётчик `MirrorHub` спят по 5 мин, когда очередей нет).
+- **В отчёт «Логи» добавлена подробная диагностика расхода энергии (`[расход энергии по узлам]`):**
+  - учёт удержания всех трёх замков (`CoreWorkWakeLock`, `CallWorkWakeLock`,
+    `WifiManager.MulticastLock`) в `[энергия и фон]`;
+  - системные счётчики `BatteryManager` (`CHARGE_COUNTER` в мкА·ч,
+    `CURRENT_NOW` в мкА) и сетевого трафика процесса `TrafficStats` (`rx`/`tx`);
+  - машинная сводка ядра `APU_POWER:` в logcat и её разбор в
+    `PowerActivityReport.kt` (счётчики `STUN`, `mDNS`, `PEX`, `ppres`,
+    `MQTT_маяк/слухи/пересылка/входящие`, `QUIC` соединений/кадров/закрытий по
+    простою и открытий 15-секундного окна);
+  - суммарное время `total_ms` по каждой фоновой операции в `RuntimeHealth`
+    (включая `outbox_pump`, `unconfirmed_outbox_pump`, `custody_reconcile`,
+    `deferred_delivery_pump`, `piggyback_flush`) и вывод топ-задач человеческим
+    языком, чтобы сразу видеть главный источник нагрузки.
+
 **Сборка 534 упала и не выпущена.** Ошибка была в моей правке TCP-приёмника:
 `run_tcp_connections` не получает `network`, поэтому вызов присутствия там не
 собирался. Сигнал присутствия оставлен на двух настоящих живых путях — прямое
@@ -5599,3 +5645,69 @@ APK для всех ABI; выпуск создан и отмечен Latest:
 выбор остаётся включённым после обновления. Helper/MQTT и другие отдельные пути
 не менялись; физический A/B и причинность нагрева не проверены. Релиз не означает,
 что одна настройка устраняет измеренную нагрузку.
+
+## 2026-11-21. Чистка неиспользуемого кода, логов сборки и потолков god-файлов
+
+Проведена ревизия кодовой базы приложения (Android Kotlin, Rust-ядро, ресурсы,
+Gradle-зависимости, документация и CI-гейты) на ветке `arena/e576e256-apumir`:
+
+- **Удалены неиспользуемые файлы и артефакты (23 файла):**
+  - 4 мёртвых Kotlin-файла без единой ссылки в коде и тестах: `GetChatsUseCase.kt`,
+    `BotApiEntryPoint.kt`, `BatteryOptimizer.kt`, `UpdateViewModel.kt` (обновлён
+    контракт в `scripts/ci/check-ui-return-contracts.py` и очищены записи в
+    `hardcoded-strings-baseline.json` и `silent-catch-baseline.json`).
+  - Некомпилируемый остаток старого бот-PR: `rust-core/src/network/store_and_forward.rs`,
+    `scripts/setup_offline_delivery.ps1`, `create_store_forward.py`, а также
+    разовые черновики `online_files.py`, `online_files2.py`, `icon-design-source.png`
+    и устаревший `scripts/generate-avatar-presets.py` (актуальный генератор —
+    `tools/avatar_presets/generate_avatars.py`).
+  - 12 закоммиченных аварийных/сборочных логов в `android-app/` (`hs_err_pid*.log`,
+    `replay_pid*.log`, `build_log.txt`, `rebuild_hilt_log.txt`); маски добавлены
+    в `.gitignore`.
+- **Удалены неиспользуемые функции, ресурсы, импорты и дубли зависимостей:**
+  - Kotlin/Compose: мёртвые кнопки звонка `ScreenShareCallButton`,
+    `CaptionsCallButton`, `BackgroundsCallButton` в `CallScreen.kt`; невызываемые
+    `RustBridge.sendViaTcp` и `RustBridge.getPublicKey(nodeId)`; устаревшие
+    `BotApi.getLatestVersion`, `UpdateChecker.downloadFailed`,
+    `ChatDetailViewModel.onCallLocked`/`onVideoLocked`,
+    `OnboardingViewModel.onFinishOnboarding`.
+  - Rust: неиспользуемые методы `CoreEngine::on_peer_connected` и `on_peer_lost`
+    в `rust-core/src/engine/core.rs` (не экспортированы в `lib.udl`, 0 вызовов).
+  - Ресурсы и импорты: 34 неиспользуемых строковых ключа синхронно удалены из
+    `values/strings.xml` и `values-en/strings.xml`; удалено 187 неиспользуемых и
+    дублирующихся импортов в 67 Kotlin-файлах.
+  - Gradle: убран дубликат `implementation("com.google.zxing:core:3.5.3")` в
+    `android-app/app/build.gradle.kts` (оставлен `libs.zxing.core`) и неиспользуемая
+    запись `jna` без `@aar` в `android-app/gradle/libs.versions.toml`.
+- **Закрыты расхождения CI-гейтов на `main` и снижены потолки god-файлов:**
+  - В `docs/README.md` добавлены `PUBLICATION_WAVE_1.md` и `THERMAL_CHECK.md`
+    (`check-docs-index.py` снова зелёный).
+  - Вынесены `ApkVersionDialog.kt` (из `SettingsScreen.kt`),
+    `ApuConnectByLinkDialog.kt` (из `ChatListScreen.kt`) и
+    `ApkReceivedScanner.kt` (из `ApkSeeder.kt` с явным логированием ошибок чтения
+    APK); потолки в `god-files-baseline.json`, `silent-catch-baseline.json` и
+    `hardcoded-strings-baseline.json` понижены через `--write`.
+- **Проверка CI на коммите `7392dc3` (`arena/e576e256-apumir`):**
+  - Build Release APK: [run 44891046617](https://github.com/vzhem/APUMIR/actions/runs/44891046617) — success (Rust-ядро по всем ABI, 309 классов / 2286 JVM-тестов, сборка и подпись release APK + feature packs).
+  - Unit tests (JVM): [run 44891046616](https://github.com/vzhem/APUMIR/actions/runs/44891046616) — success.
+  - Android storage and navigation tests: [run 44891046575](https://github.com/vzhem/APUMIR/actions/runs/44891046575) — success.
+  - Remote push prototype tests: [run 44891046585](https://github.com/vzhem/APUMIR/actions/runs/44891046585) — success.
+  - Firebase Android configuration preflight: [run 44891046584](https://github.com/vzhem/APUMIR/actions/runs/44891046584) — success.
+
+## 2026-11-21. Подготовка и выпуск v11.74.557 — тихий режим покоя, попутное окно 15 с и диагностика энергии в «Логах»
+
+Проверенный коммит `5524f68` на линии от `v11.74.556` (`b622ce22`) прошёл полный
+набор CI:
+- Build Release APK: [run 44899913195](https://github.com/vzhem/APUMIR/actions/runs/44899913195) — success;
+- Unit tests (JVM): [run 44899913090](https://github.com/vzhem/APUMIR/actions/runs/44899913090) — success;
+- Android storage and navigation tests: [run 44899913081](https://github.com/vzhem/APUMIR/actions/runs/44899913081) — success;
+- Remote push prototype tests: [run 44899913092](https://github.com/vzhem/APUMIR/actions/runs/44899913092) — success;
+- Firebase Android configuration preflight: [run 44899913078](https://github.com/vzhem/APUMIR/actions/runs/44899913078) — success.
+
+По прямому поручению владельца («выпускай релиз для всех») подготовлено описание
+[`RELEASE_NOTES_v11.74.557.md`](RELEASE_NOTES_v11.74.557.md), слияние в `main` и
+выпуск стабильного релиза `v11.74.557` с автоматической выкладкой на официальный
+сайт.
+
+
+

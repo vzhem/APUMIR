@@ -7,6 +7,7 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.TrafficStats
 import android.os.BatteryManager
 import android.os.Build
 import android.os.PowerManager
@@ -474,7 +475,10 @@ object TransferDiagnostics {
             .getOrDefault(RelayStorageDiagnostics(status = "unavailable"))
         val health = runCatching { RuntimeDiagnostics.snapshot(context.applicationContext) }
             .getOrDefault(RuntimeHealthSnapshot())
-        val details = thermalCpu + ApplicationStartupDiagnostics.report() + ServiceStartupDiagnostics.report() + OperationalDiagnostics.storageTrend(storage) + OperationalDiagnostics.journalReport() + OperationalDiagnostics.wakeReport() + logcat.relayCleanup.render() +
+        val details = thermalCpu + ApplicationStartupDiagnostics.report() + ServiceStartupDiagnostics.report() +
+            OperationalDiagnostics.storageTrend(storage) + OperationalDiagnostics.journalReport() +
+            OperationalDiagnostics.wakeReport() + powerBreakdown(context.applicationContext, createdAtMs, logcat.powerActivity, health.operations) +
+            logcat.relayCleanup.render() +
             com.vladimir.messenger.data.story.DurableStorySender.report(context.applicationContext) +
             com.vladimir.messenger.data.avatavideo.PeerVideoAvatarStore.report(context.applicationContext) +
             com.vladimir.messenger.data.story.StoryFeedbackStore.report(context.applicationContext) +
@@ -485,6 +489,39 @@ object TransferDiagnostics {
             operationalHealth = OperationalDiagnostics.tracker.snapshot(), operationalDetails = details,
             push = facts.push ?: pushSnapshot(context.applicationContext)),
             journalSnapshot.first, logcat.lines, createdAtMs)
+    }
+
+    private fun powerBreakdown(
+        context: Context,
+        nowMs: Long,
+        power: PowerActivitySnapshot,
+        operations: List<OperationHealth>,
+    ): String {
+        val batteryManager = runCatching { context.getSystemService(BatteryManager::class.java) }.getOrNull()
+        val chargeUah = runCatching {
+            batteryManager?.getLongProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)
+                ?.takeIf { it != Long.MIN_VALUE && it > 0L }
+        }.getOrNull()
+        val currentNowUa = runCatching {
+            batteryManager?.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
+                ?.takeIf { it != Long.MIN_VALUE }
+        }.getOrNull()
+        val uid = Process.myUid()
+        val rxBytes = runCatching {
+            TrafficStats.getUidRxBytes(uid).takeIf { it >= 0L }
+        }.getOrNull()
+        val txBytes = runCatching {
+            TrafficStats.getUidTxBytes(uid).takeIf { it >= 0L }
+        }.getOrNull()
+        val piggyback = com.vladimir.messenger.service.OutgoingPiggybackCoordinator.policy.snapshot(nowMs)
+        return power.render(
+            piggyback = piggyback,
+            operations = operations,
+            chargeCounterUah = chargeUah,
+            currentNowUa = currentNowUa,
+            rxBytesUid = rxBytes,
+            txBytesUid = txBytes,
+        )
     }
 
     /**
@@ -652,6 +689,7 @@ object TransferDiagnostics {
      */
     private data class LogcatScan(
         val relayCleanup: RelayCleanupWindow = RelayCleanupWindow(),
+        val powerActivity: PowerActivitySnapshot = PowerActivitySnapshot(),
         val lines: List<String>,
         val coreMessageSignals: Long,
         val relayQueueFull: Long,
@@ -692,7 +730,7 @@ object TransferDiagnostics {
                 stunFailedCycles == 0L &&
                 stunSuccessfulBindings == 0L && stunLastAttemptFailed == null &&
                 severities.warnings == 0L && severities.errors == 0L &&
-                helperRoutes == HelperRouteDiagnostics.EMPTY
+                helperRoutes == HelperRouteDiagnostics.EMPTY && !powerActivity.nativePresent
 
         companion object {
             val EMPTY = LogcatScan(
@@ -914,6 +952,7 @@ object TransferDiagnostics {
         val evictionScan = DiagnosticsPrivacy.parseRelayQueueOwnEvictions(all)
         LogcatScan(
             relayCleanup = RelayCleanupWindow.parse(all),
+            powerActivity = PowerActivitySnapshot.parseLatest(all),
             // Свежие строки важнее старых: logcat отдаёт их по времени вперёд.
             lines = DiagnosticsPrivacy.prioritizeLogcatErrors(
                 all.filter(::isRelevantProcessLog)
@@ -1019,6 +1058,7 @@ object TransferDiagnostics {
         "file_chunk_received",
         "MQTT",
         "ONLINE_HELPER",
+        "APU_POWER",
         "Engine",
         "мертв", // «движок мёртв» — от ядра о потере связи
         "error",
@@ -1074,7 +1114,7 @@ object TransferDiagnostics {
     private const val MEBIBYTE = 1024L * 1024L
 }
 
-/** Hilt-точка входа для чтения очереди передач в фоне (см. BotApiEntryPoint). */
+/** Hilt-точка входа для чтения очереди передач в фоне. */
 @EntryPoint
 @InstallIn(SingletonComponent::class)
 interface DiagnosticsEntryPoint {
