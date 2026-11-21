@@ -5694,4 +5694,20 @@ Gradle-зависимости, документация и CI-гейты) на �
   - Remote push prototype tests: [run 44891046585](https://github.com/vzhem/APUMIR/actions/runs/44891046585) — success.
   - Firebase Android configuration preflight: [run 44891046584](https://github.com/vzhem/APUMIR/actions/runs/44891046584) — success.
 
+## 2026-11-21. Подготовка и выпуск v11.74.557 — тихий режим покоя, попутное окно 15 с и диагностика энергии в «Логах»
+
+Проверенный коммит `5524f68` на линии от `v11.74.556` (`b622ce22`) прошёл полный
+набор CI:
+- Build Release APK: [run 44899913195](https://github.com/vzhem/APUMIR/actions/runs/44899913195) — success;
+- Unit tests (JVM): [run 44899913090](https://github.com/vzhem/APUMIR/actions/runs/44899913090) — success;
+- Android storage and navigation tests: [run 44899913081](https://github.com/vzhem/APUMIR/actions/runs/44899913081) — success;
+- Remote push prototype tests: [run 44899913092](https://github.com/vzhem/APUMIR/actions/runs/44899913092) — success;
+- Firebase Android configuration preflight: [run 44899913078](https://github.com/vzhem/APUMIR/actions/runs/44899913078) — success.
+
+По прямому поручению владельца («выпускай релиз для всех») подготовлено описание
+[`RELEASE_NOTES_v11.74.557.md`](RELEASE_NOTES_v11.74.557.md), слияние в `main` и
+выпуск стабильного релиза `v11.74.557` с автоматической выкладкой на официальный
+сайт.
+
+
 
