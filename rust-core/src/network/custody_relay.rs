@@ -939,7 +939,7 @@ mod tests {
         let hold = CustodyHold::new();
         let offers = CustodyOffers::new();
         let eph = held_from_envelope(
-            &envelope("eph1-av1_ready-abcd", "pk_recv", "pk_orig", 120),
+            &envelope("eph1-550e8400-e29b-41d4-a716-446655440000", "pk_recv", "pk_orig", 120),
             1_000,
         )
         .unwrap();
