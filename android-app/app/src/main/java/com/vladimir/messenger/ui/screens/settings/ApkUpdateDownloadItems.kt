@@ -1,13 +1,11 @@
 package com.vladimir.messenger.ui.screens.settings
 
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -67,17 +65,11 @@ internal fun OfficialUpdateDownloadItem(
         state?.isFailed == true -> stringResource(R.string.st_official_download_failed)
         else -> stringResource(R.string.st_official_check_download_hint)
     }
-    val progress: (@Composable () -> Unit)? = if (busy) {
-        { CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp) }
-    } else {
-        null
-    }
     ApuSettingsItem(
         icon = Icons.Default.CloudDownload,
         title = title,
         subtitle = subtitle,
         onClick = if (busy) null else viewModel::onDownloadOfficialRelease,
-        trailingContent = progress,
     )
 
     val visible = state?.takeIf { !it.isSuccessful }
@@ -169,17 +161,11 @@ internal fun NeighborUpdateDownloadItem(
     } else {
         null
     }
-    val progress: (@Composable () -> Unit)? = if (started) {
-        { CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp) }
-    } else {
-        null
-    }
     ApuSettingsItem(
         icon = Icons.Default.Download,
         title = title,
         subtitle = subtitle,
         onClick = downloadClick,
-        trailingContent = progress,
     )
     if (started && pendingVersion != null) {
         ApuSettingsDivider()

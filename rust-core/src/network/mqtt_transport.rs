@@ -1075,32 +1075,37 @@ impl MqttTransport {
         let secondary_requested = targets.contains(MqttBrokerId::Secondary);
         let secondary_available = self.secondary_active();
 
-        let primary_result = if primary_requested {
-            Some(
-                await_mqtt_request(
+        // Independent request queues: let both brokers use the same time
+        // window instead of making the secondary wait for a stalled primary.
+        // Still collect both outcomes; enqueue success is not delivery, and
+        // dropping a pending future after the first success would lose fanout.
+        let (primary_payload, secondary_payload) = match (primary_requested, secondary_requested) {
+            (true, true) => (Some(payload.clone()), Some(payload)),
+            (true, false) => (Some(payload), None),
+            (false, true) => (None, Some(payload)),
+            (false, false) => (None, None),
+        };
+        let (primary_result, secondary_result) = tokio::join!(
+            async {
+                let payload = primary_payload?;
+                Some(await_mqtt_request(
                     operation,
                     MQTT_REQUEST_ENQUEUE_TIMEOUT,
-                    self.client
-                        .publish(topic, qos, retain, payload.clone()),
-                )
-                .await,
-            )
-        } else {
-            None
-        };
-        let secondary_result =
-            if secondary_requested && (secondary_available || allow_inactive_targets) {
-            Some(
-                await_mqtt_request(
+                    self.client.publish(topic, qos, retain, payload),
+                ).await)
+            },
+            async {
+                let payload = secondary_payload?;
+                if !secondary_available && !allow_inactive_targets {
+                    return None;
+                }
+                Some(await_mqtt_request(
                     operation,
                     MQTT_REQUEST_ENQUEUE_TIMEOUT,
                     self.secondary_client.publish(topic, qos, retain, payload),
-                )
-                .await,
-            )
-        } else {
-            None
-        };
+                ).await)
+            },
+        );
 
         let mut queued = MqttBrokerSet::EMPTY;
         let mut failures = Vec::with_capacity(2);

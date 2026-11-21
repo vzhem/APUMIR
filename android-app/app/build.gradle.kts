@@ -98,10 +98,11 @@ val gitTagVersionName: String? = providers.gradleProperty("releaseVersionName")
         candidate.ifEmpty { null }
     }
 
+val explicitlyVersionedStoreBuild = providers.gradleProperty("apu.storeVersioned").orNull == "true"
 val ciVersionFromEnvironment = providers.environmentVariable("GITHUB_REF_NAME").orNull
     ?.takeIf { versionCodeFromName(it) != null }
 val releaseVersionName = gitTagVersionName?.let { tag ->
-    if (ciVersionFromEnvironment != null) tag else "$tag-debug"
+    if (ciVersionFromEnvironment != null || explicitlyVersionedStoreBuild) tag else "$tag-debug"
 } ?: "v11.16"
 val releaseVersionCode = providers.gradleProperty("releaseVersionCode")
     .orNull
@@ -136,6 +137,7 @@ android {
         buildConfigField("boolean", "APU_PUSH_TESTED", pushTestedBuild.toString())
         buildConfigField("String", "APU_PUSH_ENDPOINT", "\"$pushEndpoint\"")
 
+        buildConfigField("boolean", "APU_SELF_UPDATE", "true")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -183,6 +185,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+        }
+        create("storeRelease") {
+            initWith(getByName("release"))
+            matchingFallbacks += listOf("release")
+            buildConfigField("boolean", "APU_SELF_UPDATE", "false")
         }
         debug {
             isMinifyEnabled = false

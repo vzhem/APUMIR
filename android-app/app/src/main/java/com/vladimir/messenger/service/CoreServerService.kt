@@ -1062,7 +1062,7 @@ class CoreServerService : Service() {
                 // DownloadManager is a separate Android process: an APK
                 // queued on fallback can continue using GitHub long after a
                 // signed peer appears, unless we cancel the active job.
-                serviceScope.launch {
+                if (com.vladimir.messenger.BuildConfig.APU_SELF_UPDATE) serviceScope.launch {
                     while (kotlinx.coroutines.currentCoroutineContext().isActive) {
                         runCatching { updateChecker.suspendExternalDownloadsForSwarm() }
                             .onFailure { Log.w(TAG, "Update download barrier: ${it.message}") }
@@ -2112,7 +2112,7 @@ class CoreServerService : Service() {
             isInteractive = { event: CoreEventFfi -> MainLanePriority.isInteractive(event.eventType) },
             process = { event -> coreWorkWakeLock.withLock {
                 RuntimeDiagnostics.measure(DiagnosticOperation.CORE_EVENTS) {
-                    DeliveryCadence.touch()
+                    if (event.eventType != "peer_discovered") DeliveryCadence.touch()
                     handleEvent(event)
                 }
             } },
@@ -2788,6 +2788,8 @@ class CoreServerService : Service() {
                     val existing = resolvePresenceContact(contactRepository, peerId)
                     val observation = presence.observe(peerId, existing?.id, event.timestamp) ?: return
                     val lightTouch = observation.lightTouch
+                    // Routine presence refreshes must not keep every idle pump on its fast cadence.
+                    if (!lightTouch) DeliveryCadence.touch()
                     // Рейтинг отражает исходное время принятого наблюдения, а не время доставки.
                     runCatching {
                         com.vladimir.messenger.data.peer.PeerRatingStore.recordSighting(
@@ -2800,17 +2802,15 @@ class CoreServerService : Service() {
                     // Хранение у третьего телефона (этап 7 роя): маршрутизатор
                     // файлов ведёт свой список «кто в сети» - по нему выбирается
                     // хранитель и отдаётся хранимое появившемуся получателю.
-                    serviceScope.launch {
+                    if (!lightTouch) serviceScope.launch {
                         // Файл группы, который я жду, а его сид только что появился:
                         // спросить сразу, не дожидаясь очередного круга (этап 9).
-                        if (!lightTouch) {
-                            runCatching { groupFiles.onPeerOnline(peerId) }
-                                .onFailure { Log.w(TAG, "group file presence failed: ${it.message}") }
-                            // Обновление раздаёт именно этот узел — спросить сразу.
-                            runCatching { apkSeeder.onPeerOnline(peerId) }
-                                .onFailure { Log.w(TAG, "apk presence failed: ${it.message}") }
-                            runCatching { groupRepository.onPeerOnline(peerId) } // досылка правки
-                        }
+                        runCatching { groupFiles.onPeerOnline(peerId) }
+                            .onFailure { Log.w(TAG, "group file presence failed: ${it.message}") }
+                        // Обновление раздаёт именно этот узел — спросить сразу.
+                        runCatching { apkSeeder.onPeerOnline(peerId) }
+                            .onFailure { Log.w(TAG, "apk presence failed: ${it.message}") }
+                        runCatching { groupRepository.onPeerOnline(peerId) } // досылка правки
                     }
 
                     // Обновляем только СУЩЕСТВУЮЩИЕ контакты (НЕ создаём новые автоматически)

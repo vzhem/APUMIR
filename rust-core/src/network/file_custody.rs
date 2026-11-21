@@ -138,7 +138,7 @@ impl Default for FileCustodyPolicy {
             max_active_transfers_per_origin: 32,
             max_ranges_per_transfer: 65_536,
             max_ranges_per_origin_per_minute: 120,
-            max_ttl_ms: 7 * 24 * 60 * 60 * 1_000,
+            max_ttl_ms: 24 * 60 * 60 * 1_000,
             allowed_origin_keys: Vec::new(),
         }
     }

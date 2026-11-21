@@ -1117,16 +1117,17 @@ private fun SectionPage(
         .collectAsStateWithLifecycle()
     val showBirthdayBanner = !isSearchActive &&
         (section == InboxSection.All || section == InboxSection.Chats)
-    val birthdayGuests = if (showBirthdayBanner && birthdays.isNotEmpty()) {
-        com.vladimir.messenger.data.profile.BirthdayBanner.guests(
-            birthdays = birthdays,
-            contacts = items.filterIsInstance<InboxItem.Personal>()
-                .map { it.chat.contactId to it.chat.contactName },
-            today = java.time.LocalDate.now(),
-            dismissed = birthdaysHidden,
-        )
-    } else {
-        emptyList()
+    val today = java.time.LocalDate.now()
+    val birthdayGuests = remember(showBirthdayBanner, birthdays, items, today, birthdaysHidden) {
+        if (showBirthdayBanner && birthdays.isNotEmpty()) {
+            com.vladimir.messenger.data.profile.BirthdayBanner.guests(
+                birthdays = birthdays,
+                contacts = items.filterIsInstance<InboxItem.Personal>()
+                    .map { it.chat.contactId to it.chat.contactName },
+                today = today,
+                dismissed = birthdaysHidden,
+            )
+        } else emptyList()
     }
 
     Box(modifier = Modifier.fillMaxSize()) {

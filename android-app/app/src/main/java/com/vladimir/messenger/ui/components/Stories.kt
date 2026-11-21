@@ -83,6 +83,7 @@ import androidx.core.view.WindowCompat
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.R
@@ -251,12 +252,11 @@ private fun StoryBubble(
                     }
                 }
                 if (self) {
-                    // Своя ячейка играет через MyAvatar, чужая — через PeerAvatar.
+                    // В списке показываем постер: декодер не должен работать в простое.
                     MyAvatar(
                         displayName = selfName.orEmpty().ifBlank { title },
                         modifier = Modifier.size(54.dp),
                         size = 54,
-                        playVideo = true,
                     )
                 } else {
                     PeerAvatar(name = title, avatarB64 = avatar, size = 54.dp, peerId = peerId)
@@ -422,9 +422,18 @@ fun StoryViewerDialog(
     /** История показана: экран просит у автора сводку откликов, если её нет. */
     onStoryShown: ((StoryStore.Story) -> Unit)? = null,
 ) {
+    val owner = LocalLifecycleOwner.current
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
-        while (true) { delay(1_000); now = System.currentTimeMillis() }
+    LaunchedEffect(stories, owner) {
+        owner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                val currentTime = System.currentTimeMillis()
+                now = currentTime
+                val nextExpiry = stories.asSequence().map { it.createdAtMs + StoryStore.LIFETIME_MS }
+                    .filter { it > currentTime }.minOrNull() ?: break
+                delay(nextExpiry - currentTime)
+            }
+        }
     }
     val activeStories = stories.filter { now - it.createdAtMs < StoryStore.LIFETIME_MS }
     if (activeStories.isEmpty()) {
@@ -447,7 +456,6 @@ fun StoryViewerDialog(
     var showReactionPicker by remember { mutableStateOf(false) }
     var showComments by remember { mutableStateOf(false) }
     val feedback = rememberStoryFeedback(current.id)
-    val owner = LocalLifecycleOwner.current
     var resumed by remember(owner) { mutableStateOf(owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     DisposableEffect(owner) {
         val observer = LifecycleEventObserver { _, _ ->

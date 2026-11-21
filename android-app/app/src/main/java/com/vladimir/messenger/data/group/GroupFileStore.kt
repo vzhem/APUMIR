@@ -163,6 +163,6 @@ class GroupFileStore(private val root: File) {
         const val MAX_NAME_CHARS = 120
         const val COPY_BUFFER_BYTES = 64 * 1024
         /** Верхняя граница: срок передачи считает FileTransferRetention (тяжёлое — сутки). */
-        const val DEFAULT_TTL_MS = 7L * 24 * 60 * 60 * 1000
+        const val DEFAULT_TTL_MS = 24L * 60 * 60 * 1000
     }
 }

@@ -30,27 +30,27 @@ class FileTransferRetentionTest {
     }
 
     @Test
-    fun heavyLivesOneDayAndLightLivesAWeek() {
+    fun allFileTransfersLiveOneDay() {
         assertEquals(24L * 60 * 60 * 1000, FileTransferRetention.ttlMs("video/mp4", 5L))
         assertEquals(24L * 60 * 60 * 1000, FileTransferRetention.ttlMs("image/webp", 5L))
         assertEquals(
             24L * 60 * 60 * 1000,
             FileTransferRetention.ttlMs("application/octet-stream", 9L * 1024 * 1024),
         )
-        assertEquals(7L * 24 * 60 * 60 * 1000, FileTransferRetention.ttlMs("text/plain", 1_000L))
-        assertEquals(7L * 24 * 60 * 60 * 1000, FileTransferRetention.ttlMs("application/pdf", 512_000L))
+        assertEquals(24L * 60 * 60 * 1000, FileTransferRetention.ttlMs("text/plain", 1_000L))
+        assertEquals(24L * 60 * 60 * 1000, FileTransferRetention.ttlMs("application/pdf", 512_000L))
         // Ровно на черте — ещё не тяжёлое: граница не должна «прыгать».
         assertEquals(
-            7L * 24 * 60 * 60 * 1000,
+            24L * 60 * 60 * 1000,
             FileTransferRetention.ttlMs("application/pdf", FileTransferRetention.HEAVY_MAX_BYTES),
         )
-        assertTrue(FileTransferRetention.HEAVY_TTL_MS < FileTransferRetention.LIGHT_TTL_MS)
+        assertEquals(FileTransferRetention.HEAVY_TTL_MS, FileTransferRetention.LIGHT_TTL_MS)
     }
 
     @Test
     fun logsSayTheRuleAndTheSweep() {
         // Владелец должен видеть правило в «Логах», а не догадываться о нём.
-        assertEquals("срок хранения: тяжёлое 24 ч · текст и малое 7 сут", FileTransferRetention.describe())
+        assertEquals("срок хранения новых файловых передач: 24 ч", FileTransferRetention.describe())
         assertEquals(
             "просроченное убрано: строк=3 копий=5",
             FileTransferRetention.describeSweep(3, 5),

@@ -52,9 +52,12 @@ class DeliveryCadenceContractTest(unittest.TestCase):
         self.assertIn("wait_for_lane", events)
         self.assertIn("self.ready.notify_all()", events)
 
-    def test_each_incoming_event_marks_activity(self):
+    def test_real_work_marks_activity_but_light_presence_keeps_idle_cadence(self):
         processing = self.service[self.service.index("process = { event ->"):]
-        self.assertLess(processing.index("DeliveryCadence.touch()"), processing.index("handleEvent(event)"))
+        self.assertLess(processing.index('if (event.eventType != "peer_discovered") DeliveryCadence.touch()'), processing.index("handleEvent(event)"))
+        presence = processing.split('"peer_discovered" -> {', 1)[1].split('"peer_lost" -> {', 1)[0]
+        self.assertIn("if (!lightTouch) DeliveryCadence.touch()", presence)
+        self.assertIn("if (!lightTouch) serviceScope.launch", presence)
 
     def test_main_and_file_consumers_are_independent_and_fair(self):
         loops = read(SERVICE / "CoreEventLoops.kt")

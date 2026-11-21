@@ -1010,8 +1010,9 @@ pub async fn stun_via_side_channel(
     side: &mut UdpSideChannel,
     servers: &[&str],
     per_server: Duration,
+    prefer_ipv4: bool,
 ) -> Option<SocketAddr> {
-    stun_via_side_channel_family(side, servers, per_server, None).await
+    stun_via_side_channel_ordered(side, servers, per_server, None, prefer_ipv4).await
 }
 
 /// То же, но можно ограничить семейство адресов сервера.
@@ -1026,6 +1027,16 @@ pub async fn stun_via_side_channel_family(
     servers: &[&str],
     per_server: Duration,
     only_ipv6: Option<bool>,
+) -> Option<SocketAddr> {
+    stun_via_side_channel_ordered(side, servers, per_server, only_ipv6, false).await
+}
+
+async fn stun_via_side_channel_ordered(
+    side: &mut UdpSideChannel,
+    servers: &[&str],
+    per_server: Duration,
+    only_ipv6: Option<bool>,
+    prefer_ipv4: bool,
 ) -> Option<SocketAddr> {
     use super::ice::{decode_binding_response, encode_binding_request};
 
@@ -1045,10 +1056,13 @@ pub async fn stun_via_side_channel_family(
         })
         .await
         .unwrap_or_default();
-        let targets: Vec<SocketAddr> = targets
+        let mut targets: Vec<SocketAddr> = targets
             .into_iter()
             .filter(|target| only_ipv6.map(|v6| target.is_ipv6() == v6).unwrap_or(true))
             .collect();
+        if prefer_ipv4 {
+            targets.sort_by_key(SocketAddr::is_ipv6);
+        }
         if targets.is_empty() {
             tracing::warn!("STUN(7777): cannot resolve {} for the requested stack", server);
             continue;

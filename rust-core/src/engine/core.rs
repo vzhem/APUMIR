@@ -91,7 +91,7 @@ const FILE_SESSION_V1_PREFERRED_FLAG: u32 = 1 << 31;
 /// K5-2: сколько чужого держим по времени. Совпадает с политикой склада по
 /// умолчанию (неделя): дольше держать кусок зашифрованного файла смысла нет -
 /// отправитель за это время либо доставит его, либо начнёт заново.
-const MAX_FILE_CUSTODY_TTL_MS: i64 = 7 * 24 * 60 * 60 * 1_000;
+const MAX_FILE_CUSTODY_TTL_MS: i64 = 24 * 60 * 60 * 1_000;
 
 #[derive(Debug)]
 enum MqttOutboundCommand {
@@ -4714,6 +4714,9 @@ impl P2PCore {
         // Без бокового канала (endpoint не поднялся) - старый путь через
         // временный сокет: адрес хуже, чем никакой, только для брокера.
         let mut backoff_secs = 15u64;
+        // Prefer the recently working IPv4 path for a few refreshes, then
+        // re-probe in normal order. IPv6 stays a fallback on every probe.
+        let mut prefer_ipv4_until: Option<tokio::time::Instant> = None;
         loop {
             let now = crate::storage::models::now_ms();
             if !policy.transport_fallback_allowed(now) {
@@ -4734,9 +4737,12 @@ impl P2PCore {
             }
             tracing::info!("STUN: fallback external address discovery...");
 
+            let prefer_ipv4 = prefer_ipv4_until
+                .map(|until| tokio::time::Instant::now() < until)
+                .unwrap_or(false);
             let result: Option<SocketAddr> = match side.as_mut() {
                 Some(channel) => {
-                    stun_via_side_channel(channel, DEFAULT_STUN_SERVERS, STUN_TIMEOUT).await
+                    stun_via_side_channel(channel, DEFAULT_STUN_SERVERS, STUN_TIMEOUT, prefer_ipv4).await
                 }
                 None => tokio::task::spawn_blocking(|| {
                     StunClient::get_external_address_from_any(DEFAULT_STUN_SERVERS).ok()
@@ -4748,6 +4754,11 @@ impl P2PCore {
 
             match result {
                 Some(addr) => {
+                    if addr.is_ipv6() {
+                        prefer_ipv4_until = None;
+                    } else if !prefer_ipv4 {
+                        prefer_ipv4_until = Some(tokio::time::Instant::now() + std::time::Duration::from_secs(300));
+                    }
                     // If direct discovery succeeded during the STUN transaction,
                     // do not promote this late external reply over its reflection.
                     if policy.transport_fallback_allowed(crate::storage::models::now_ms()) {

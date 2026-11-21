@@ -293,6 +293,16 @@ impl EventBus {
     pub fn emit(&self, event: CoreEvent) {
         let mut queue = self.queue.lock().unwrap();
         if queue.len() >= self.max_size {
+            // An ACK already waiting for the same ID performs the same update.
+            // Never coalesce incoming messages: identical IDs alone do not
+            // establish that two envelopes have the same validity.
+            if let CoreEvent::MessageDelivered { message_id } = &event {
+                if queue.iter().any(|pending| matches!(pending,
+                    CoreEvent::MessageDelivered { message_id: id } if id == message_id
+                )) {
+                    return;
+                }
+            }
             let victim = (1..=2).rev().find_map(|rank| {
                 queue.iter().rposition(|e| e.eviction_rank() == rank)
             });
@@ -302,10 +312,14 @@ impl EventBus {
                         self.note_eviction(&dropped);
                     }
                 }
+                None if event.eviction_rank() != 0 => {
+                    self.note_eviction(&event);
+                    return;
+                }
                 None => {
-                    tracing::warn!(
-                        "EventBus overflow: only critical message events queued, growing softly"
-                    );
+                    if queue.len() == self.max_size || queue.len().is_power_of_two() {
+                        tracing::warn!("EventBus overflow: critical backlog len={}", queue.len());
+                    }
                 }
             }
         }
@@ -937,4 +951,19 @@ mod tests {
             .iter()
             .any(|e| matches!(e, CoreEvent::MessageDelivered { message_id } if message_id == "m1")));
     }
+    #[test]
+    fn saturated_queue_keeps_unique_acks_without_repeating_pending_ack() {
+        let bus = EventBus::new(1);
+        bus.emit(CoreEvent::MessageDelivered { message_id: "one".into() });
+        for _ in 0..20 {
+            bus.emit(CoreEvent::MessageDelivered { message_id: "one".into() });
+            bus.emit(CoreEvent::NetworkStatusChanged { status: "relayed".into() });
+        }
+        bus.emit(CoreEvent::MessageDelivered { message_id: "two".into() });
+        let pending = bus.drain();
+        assert_eq!(pending.len(), 2);
+        assert!(matches!(&pending[0], CoreEvent::MessageDelivered { message_id } if message_id == "one"));
+        assert!(matches!(&pending[1], CoreEvent::MessageDelivered { message_id } if message_id == "two"));
+    }
+
 }

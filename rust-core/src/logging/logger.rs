@@ -15,7 +15,15 @@ pub fn init_logger() {
                 Ok(l) => l,
                 Err(_) => return,
             };
-            let subscriber = tracing_subscriber::registry().with(android_layer);
+            // QUIC libraries emit trace/debug records in packet hot paths.
+            // Keep transport warnings and all existing APU diagnostics.
+            let transport_filter = tracing_subscriber::filter::filter_fn(|meta| {
+                let quic = matches!(meta.target().split("::").next(),
+                    Some("quinn" | "quinn_proto" | "quinn_udp"));
+                !quic || matches!(*meta.level(),
+                    tracing::Level::ERROR | tracing::Level::WARN | tracing::Level::INFO)
+            });
+            let subscriber = tracing_subscriber::registry().with(android_layer.with_filter(transport_filter));
             let _ = tracing::subscriber::set_global_default(subscriber);
         }
 
