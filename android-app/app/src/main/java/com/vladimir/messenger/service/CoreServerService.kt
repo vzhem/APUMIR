@@ -114,6 +114,7 @@ class CoreServerService : Service() {
     @Inject lateinit var stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary
     @Inject lateinit var proxyAutopilot: com.vladimir.messenger.service.ProxyAutopilot
     private var gossipStarted = false
+    private var unregisterPiggyback: (() -> Unit)? = null
 
     private val coreWorkWakeLock by lazy { CoreWorkWakeLock(applicationContext) }
     private val callWorkWakeLock by lazy { CallWorkWakeLock(applicationContext) }
@@ -610,71 +611,52 @@ class CoreServerService : Service() {
         }
 
         
-        // Сердечки: общая рассылка раз в 6 часов, только когда телефон свободен (HeartSyncPolicy).
-        // Ядро живёт в этом сервисе постоянно, поэтому цикл здесь, а не в экране игры.
-        serviceScope.launch {
-            while (isActive) {
-                try {
-                    heartGameNetwork.broadcastIfNeeded()
-                } catch (e: kotlinx.coroutines.CancellationException) {
-                    throw e
-                } catch (_: Exception) {
-                    // Ядро или подпись недоступны: повторим на следующем круге.
-                }
-                delay(com.vladimir.messenger.data.heartgame.HeartSyncPolicy.CHECK_PERIOD_MS)
-            }
-        }
-
-        // ================================================================
-        // РЕГИСТРАЦИЯ В CLOUDFLARE WORKER REGISTRY
-        // (независимо от наличия telegram_bot_token)
-        // ================================================================
         presence.start(serviceScope)
-        serviceScope.launch {
-            try {
-                // Ждём пока RustBridge инициализируется
-                var attempts = 0
-                while (RustBridge.nodeId() == null && attempts < 30) {
-                    kotlinx.coroutines.delay(500)
-                    attempts++
-                }
-                
-                val myNodeId = RustBridge.nodeId()
-                val myPubKey = RustBridge.publicKey()
-                val prefs = getSharedPreferences("p2p_prefs", MODE_PRIVATE)
-                val myName = prefs.getString("display_name", null) ?: "Unknown"
-                
-                if (myNodeId != null && myPubKey != null && myPubKey.isNotBlank()) {
-                    // Регистрация в справочнике нужна один раз: она сообщает
-                    // серверу-указателю мой ключ и имя. Раньше запрос уходил
-                    // при КАЖДОМ запуске сервиса, то есть по нескольку раз в
-                    // день на мобильном интернете. Повторяем, только если имя
-                    // изменилось или прошла неделя.
-                    val lastName = prefs.getString(REGISTRY_NAME_KEY, null)
-                    val lastAtMs = prefs.getLong(REGISTRY_AT_KEY, 0L)
-                    val weekPassed = System.currentTimeMillis() - lastAtMs > REGISTRY_REFRESH_MS
-                    if (lastName != myName || weekPassed) {
-                        Log.i(TAG, "Registering in registry: nodeId=${myNodeId.take(16)}... name=$myName")
-                        val ok = botApi.registerMyself(myNodeId, myPubKey, myName)
-                        Log.i(TAG, "Registry registration: $ok")
-                        if (ok) {
-                            prefs.edit()
-                                .putString(REGISTRY_NAME_KEY, myName)
-                                .putLong(REGISTRY_AT_KEY, System.currentTimeMillis())
-                                .apply()
-                        }
-                    } else {
-                        Log.i(TAG, "Registry registration skipped: already registered as $myName")
-                    }
-                } else {
-                    Log.w(TAG, "Cannot register: nodeId=$myNodeId, pubKey=${myPubKey?.take(16) ?: "null"}")
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Registry registration failed", e)
-            }
+        unregisterPiggyback?.invoke()
+        unregisterPiggyback = OutgoingPiggybackCoordinator.registerFlushListener {
+            flushOutgoingPiggyback()
         }
-
         networkMonitor = NetworkMonitor(this).also { it.start() }
+    }
+
+    private suspend fun flushOutgoingPiggyback() {
+        runCatching { registerInDirectoryIfDue() }
+            .onFailure { Log.w(TAG, "Registry registration failed: ${it.message}") }
+        runCatching { heartGameNetwork.broadcastIfNeeded() }
+        runCatching { peerRankBroadcaster.broadcastIfNeeded() }
+        if (!RustBridge.isRunningCached()) return
+        runCatching { groupRepository.publishMyNickname() }
+        runCatching { groupRepository.publishMyDirectory() }
+        runCatching { groupRepository.publishMyAvatar() }
+        runCatching { groupRepository.publishMyBirthday() }
+        runCatching { groupRepository.publishMyEmojiStatus() }
+        runCatching { groupRepository.publishMyCapabilities() }
+        runCatching { gifLibraryBootstrap() }
+            .onFailure { Log.w(TAG, "gif catalog bootstrap failed: ${it.message}") }
+        runCatching { stickerLibrary.syncWithSwarm(chatRepository, force = false) }
+            .onFailure { Log.w(TAG, "sticker catalog bootstrap failed: ${it.message}") }
+        runCatching { proxyAutopilot.cycle() }
+            .onFailure { Log.w(TAG, "Proxy autopilot cycle: ${it.message}") }
+        runCatching { addressBookBackup.swarmHourlyTick() }
+            .onFailure { Log.w(TAG, "AddressBook peer distribution: ${it.message}") }
+        runCatching { addressBookBackup.backupIfDue() }
+            .onFailure { Log.w(TAG, "AddressBook backup failed: ${it.message}") }
+    }
+
+    private suspend fun registerInDirectoryIfDue() {
+        val myNodeId = RustBridge.nodeId() ?: return
+        val myPubKey = RustBridge.publicKey()?.takeIf { it.isNotBlank() } ?: return
+        val prefs = getSharedPreferences("p2p_prefs", MODE_PRIVATE)
+        val myName = prefs.getString("display_name", null) ?: "Unknown"
+        val lastName = prefs.getString(REGISTRY_NAME_KEY, null)
+        val lastAtMs = prefs.getLong(REGISTRY_AT_KEY, 0L)
+        if (lastName == myName && System.currentTimeMillis() - lastAtMs <= REGISTRY_REFRESH_MS) return
+        if (botApi.registerMyself(myNodeId, myPubKey, myName)) {
+            prefs.edit()
+                .putString(REGISTRY_NAME_KEY, myName)
+                .putLong(REGISTRY_AT_KEY, System.currentTimeMillis())
+                .apply()
+        }
     }
 
     /**
@@ -788,35 +770,31 @@ class CoreServerService : Service() {
         // р242: тот же цикл раз в минуту досылает PENDING - не полагаемся на
         // событие «увидели собеседника», которое может быть пропущено.
         serviceScope.launch {
-            // Раунд 261: первая итерация - не сразу: холодному старту важнее
-            // поднять движок, а не считать незавершённые отправки.
             kotlinx.coroutines.delay(10_000L)
             var sincePump = 0
             while (true) {
-                runCatching { chatRepository.countPendingOutgoing() }
-                    .onSuccess { com.vladimir.messenger.data.mirror.MirrorHub.setPendingOutgoing(it) }
-                // р243: держим свежим кэш своего адреса - он нужен и без
-                // зеркала (страж «печатает», отсев сообщений от себя).
+                val pending = runCatching { chatRepository.countPendingOutgoing() }.getOrDefault(0)
+                com.vladimir.messenger.data.mirror.MirrorHub.setPendingOutgoing(pending)
                 runCatching {
                     com.vladimir.messenger.data.mirror.MirrorHub
                         .noteSelfNodeId(RustBridge.nodeId().orEmpty())
                 }
-                if (sincePump >= 2) {
+                val mirrorShadow = mirror != null && !RustBridge.isRunningCached()
+                if (sincePump >= 2 && (pending > 0 || mirrorShadow)) {
                     sincePump = 0
-                    runCatching { chatRepository.pumpPendingOutgoing() }
-                        .onFailure { Log.w(TAG, "pending pump failed: ${it.message}") }
-                    // р245: медиа. У тени нет сети, поэтому байты гифок ей
-                    // взять неоткуда - просим у активного партнёра. Карточка в
-                    // чате к этому моменту уже есть, оживёт по приходу байтов.
-                    runCatching { pumpMirrorMedia() }
-                        .onFailure { Log.w(TAG, "media pump failed: ${it.message}") }
-                    // р249: байты файлов, которые тень не смогла попросить в
-                    // момент приёма (была офлайн или без активного партнёра).
-                    runCatching { pumpMirrorFiles() }
-                        .onFailure { Log.w(TAG, "file bytes pump failed: ${it.message}") }
+                    if (pending > 0) {
+                        runCatching { chatRepository.pumpPendingOutgoing() }
+                            .onFailure { Log.w(TAG, "pending pump failed: ${it.message}") }
+                    }
+                    if (mirrorShadow) {
+                        runCatching { pumpMirrorMedia() }
+                            .onFailure { Log.w(TAG, "media pump failed: ${it.message}") }
+                        runCatching { pumpMirrorFiles() }
+                            .onFailure { Log.w(TAG, "file bytes pump failed: ${it.message}") }
+                    }
                 }
                 sincePump++
-                kotlinx.coroutines.delay(30_000L)
+                kotlinx.coroutines.delay(if (pending > 0 || mirrorShadow) 30_000L else 5 * 60_000L)
             }
         }
 
@@ -829,33 +807,16 @@ class CoreServerService : Service() {
                 .onFailure { Log.w(TAG, "Delivery ACK junk cleanup failed: ${it.message}") }
         }
 
-        // Роевые публикации: моё @имя и каталог групп - при старте и при смене имени.
+        // Роевые публикации уходят в 15-секундном окне после отправки сообщения;
+        // на холодном старте только сверяем локальные таблицы без сетевого шума.
         if (!gossipStarted) {
             gossipStarted = true
             serviceScope.launch {
-                // Раунд 261: сверки и роевые публикации не нужны в первую
-                // секунду - откладываем на 30 с, чтобы не конкурировать с
-                // подъёмом движка за диск и сеть.
                 kotlinx.coroutines.delay(30_000)
-                // Сверка «Контакты» = главная: у каждого контакта ровно один
-                // чат, дубли схлопнуты. Разово при старте, чтобы разошедшиеся
-                // за прошлые версии списки сошлись сами.
                 runCatching { contactRepository.reconcileChats() }
                     .onFailure { Log.w(TAG, "reconcileChats: " + it.message) }
-                // Без force: если рассылали недавно, повтор пропускается сам.
-                runCatching { groupRepository.publishMyNickname() }
-                runCatching { groupRepository.publishMyDirectory() }
-                // Аватары: сначала поднять присланные из базы в витрину,
-                // затем разослать свой контактам (раунд 40).
                 runCatching { groupRepository.loadAvatars() }
-                runCatching { groupRepository.publishMyAvatar() }
-                // День рождения: своя (видимая) дата — контактам, скрытая не
-                // уходит вовсе. Даты друзей лежат в своей книге.
-                runCatching { groupRepository.publishMyBirthday() }
-                // Эмодзи-статус у профиля: объявить свой сети при старте.
-                runCatching { groupRepository.publishMyEmojiStatus() }
-                // Сколько места под пересылку отдаю - контактам, для их рейтинга.
-                runCatching { groupRepository.publishMyCapabilities() }
+                OutgoingPiggybackCoordinator.markDirty()
             }
             // Подвинул ползунок «Место под пересылку» - контакты узнают сразу.
             // init до подписки: иначе чтение сохранённого значения само
@@ -1051,7 +1012,9 @@ class CoreServerService : Service() {
                 serviceScope.launch {
                     while (kotlinx.coroutines.currentCoroutineContext().isActive) {
                         RustBridge.refreshOnlineHelperPolicy()
-                        kotlinx.coroutines.delay(30_000)
+                        kotlinx.coroutines.delay(
+                            if (OutgoingPiggybackCoordinator.isWindowActive()) 30_000L else 120_000L,
+                        )
                     }
                 }
                 TransferDiagnostics.count(Counters.CORE_STARTS)
@@ -1080,56 +1043,14 @@ class CoreServerService : Service() {
                     recordFailure = { Log.w(TAG, "Presence audience refresh failed", it) },
                 )
 
-                // Раунд 121: свой каталог гифок - разослать и спросить чужие
-                // (тротлимб внутри; при старте уходит после подключения).
-                serviceScope.launch {
-                    runCatching { gifLibraryBootstrap() }
-                        .onFailure { Log.w(TAG, "gif catalog bootstrap failed: ${it.message}") }
-                }
-
-                // Раунд 139: свой каталог стикеров - так же разослать и спросить.
-                serviceScope.launch {
-                    runCatching {
-                        stickerLibrary.syncWithSwarm(chatRepository, force = false)
-                    }.onFailure { Log.w(TAG, "sticker catalog bootstrap failed: ${it.message}") }
-                }
-
-                // Прокси-автопилот: первичный цикл при старте — проверить пул, убрать мёртвых,
-                // выбрать и подключить лучшего (без принудительного сбора).
-                serviceScope.launch {
-                    try {
-                        proxyAutopilot.cycle()
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Proxy autopilot startup cycle: ${e.message}")
-                    }
-                }
-
                 // A first-installation book is recovered ONLY after the core
-                // has had time to discover direct mDNS/signed neighbours.
+                // has had time to discover direct mDNS/signed neighbours;
+                // outgoing distribution and cloud backup piggyback on user sends.
                 serviceScope.launch {
                     kotlinx.coroutines.delay(25_000L)
-                    while (kotlinx.coroutines.currentCoroutineContext().isActive) {
-                        runCatching { addressBookBackup.autoRestoreIfEmpty() }
-                            .onFailure { Log.w(TAG, "AddressBook post-search restore: ${it.message}") }
-                        // A snapshot learned from the fallback server must go
-                        // to the next reachable signed neighbour promptly;
-                        // it is not enough to wait for the hourly backup loop.
-                        runCatching { addressBookBackup.swarmHourlyTick() }
-                            .onFailure { Log.w(TAG, "AddressBook peer distribution: ${it.message}") }
-                        kotlinx.coroutines.delay(60_000L)
-                    }
-                }
-
-                // Облачная копия азбуки: первая через 3 минуты (адреса уже
-                // насобирались), дальше каждый час; шлём только если файл
-                // менялся (см. AddressBookBackup.backupIfDue).
-                serviceScope.launch {
-                    kotlinx.coroutines.delay(3 * 60 * 1000L)
-                    while (true) {
-                        runCatching { addressBookBackup.backupIfDue() }
-                            .onFailure { Log.w(TAG, "AddressBook backup failed: ${it.message}") }
-                        kotlinx.coroutines.delay(60 * 60 * 1000L)
-                    }
+                    runCatching { addressBookBackup.autoRestoreIfEmpty() }
+                        .onFailure { Log.w(TAG, "AddressBook post-search restore: ${it.message}") }
+                    OutgoingPiggybackCoordinator.markDirty()
                 }
 
             // Telegram Bot relay (запасной канал)
@@ -2043,6 +1964,8 @@ class CoreServerService : Service() {
         }
         // Cancel every service-owned polling loop/collector. Repeated start intents are
         // idempotent, but a real service destruction must release this entire coroutine tree.
+        unregisterPiggyback?.invoke()
+        unregisterPiggyback = null
         serviceJob.cancel()
         telegramRelay?.stop()
         cloudflareRelay?.stop()
@@ -2087,10 +2010,15 @@ class CoreServerService : Service() {
         
         serviceScope.launch {
             while (isActive) {
-                try { deferredDelivery.pumpPending() }
+                var hasUpcoming = false
+                try {
+                    hasUpcoming = RuntimeDiagnostics.measure(DiagnosticOperation.DEFERRED_DELIVERY_PUMP) {
+                        deferredDelivery.pumpPending()
+                    }
+                }
                 catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                 catch (error: Exception) { Log.w(TAG, "Deferred delivery assist failed", error) }
-                delay(30_000L)
+                delay(if (hasUpcoming) 30_000L else 5 * 60_000L)
             }
         }
 
@@ -2812,8 +2740,8 @@ class CoreServerService : Service() {
 
                     // Обновляем только СУЩЕСТВУЮЩИЕ контакты (НЕ создаём новые автоматически)
                     if (existing != null) {
-                        if (observation.becameOnline) {
-                            // Новенький в сети: точечно синхронизируем сердечки (с антиспамом в HeartSyncPolicy).
+                        if (observation.becameOnline && OutgoingPiggybackCoordinator.isWindowActive()) {
+                            // Новенький в сети: синхронизируем сердечки и ранг только в окне исходящей отправки.
                             serviceScope.launch {
                                 try {
                                     heartGameNetwork.syncWithNewcomer(existing.id)
@@ -2821,17 +2749,13 @@ class CoreServerService : Service() {
                                     throw e
                                 } catch (e: Exception) { Log.w(TAG, "heart sync for newcomer failed: ${e.message}") }
                             }
-                            // Ранг новенького не знаем - а значок VIP у его
-                            // имени нужен сразу, не после недельной рассылки.
-                            // Просим конверт ранга адресно (ограничитель
-                            // внутри: не чаще раза в сутки одному).
                             serviceScope.launch {
                                 runCatching {
                                     if (!com.vladimir.messenger.data.rank.PeerRankStore.isVipRank(peerRankStore.qualifiedFor(peerId))) { requestPeerRank(peerId) }
                                 }
                             }
-                            Log.i(TAG, "🟢 ONLINE: $peerName")
                         }
+                        if (observation.becameOnline) Log.i(TAG, "🟢 ONLINE: $peerName")
                         if (lightTouch) return  // пульс учли, тяжёлую синхру не дёргаем
                         // Раунд 186 (аудит-6): повторяется на каждый «тяжёлый»
                         // пульс (раз в 30 с на узел) - в релизе не пишем.
@@ -2851,11 +2775,10 @@ class CoreServerService : Service() {
                             chatRepository.updateContactName(peerId, peerName)
                             // Имя пришло с presence - просить нечего.
                         } else if (!contactRepository.isRealName(peerName) &&
-                            !contactRepository.isRealName(existing.displayName)
+                            !contactRepository.isRealName(existing.displayName) &&
+                            OutgoingPiggybackCoordinator.isWindowActive()
                         ) {
-                            // И в контакте, и в presence - «буквыцифры».
-                            // Ждать роевую рассылку @имени можно часами,
-                            // поэтому просим узел представиться адресно.
+                            // Просим узел представиться адресно только в окне исходящей отправки.
                             serviceScope.launch {
                                 runCatching { groupRepository.requestIdentity(peerId) }
                                     .onFailure { Log.w(TAG, "whois failed: ${it.message}") }

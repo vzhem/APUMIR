@@ -30,6 +30,8 @@ object OperationalDiagnostics {
         }
     }
     val wake = WakeHoldTracker()
+    val callWake = WakeHoldTracker()
+    val multicast = WakeHoldTracker()
     private val lock = Any()
     private var file: AtomicFile? = null
     private val phases = ArrayDeque<Pair<DiagnosticPhase, Long>>()
@@ -103,9 +105,17 @@ object OperationalDiagnostics {
     }
 
     fun wakeReport(): String {
-        val sample = wake.snapshot(SystemClock.elapsedRealtime())
-        return "[энергия и фон]\ncore_wake_acquisitions=${sample.first} · core_wake_timed_upper_ms=${sample.second}\n" +
-            "Учитываются только успешные timed acquire ядра, release и таймаут; это верхняя оценка удержания, не измерение расхода батареи и не все wakelock приложения.\n"
+        val now = SystemClock.elapsedRealtime()
+        val core = wake.snapshot(now)
+        val call = callWake.snapshot(now)
+        val mdns = multicast.snapshot(now)
+        return buildString {
+            appendLine("[энергия и фон]")
+            appendLine("core_wake_acquisitions=${core.first} · core_wake_timed_upper_ms=${core.second}")
+            appendLine("call_wake_acquisitions=${call.first} · call_wake_timed_upper_ms=${call.second}")
+            appendLine("wifi_multicast_acquisitions=${mdns.first} · wifi_multicast_held_ms=${mdns.second}")
+            appendLine("Учитываются только успешные acquire/release и таймаут в этом процессе; это верхняя оценка удержания CPU/Wi-Fi multicast, не измерение мА·ч батареи.")
+        }
     }
 
     fun journalReport(): String = synchronized(lock) {

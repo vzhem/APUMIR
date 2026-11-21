@@ -214,18 +214,13 @@ class ChatRepository @Inject constructor(
             val rawId = if (recipientId.isBlank()) chat?.contactId ?: "" else recipientId
             
             
-            val actualRecipientId = when {
-                rawId.startsWith("pk_") -> rawId
-                rawId.contains("node=pk_") -> "pk_" + rawId.substringAfter("node=pk_").substringBefore("&")
-                else -> rawId
-            }
-            
-            // Раунд 183 (аудит-4): отладочная роспись на КАЖДОЕ отправленное
-            // сообщение - только в debug-сборке (в release строковые склейки
-            // и logcat на каждое сообщение были лишними).
-            if (com.vladimir.messenger.BuildConfig.DEBUG) {
-                Log.i(TAG, "📨 ROUTING: chatId=$chatId '$recipientId' -> '$actualRecipientId'")
-            }
+        val actualRecipientId = when {
+            rawId.startsWith("pk_") -> rawId
+            rawId.contains("node=pk_") -> "pk_" + rawId.substringAfter("node=pk_").substringBefore("&")
+            else -> rawId
+        }
+        // Раунд 183: роспись отправки только в debug-сборке.
+        if (com.vladimir.messenger.BuildConfig.DEBUG) Log.i(TAG, "📨 ROUTING: chatId=$chatId '$recipientId' -> '$actualRecipientId'")
 
             // ШАГ 2: Создать entity с recipientId
             val entity = outgoingTextRow(
@@ -244,6 +239,7 @@ class ChatRepository @Inject constructor(
             } else {
                 messageDao.insertMessage(entity)
                 chatDao.updateLastMessage(chatId, preview, timestamp)
+                com.vladimir.messenger.service.OutgoingPiggybackCoordinator.onUserOutgoing(timestamp)
             }
             OperationalDiagnostics.tracker.persisted(messageId)
 
@@ -403,6 +399,7 @@ class ChatRepository @Inject constructor(
             }
         }
 
+        if (!fromMirror) com.vladimir.messenger.service.OutgoingPiggybackCoordinator.onUserOutgoing()
         val sentDirectly = replyAwareOutboxSender.sendManual(
             original.id,
             original.chatId,
@@ -1256,7 +1253,9 @@ class ChatRepository @Inject constructor(
             } else {
                 val peers = directContactIds()
                 if (!revoke && !storyVideos.register(story, peers)) false
-                else DurableStorySender.enqueue(context, story, peers, revoke)
+                else DurableStorySender.enqueue(context, story, peers, revoke).also {
+                    if (it) com.vladimir.messenger.service.OutgoingPiggybackCoordinator.onUserOutgoing()
+                }
             }
         }
 

@@ -517,6 +517,7 @@ class FeaturePackSeeder @Inject constructor(
 
     private suspend fun announceInstalled() {
         val now = System.currentTimeMillis()
+        if (!com.vladimir.messenger.service.OutgoingPiggybackCoordinator.isWindowActive(now)) return
         if (now - lastAnnounceAtMs < ANNOUNCE_INTERVAL_MS) return
         announceMutex.withLock {
             if (now - lastAnnounceAtMs < ANNOUNCE_INTERVAL_MS) return

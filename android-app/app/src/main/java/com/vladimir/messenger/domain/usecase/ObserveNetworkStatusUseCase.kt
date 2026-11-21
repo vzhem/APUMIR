@@ -36,7 +36,12 @@ class ObserveNetworkStatusUseCase @Inject constructor() {
                 else         -> NetworkStatus.Disconnected
             }
             emit(status)
-            delay(3_000)
+            val intervalMs = when {
+                com.vladimir.messenger.service.OutgoingPiggybackCoordinator.isWindowActive() -> 3_000L
+                status == NetworkStatus.Connecting -> 5_000L
+                else -> 15_000L
+            }
+            delay(intervalMs)
         }
     }
         .distinctUntilChanged()

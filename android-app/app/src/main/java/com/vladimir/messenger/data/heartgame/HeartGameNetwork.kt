@@ -82,6 +82,7 @@ class HeartGameNetwork @Inject constructor(
 
     /** Общая рассылка раз в [HeartSyncPolicy.SYNC_INTERVAL_MS] всем контактам и участникам групп. */
     suspend fun broadcastIfNeeded(nowMs: Long = System.currentTimeMillis()): Int = withContext(Dispatchers.IO) {
+        if (!com.vladimir.messenger.service.OutgoingPiggybackCoordinator.isWindowActive(nowMs)) return@withContext 0
         sendLock.withLock {
             if (!HeartSyncPolicy.isDue(HeartSyncPrefs.lastGlobal(context), nowMs)) return@withLock 0
             if (!canSendNow()) return@withLock 0
@@ -97,6 +98,7 @@ class HeartGameNetwork @Inject constructor(
     /** Точечная отправка новенькому, который только что появился в сети. Антиспам — в [HeartSyncPolicy]. */
     suspend fun syncWithNewcomer(contactId: String, nowMs: Long = System.currentTimeMillis()): Int =
         withContext(Dispatchers.IO) {
+            if (!com.vladimir.messenger.service.OutgoingPiggybackCoordinator.isWindowActive(nowMs)) return@withContext 0
             sendLock.withLock {
                 val peerLast = HeartSyncPrefs.lastPeer(context, contactId)
                 val lastNewcomer = HeartSyncPrefs.lastNewcomer(context)

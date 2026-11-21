@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use super::direct_transport::{DirectTransport, DIRECT_SEND_BUDGET};
 use super::presence_scope::{direct_presence_payload, PresenceScope, MAX_OWN_PER_ROUND};
+use crate::engine::outgoing_activity::OutgoingActivityGate;
 
 const PARALLEL_SENDS: usize = 4;
 
@@ -66,27 +67,36 @@ impl PresenceDispatcher {
         addr_changed: Arc<AtomicBool>,
         node_id: String,
         display_name: String,
+        outgoing_activity: Arc<OutgoingActivityGate>,
     ) {
         let dispatcher = Self::new(runtime.clone(), Arc::clone(&stop));
         runtime.spawn(async move {
-            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(5));
-            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
-                ticker.tick().await;
                 if stop.load(Ordering::Relaxed) { break; }
                 let now = crate::storage::models::now_ms();
-                if dispatcher.is_busy() || !scope.own_due(now) { continue; }
-                let transport = { direct.lock().unwrap().clone() };
-                let Some(transport) = transport else { continue; };
-                let recipients = scope.next_batch(MAX_OWN_PER_ROUND);
-                if dispatcher.dispatch(
-                    transport, Arc::clone(&scope), Arc::clone(&addresses),
-                    Arc::clone(&public_addr), node_id.clone(), display_name.clone(), recipients,
-                ) {
-                    scope.mark_own(now);
-                    if public_addr.lock().unwrap().is_some() && addr_changed.swap(false, Ordering::Relaxed) {
-                        tracing::info!("PRESENCE K4: changed address queued for bounded personal rounds");
+                let addr_dirty = addr_changed.load(Ordering::Acquire);
+                let active_window = outgoing_activity.is_active(now);
+                if (active_window || addr_dirty) && !dispatcher.is_busy() && (scope.own_due(now) || addr_dirty) {
+                    if let Some(transport) = direct.lock().unwrap().clone() {
+                        let recipients = scope.next_batch(MAX_OWN_PER_ROUND);
+                        if dispatcher.dispatch(
+                            transport, Arc::clone(&scope), Arc::clone(&addresses),
+                            Arc::clone(&public_addr), node_id.clone(), display_name.clone(), recipients,
+                        ) {
+                            crate::engine::outgoing_activity::POWER_COUNTERS
+                                .direct_presence_rounds
+                                .fetch_add(1, Ordering::Relaxed);
+                            scope.mark_own(now);
+                            if public_addr.lock().unwrap().is_some() && addr_changed.swap(false, Ordering::Relaxed) {
+                                tracing::info!("PRESENCE K4: changed address queued for bounded personal rounds");
+                            }
+                        }
                     }
+                }
+                if active_window {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                } else {
+                    outgoing_activity.sleep_or_wake(std::time::Duration::from_secs(300)).await;
                 }
             }
         });

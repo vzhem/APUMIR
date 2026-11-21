@@ -50,6 +50,8 @@ class CallWorkWakeLock(context: Context) {
     private fun acquire() {
         runCatching {
             wakeLock.acquire(CallIncoming.CORE_WAKE_LOCK_MS)
+            com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
+                .callWake.acquire(android.os.SystemClock.elapsedRealtime(), CallIncoming.CORE_WAKE_LOCK_MS)
         }.onFailure { Log.w(TAG, "call wake lock acquire failed: ${it.message}") }
     }
 
@@ -57,7 +59,11 @@ class CallWorkWakeLock(context: Context) {
         job?.cancel()
         job = null
         runCatching {
-            if (wakeLock.isHeld) wakeLock.release()
+            if (wakeLock.isHeld) {
+                wakeLock.release()
+                com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
+                    .callWake.release(android.os.SystemClock.elapsedRealtime())
+            }
         }.onFailure { Log.w(TAG, "call wake lock release failed: ${it.message}") }
     }
 

@@ -937,9 +937,7 @@ class MirrorChannel(
 
     /**
      * р249: умеет ли партнёр договариваться о комнате (0 - старая сборка).
-     * Пока партнёр старый, маркер ему не отдаём и в защищённую комнату не
-     * уходим: иначе он останется в одиночестве, а зеркало встанет.
-     */
+    /** Пока партнёр старый, маркер не отдаём и в защищённую комнату не уходим. */
     @Volatile private var partnerRoomV = 0
 
     /** р249: свои запросы-числа, на которые ждём ответа партнёра. */
@@ -952,7 +950,7 @@ class MirrorChannel(
     @Volatile private var wsOpen = false
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-        .pingInterval(30, java.util.concurrent.TimeUnit.SECONDS)
+        .pingInterval(60, java.util.concurrent.TimeUnit.SECONDS)
         .build()
     private var backoffMs = 2_000L
     @Volatile private var closedByUs = false
@@ -2752,18 +2750,19 @@ class MirrorChannel(
                     promoteFired.set(false)
                 }
             }
-            // Сердцебиение: рядом с партнёром чаще, в одиночку - реже.
-            val interval = if (partnerAlive) 5_000L else 20_000L
+            // Сердцебиение: рядом с партнёром чаще, при недавнем втором телефоне умеренно, у одиночки редко.
+            val hadRecentPartner = lastPartnerAt > 0L && now - lastPartnerAt <= PARTNER_MEMORY_MS
+            val interval = if (partnerAlive) 5_000L else if (hadRecentPartner) 20_000L else 120_000L
             if (now - lastHb >= interval && wsRef.get() != null) {
                 lastHb = now
                 sendJson(heartbeat())
             }
-            // р249: комната зеркала - защищённая по маркеру или общая.
+            // р249: комната зеркала — защищённая по маркеру или общая.
             maybeProbeLegacy(now)
             maybeSwitchRoom(now)
             maybeRoomHandshake(now)
             pendingFlusher.request()
-            delay(2_500L)
+            delay(if (partnerAlive || hadRecentPartner || hasPairingPeer()) 2_500L else 10_000L)
         }
     }
 

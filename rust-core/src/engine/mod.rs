@@ -2,6 +2,7 @@
 
 pub mod core;
 pub mod events;
+pub(crate) mod outgoing_activity;
 pub(crate) mod send_gates;
 mod mesh_delivery;
 mod mesh_cleanup;

@@ -65,6 +65,10 @@ class PeerRankBroadcaster @Inject constructor(
             if (!RankBroadcastPrefs.shouldBroadcast(app, qualified, nowMs)) {
                 return@withContext 0
             }
+            if (!com.vladimir.messenger.service.OutgoingPiggybackCoordinator.isWindowActive(nowMs)) {
+                com.vladimir.messenger.service.OutgoingPiggybackCoordinator.markDirty(nowMs)
+                return@withContext 0
+            }
 
             val envelope = RankWire.build(own, qualified, nowMs)
             if (envelope == null) {
@@ -150,7 +154,7 @@ class PeerRankBroadcaster @Inject constructor(
         // а не «не дошло». Раньше ответ на запрос считался неудачным и
         // повторялся на каждый запрос, но собеседник при этом ждал рассылку.
         val sent = runCatching {
-            RustBridge.sendMessage(UUID.randomUUID().toString(), chatId, peer, envelope)
+            RustBridge.sendMessage("peer-rank:" + UUID.randomUUID(), chatId, peer, envelope)
         }
         if (sent.getOrNull() == true) {
             prefs.edit().putLong(key, nowMs).apply()
@@ -183,6 +187,9 @@ class PeerRankBroadcaster @Inject constructor(
         val prefs = app.getSharedPreferences(REPLY_PREFS, Context.MODE_PRIVATE)
         val key = "ask_" + peer.hashCode()
         val nowMs = System.currentTimeMillis()
+        if (!com.vladimir.messenger.service.OutgoingPiggybackCoordinator.isWindowActive(nowMs)) {
+            return@withContext false
+        }
         if (nowMs - prefs.getLong(key, 0L) < REQUEST_MIN_INTERVAL_MS) {
             com.vladimir.messenger.data.diagnostics.TransferDiagnostics
                 .noteRankRefusal(com.vladimir.messenger.data.diagnostics.TransferDiagnostics.RankRefusalReason.GATE_DAILY)

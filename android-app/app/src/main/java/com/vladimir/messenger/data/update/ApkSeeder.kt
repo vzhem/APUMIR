@@ -679,10 +679,10 @@ class ApkSeeder @Inject constructor(
      * то же, что кнопка «Проверить», но тихо и по расписанию: раз в 2 часа,
      * пятерым известным узлам (веер ограничен - рой любого размера). Ответы -
      * обычные `upk`, карточки в настройках появляются сами. Так рой узнаёт
-     * о релизах даже при недоступном relay-воркере; сайт остаётся
-     * ускорителем, а не источником истины.
+     * о релизах при недоступном relay-воркере; сайт — ускоритель.
      */
     private suspend fun askPeersPeriodically(now: Long) {
+        if (!com.vladimir.messenger.service.OutgoingPiggybackCoordinator.isWindowActive(now)) return
         if (now - lastAutoAskAtMs < AUTO_ASK_INTERVAL_MS) return
         if (pending != null || patchPending != null) return
         if (_offers.value.isNotEmpty() || _patchOffers.value.isNotEmpty()) return
@@ -1692,9 +1692,9 @@ class ApkSeeder @Inject constructor(
             served = row?.let { router.groupSeeder.servedCount(it.transferId) } ?: 0,
             preparing = row == null,
         )
-        if (row != null && now - lastAnnounceAtMs >= ANNOUNCE_INTERVAL_MS) {
-            runCatching { announce() }
-        }
+        if (row != null && now - lastAnnounceAtMs >= ANNOUNCE_INTERVAL_MS &&
+            com.vladimir.messenger.service.OutgoingPiggybackCoordinator.isWindowActive(now)
+        ) { runCatching { announce() } }
     }
 
     /** Давние объявления и не более новые, чем моя версия — долой. */

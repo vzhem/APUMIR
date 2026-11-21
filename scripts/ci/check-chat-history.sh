@@ -281,6 +281,10 @@ IPV6_PROXY_TEST="$BASE/test/java/com/vladimir/messenger/data/swarm/Ipv6NetworkPr
 PROFILE_CALLSIGN="$BASE/main/java/com/vladimir/messenger/util/ProfileCallsign.kt"
 DEVICE_ANCHOR="$BASE/main/java/com/vladimir/messenger/data/security/DeviceProfileAnchor.kt"
 DEVICE_ANCHOR_TEST="$BASE/test/java/com/vladimir/messenger/data/security/ProfileCallsignAndDeviceAnchorTest.kt"
+OUTGOING_PIGGYBACK_POLICY="$BASE/main/java/com/vladimir/messenger/service/OutgoingPiggybackPolicy.kt"
+OUTGOING_PIGGYBACK_TEST="$BASE/test/java/com/vladimir/messenger/service/OutgoingPiggybackPolicyTest.kt"
+POWER_ACTIVITY_REPORT="$BASE/main/java/com/vladimir/messenger/data/diagnostics/PowerActivityReport.kt"
+POWER_ACTIVITY_REPORT_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/PowerActivityReportTest.kt"
 # TextColorPalette в этом окружении не компилируется: ему нужны Compose Color и
 # сгенерированный R.string. Поэтому TextColorWire (он здесь настоящий, его
 # формат и проверяем) собирается с заглушкой палитры, а список id берётся ИЗ
@@ -332,7 +336,9 @@ PYGEN
     "$IDENTITY_HEALTH" "$IDENTITY_HEALTH_TEST" \
     "$FLASHLIGHT_POLICY" "$FLASHLIGHT_POLICY_TEST" \
     "$IPV6_PROXY_CONFIG" "$IPV6_PROXY_RUNTIME" "$IPV6_PROXY_TEST" \
-    "$PROFILE_CALLSIGN" "$DEVICE_ANCHOR" "$DEVICE_ANCHOR_TEST"
+    "$PROFILE_CALLSIGN" "$DEVICE_ANCHOR" "$DEVICE_ANCHOR_TEST" \
+    "$OUTGOING_PIGGYBACK_POLICY" "$OUTGOING_PIGGYBACK_TEST" \
+    "$POWER_ACTIVITY_REPORT" "$POWER_ACTIVITY_REPORT_TEST"
 "$JAVA" -cp "$OUT/classes:$CP" org.junit.runner.JUnitCore \
     com.vladimir.messenger.data.group.GroupWallpaperTest \
     com.vladimir.messenger.ui.screens.chat.ChatHistoryObserverTest \
@@ -387,7 +393,9 @@ PYGEN
     com.vladimir.messenger.data.file.FileTransferRetentionTest \
     com.vladimir.messenger.data.notification.FlashlightAlertPolicyTest \
     com.vladimir.messenger.data.swarm.Ipv6NetworkProxyTest \
-    com.vladimir.messenger.data.security.ProfileCallsignAndDeviceAnchorTest
+    com.vladimir.messenger.data.security.ProfileCallsignAndDeviceAnchorTest \
+    com.vladimir.messenger.service.OutgoingPiggybackPolicyTest \
+    com.vladimir.messenger.data.diagnostics.PowerActivityReportTest
 
 # Изолированные симуляции компилируются в отдельных classpath со своими заглушками.
 bash "$ROOT/scripts/ci/check-update-download-sim.sh" "$JAVA" "$CP" "$OUT" "$KOTLIN"

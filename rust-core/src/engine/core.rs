@@ -631,6 +631,9 @@ pub struct P2PCore {
     peer_exchange: Arc<PeerExchange>,
     /// External transport stays idle while a signed and connected neighbour is alive.
     swarm_first: Arc<SwarmFirstPolicy>,
+    /// Bounded ~15 s outgoing-activity piggyback gate so idle loops sleep quietly
+    /// until genuine user correspondence is sent.
+    pub(super) outgoing_activity: Arc<super::outgoing_activity::OutgoingActivityGate>,
     peer_assistance: Arc<PeerAssistance>,
     /// K5-1: копии чужих сообщений, которые держим мы, пока получатель не
     /// появится (см. `network::custody_relay`).
@@ -697,6 +700,7 @@ impl P2PCore {
             address_book: Arc::new(AddressBook::open(address_book_path)),
             peer_exchange: Arc::new(PeerExchange::open(peer_exchange_path)),
             swarm_first: Arc::new(SwarmFirstPolicy::new(crate::storage::models::now_ms())),
+            outgoing_activity: Arc::new(super::outgoing_activity::OutgoingActivityGate::new()),
             peer_assistance: Arc::new(PeerAssistance::new()),
             custody_hold: Arc::new(CustodyHold::new()),
             custody_offers: Arc::new(CustodyOffers::new()),
@@ -1191,6 +1195,7 @@ impl P2PCore {
                                 Arc::clone(&public_addr_alt_arc),
                                 Arc::clone(&self.address_lookup), node_id.clone(),
                                 Arc::clone(&self.swarm_first),
+                                Arc::clone(&self.outgoing_activity),
                             ));
                         } else {
                             tracing::info!("PEER EXCHANGE: no real signing sidecar; legacy discovery retained");
@@ -1198,6 +1203,7 @@ impl P2PCore {
                         // STUN с того же сокета: отражённый адрес = адрес,
                         // на котором мы реально слушаем.
                         let policy_stun = Arc::clone(&self.swarm_first);
+                        let activity_stun = Arc::clone(&self.outgoing_activity);
                         runtime.spawn(async move {
                             Self::run_stun_discovery(
                                 public_addr_stun,
@@ -1206,6 +1212,7 @@ impl P2PCore {
                                 Some(side),
                                 own_address_gossip,
                                 policy_stun,
+                                activity_stun,
                             )
                             .await;
                         });
@@ -1215,6 +1222,7 @@ impl P2PCore {
                         // остаются брокер и relay. STUN - по-старому, с
                         // временного сокета, чтобы presence всё же нёс адрес.
                         let policy_stun = Arc::clone(&self.swarm_first);
+                        let activity_stun = Arc::clone(&self.outgoing_activity);
                         runtime.spawn(async move {
                             Self::run_stun_discovery(
                                 public_addr_stun,
@@ -1223,6 +1231,7 @@ impl P2PCore {
                                 None,
                                 None,
                                 policy_stun,
+                                activity_stun,
                             )
                             .await;
                         });
@@ -1261,6 +1270,8 @@ impl P2PCore {
                 }
                 let own_broker_mqtt = Arc::clone(&self.own_broker_shared);
                 let policy_mqtt = Arc::clone(&self.swarm_first);
+                let activity_mqtt = Arc::clone(&self.outgoing_activity);
+                let activity_mdns = Arc::clone(&self.outgoing_activity);
                 std::thread::spawn(move || {
                     let rt = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
@@ -1283,6 +1294,7 @@ impl P2PCore {
                             directory_mqtt,
                             mqtt_outbound_rx,
                             policy_mqtt,
+                            activity_mqtt,
                         ).await;
                     });
                 });
@@ -1300,6 +1312,7 @@ impl P2PCore {
                         direct_mdns,
                         public_addr_mdns,
                         address_book_mdns,
+                        activity_mdns,
                     ).await;
                 });
 
@@ -1959,6 +1972,7 @@ impl P2PCore {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn run_mdns_discovery(
         events: Arc<EventBus>,
         network: Arc<NetworkManagerFfi>,
@@ -1971,6 +1985,7 @@ impl P2PCore {
         direct: Arc<Mutex<Option<DirectTransport>>>,
         public_addr: Arc<Mutex<Option<SocketAddr>>>,
         address_book: Arc<AddressBook>,
+        outgoing_activity: Arc<super::outgoing_activity::OutgoingActivityGate>,
     ) {
         use crate::network::mdns::MdnsService;
         use std::time::Duration;
@@ -2008,6 +2023,9 @@ impl P2PCore {
         if let Err(e) = mdns.publish_self_device(&node_id, port, &display_name, 1, public_addr_str.as_deref(), local_device.as_deref()).await {
             tracing::warn!("mDNS publish failed: {}", e);
         } else {
+            super::outgoing_activity::POWER_COUNTERS
+                .mdns_publishes
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             tracing::info!("mDNS: published self as {} port {}", display_name, port);
         }
 
@@ -2026,6 +2044,9 @@ impl P2PCore {
                     .await
                 {
                     Ok(()) => {
+                        super::outgoing_activity::POWER_COUNTERS
+                            .mdns_publishes
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         tracing::info!("mDNS: re-published self as {} port {}", display_name, port)
                     }
                     Err(e) => tracing::warn!("mDNS re-publish failed: {}", e),
@@ -2047,6 +2068,9 @@ impl P2PCore {
                 }
                 crate::network::device_endpoints::set_local_contact_hints(hints);
             }
+            super::outgoing_activity::POWER_COUNTERS
+                .mdns_scans
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             match mdns.discover(Duration::from_secs(5)).await {
                 Err(e) => tracing::warn!("mDNS discover error: {}", e),
                 Ok(nodes) => {
@@ -2170,10 +2194,15 @@ impl P2PCore {
                 }
             }
 
-            // Было 10 секунд. Опрос локальной сети не тратит мобильный
-            // интернет, но будит Wi-Fi и радио каждые десять секунд. Соседи по
-            // Wi-Fi никуда не убегают за полминуты.
-            tokio::time::sleep(Duration::from_secs(30)).await;
+            // В покое не будим Wi-Fi multicast радио каждые 30 секунд:
+            // после стартового обхода спим до реальной отправки или смены сети,
+            // а в активном окне переписки держим быстрый 30-секундный шаг.
+            let sleep_secs = if outgoing_activity.is_active(crate::storage::models::now_ms()) {
+                30
+            } else {
+                super::outgoing_activity::IDLE_MDNS_REFRESH_SECS
+            };
+            outgoing_activity.sleep_or_wake(Duration::from_secs(sleep_secs)).await;
         }
     }
 
@@ -2374,6 +2403,7 @@ impl P2PCore {
 
     /// Direct bootstrap is independent of the broker and the blocking presence/custody thread.
     /// At most two exchanges are in flight, with a six-request/minute ceiling in PeerExchange.
+    #[allow(clippy::too_many_arguments)]
     async fn run_peer_exchange(
         identity: Arc<crate::crypto::signing_identity::InstalledSigningIdentity>,
         transport: DirectTransport, directory: Arc<PeerExchange>, scope: Arc<PresenceScope>,
@@ -2381,17 +2411,17 @@ impl P2PCore {
         public_addr: Arc<Mutex<Option<SocketAddr>>>, public_addr_alt: Arc<Mutex<Option<SocketAddr>>>,
         lookup: Arc<AddressLookup>, our_id: String,
         swarm_first: Arc<SwarmFirstPolicy>,
+        outgoing_activity: Arc<super::outgoing_activity::OutgoingActivityGate>,
     ) {
-        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(5));
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut generation = 0;
         let mut audience_generation = 0;
-        let mut legacy_at = crate::storage::models::now_ms().saturating_add(20_000);
+        let started_ms = crate::storage::models::now_ms();
+        let startup_bootstrap_until = started_ms.saturating_add(25_000);
+        let mut legacy_at = started_ms.saturating_add(20_000);
         // Let ordinary fresh-address discovery run first. This does not wake the
         // phone solely to scan: the task exists only while the engine is active.
-        let mut history_at = crate::storage::models::now_ms().saturating_add(60_000);
+        let mut history_at = started_ms.saturating_add(60_000);
         loop {
-            ticker.tick().await;
             let now = crate::storage::models::now_ms();
             // Sample reachability even on a quiet tick: a directory entry or
             // broker presence alone must NEVER suppress external fallback.
@@ -2404,7 +2434,17 @@ impl P2PCore {
             let updated_audience = scope.generation();
             if updated_audience != audience_generation { audience_generation = updated_audience; directory.wake(); }
             directory.flush(false, now);
-            if !directory.due(now) && now < legacy_at && now < history_at { continue; }
+            let active_window = now < startup_bootstrap_until || outgoing_activity.is_active(now);
+            if !active_window {
+                // Quiet idle: do not probe contacts or dial PEX until a real
+                // outgoing send or network reset wakes the gate.
+                outgoing_activity.sleep_or_wake(std::time::Duration::from_secs(60)).await;
+                continue;
+            }
+            if !directory.due(now) && now < legacy_at && now < history_at {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                continue;
+            }
             let observations = book.observations();
             let addresses = addrs.lock().unwrap().clone();
             let wanted: Vec<String> = scope.all_own().into_iter().filter(|id| {
@@ -2434,6 +2474,9 @@ impl P2PCore {
                     primary.into_iter().chain(alt).collect()
                 };
                 for request in directory.plan_multi(&identity, own_addrs, candidates, &wanted, now) {
+                    super::outgoing_activity::POWER_COUNTERS
+                        .pex_rounds
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     Self::spawn_exchange_send(transport.clone(), Arc::clone(&identity), Arc::clone(&directory), Arc::clone(&book), request);
                 }
             }
@@ -2480,6 +2523,7 @@ impl P2PCore {
                     tokio::spawn(async move { let _ = transport.send(&peer, Some(addr), bytes).await; });
                 }
             }
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         }
     }
 
@@ -2524,6 +2568,7 @@ impl P2PCore {
                 runtime.handle().clone(), Arc::clone(&stop), Arc::clone(&self.presence_scope),
                 Arc::clone(&self.direct), Arc::clone(&self.peer_addrs), Arc::clone(&self.public_addr),
                 Arc::clone(&self.own_addr_changed), node_id.clone(), self.config.display_name.clone(),
+                Arc::clone(&self.outgoing_activity),
             );
         }
 
@@ -2531,6 +2576,7 @@ impl P2PCore {
         let lookup = Arc::clone(&self.address_lookup);
         let directory = Arc::clone(&self.peer_exchange);
         let address_book = Arc::clone(&self.address_book);
+        let outgoing_activity = Arc::clone(&self.outgoing_activity);
         let modern_discovery = crate::crypto::signing_identity::installed_signing_identity()
             .map(|identity| identity.legacy_routing_node_id() == node_id).unwrap_or(false);
         let hold = Arc::clone(&self.custody_hold);
@@ -2575,10 +2621,12 @@ impl P2PCore {
                 }
 
                 // Раз в минуту смотрим, у кого из «своих» адреса нет, и
-                // спрашиваем соседей напрямую - без брокера. Идёт и в
-                // маленькой сети: это просто ещё одна возможность найти
-                // адрес, когда брокер молчит.
-                if !modern_discovery && ticks % OWN_LOOKUP_TICKS == 0 {
+                // спрашиваем соседей напрямую - без брокера. В покое не стучим
+                // соседям без причины: только в окне отправки.
+                if !modern_discovery
+                    && ticks % OWN_LOOKUP_TICKS == 0
+                    && outgoing_activity.is_active(now_ms)
+                {
                     let candidates = scope.next_lookup_batch(MAX_OWN_PER_ROUND);
                     let observed = address_book.observations();
                     let missing: Vec<String> = {
@@ -2926,6 +2974,7 @@ impl P2PCore {
         directory: Arc<PeerExchange>,
         mut outbound_rx: tokio::sync::mpsc::Receiver<MqttOutboundCommand>,
         policy: Arc<SwarmFirstPolicy>,
+        outgoing_activity: Arc<super::outgoing_activity::OutgoingActivityGate>,
     ) {
         use crate::network::mqtt_liveness::next_mqtt_restart_backoff_secs;
         use crate::network::mqtt_overflow::MQTT_LOSS_INTOLERANT_INBOX_CAPACITY;
@@ -3215,6 +3264,9 @@ impl P2PCore {
                         let Some(wire) = wire else { continue; };
                         match transport.send_mesh_relay(&recipient, &wire).await {
                             Ok(()) => {
+                                super::outgoing_activity::POWER_COUNTERS
+                                    .mqtt_relay_publishes
+                                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                                 if published_own_in_generation.len() >= 4_096 {
                                     published_own_in_generation.clear();
                                 }
@@ -3345,6 +3397,9 @@ impl P2PCore {
                         // предлагаем снова, пока не придёт квитанция.
                         if !q.contains(&message_id) { continue; }
                         if transport.send_mesh_relay(&recipient, &envelope).await.is_ok() {
+                            super::outgoing_activity::POWER_COUNTERS
+                                .mqtt_relay_publishes
+                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                             if published_own_in_generation.len() >= 4_096 { published_own_in_generation.clear(); }
                             published_own_in_generation.insert(message_id);
                         }
@@ -3353,7 +3408,14 @@ impl P2PCore {
             }
 
             let polled_event = match transport.poll_event_or(outbound_rx.recv()).await {
-                crate::network::mqtt_transport::MqttPoll::Event(event) => event,
+                crate::network::mqtt_transport::MqttPoll::Event(event) => {
+                    if event.is_some() {
+                        super::outgoing_activity::POWER_COUNTERS
+                            .mqtt_inbound_events
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    event
+                }
                 crate::network::mqtt_transport::MqttPoll::Wake(Some(command)) => {
                     pending_outbound = Some(command);
                     None
@@ -3531,13 +3593,11 @@ impl P2PCore {
                         if outcome != PresenceOutcome::Live { continue; }
                         seen_via_presence.insert(peer_id.to_string());
                         tracing::info!("MQTT: fresh peer presence: {} ({})", display_name, peer_id);
-                        // Узел только что объявился и слушает брокера. Если он
-                        // нам нужен для отправки, но его подписанной identity у
-                        // нас нет, просим её СЕЙЧАС: к моменту первой отправки
-                        // ответ уже придёт, и помощная доставка не упрётся в
-                        // `route_unavailable reason=recipient_identity`.
-                        // Спрашиваем только про «своих»: чужие presence — фон.
-                        if presence_scope.is_own(peer_id) {
+                        // Узел только что объявился и слушает брокера. В покое не
+                        // рассылаем запросы identity на каждый чужой presence:
+                        // запрашиваем только в окне исходящей отправки (либо сама
+                        // отправка запросит через send_with_helper).
+                        if presence_scope.is_own(peer_id) && outgoing_activity.is_active(now_ms) {
                             if let Some(ask) = Self::identity_request_due(
                                 directory.as_ref(), &node_id, peer_id, now_ms,
                             ) {
@@ -3579,10 +3639,10 @@ impl P2PCore {
                             }
                         }
 
-                        // M3(c.1): отправляем peer только сводку RelayQueue. Никакие relay
-                        // на этом подшаге ещё не пересылаются. Cooldown и глобальный budget
-                        // защищают телефон, если одновременно видны тысячи peers.
-                        if let Some(ref q) = relay_queue {
+                        // M3(c.1): отправляем peer сводку RelayQueue только если в очереди
+                        // действительно есть что синхронизировать или открыто окно отправки.
+                        // Пустую сводку ("gossip_summary|0") на каждый чужой presence в покое не шлём.
+                        if let Some(ref q) = relay_queue.as_ref().filter(|q| !q.is_empty() || outgoing_activity.is_active(now_ms)) {
                             let now = std::time::Instant::now();
                             if mesh_summary_window_started.elapsed().as_secs()
                                 >= MESH_SUMMARY_WINDOW_SECS
@@ -4544,7 +4604,12 @@ impl P2PCore {
                         .publish_presence(&display_name, current_addr.as_deref(), current_is_relay)
                         .await
                     {
-                        Ok(()) => true,
+                        Ok(()) => {
+                            super::outgoing_activity::POWER_COUNTERS
+                                .mqtt_presence_publishes
+                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            true
+                        }
                         Err(e) => {
                             tracing::warn!("MQTT: periodic presence request failed: {}", e);
                             false
@@ -4583,9 +4648,17 @@ impl P2PCore {
                         "PRESENCE: self is missing from the shared list, re-announcing"
                     );
                 }
+                tracing::info!(
+                    "{}",
+                    super::outgoing_activity::POWER_COUNTERS
+                        .summary_line(outgoing_activity.is_active(now_ms))
+                );
                 // === GOSSIP: broadcast known peers to the network ===
-                // Реже, чем presence: список знакомых меняется медленно.
-                if !cadence.take_gossip(std::time::Instant::now()) {
+                // В покое слухи о третьих лицах в общий эфир не рассылаем:
+                // только в окне исходящей отправки.
+                if !outgoing_activity.is_active(now_ms)
+                    || !cadence.take_gossip(std::time::Instant::now())
+                {
                     continue;
                 }
                 if !known_peers.is_empty() {
@@ -4622,7 +4695,12 @@ impl P2PCore {
                     if count == 0 { continue; }
                     let gossip_payload = gossip_parts.join("|");
                     match transport.publish_gossip(&gossip_payload).await {
-                        Ok(_) => tracing::info!("Gossip: broadcasted {} known peers", count),
+                        Ok(_) => {
+                            super::outgoing_activity::POWER_COUNTERS
+                                .mqtt_gossip_publishes
+                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            tracing::info!("Gossip: broadcasted {} known peers", count)
+                        }
                         Err(e) => tracing::info!("Gossip: broadcast failed: {}", e),
                     }
                 }
@@ -4699,20 +4777,15 @@ impl P2PCore {
         mut side: Option<crate::network::quic_client::UdpSideChannel>,
         gossip: Option<OwnAddressGossip>,
         policy: Arc<SwarmFirstPolicy>,
+        outgoing_activity: Arc<super::outgoing_activity::OutgoingActivityGate>,
     ) {
         use crate::network::direct_transport::stun_via_side_channel;
         use crate::network::ice::{StunClient, DEFAULT_STUN_SERVERS, STUN_TIMEOUT};
 
-        // Повторяем периодически: одна попытка при старте часто приходится на
-        // момент, когда сети ещё нет, а внешний адрес меняется при переходе
-        // Wi-Fi <-> мобильный интернет. Без обновления телефон остаётся
-        // недостижимым до перезапуска приложения.
-        //
-        // K1: запрос уходит с общего QUIC-сокета (порт 7777), поэтому
-        // отражённый адрес - это адрес, на котором мы действительно слушаем.
-        // Заодно эти датаграммы раз в минуту освежают отображение на NAT.
-        // Без бокового канала (endpoint не поднялся) - старый путь через
-        // временный сокет: адрес хуже, чем никакой, только для брокера.
+        // Запрос уходит с общего QUIC-сокета (порт 7777), поэтому отражённый
+        // адрес — тот, на котором мы реально слушаем. В покое не шлём STUN
+        // каждую минуту (экономим радио и батарею): опрашиваем при старте,
+        // при смене сети и в окне исходящей отправки, если снимок старше 2 мин.
         let mut backoff_secs = 15u64;
         // Prefer the recently working IPv4 path for a few refreshes, then
         // re-probe in normal order. IPv6 stays a fallback on every probe.
@@ -4732,10 +4805,18 @@ impl P2PCore {
                         }
                     }
                 }
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                outgoing_activity.sleep_or_wake(std::time::Duration::from_secs(5)).await;
+                continue;
+            }
+            if outgoing_activity.is_active(now) && !outgoing_activity.stun_needs_piggyback_refresh(now) {
+                let wait_ms = outgoing_activity.remaining_ms(now).max(1_000);
+                tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
                 continue;
             }
             tracing::info!("STUN: fallback external address discovery...");
+            super::outgoing_activity::POWER_COUNTERS
+                .stun_probes
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
             let prefer_ipv4 = prefer_ipv4_until
                 .map(|until| tokio::time::Instant::now() < until)
@@ -4779,10 +4860,10 @@ impl P2PCore {
                             }
                         }
                     }
-                    // Раз в минуту, а не в две: отображение на NAT у
-                    // мобильных операторов живёт 30-60 с, и этот же запрос
-                    // держит его тёплым для входящих соединений.
-                    backoff_secs = 55;
+                    outgoing_activity.note_stun_reflected(crate::storage::models::now_ms());
+                    // В покое спим 30 минут (или до отправки сообщения / смены сети),
+                    // не будя радио ежеминутными STUN-датаграммами.
+                    backoff_secs = super::outgoing_activity::IDLE_STUN_REFRESH_SECS;
                 }
                 None => {
                     tracing::warn!("STUN: all servers failed");
@@ -4790,7 +4871,9 @@ impl P2PCore {
                 }
             }
 
-            tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
+            outgoing_activity
+                .sleep_or_wake(std::time::Duration::from_secs(backoff_secs))
+                .await;
         }
     }
     /// Send message via MQTT (internet fallback)
@@ -5058,6 +5141,7 @@ impl P2PCore {
         self.swarm_first.reset(crate::storage::models::now_ms());
         self.peer_exchange.reset_session();
         self.invalidate_own_addresses();
+        self.outgoing_activity.note_network_reset();
         // Часть 2 задачи IPv6: смена сети (Wi-Fi → LTE, VPN, авиарежим).
         // Старые прямые соединения открыты с прежнего адреса источника и по
         // прежнему маршруту — закрываем пул, иначе каждая отправка упирается
@@ -5240,6 +5324,8 @@ impl P2PCore {
     /// Кнопка «Собрать данные об абонентах» раньше была заглушкой: она писала
     /// строку в лог и возвращала true, ничего не отправляя.
     pub fn trigger_gossip_discovery(&self) -> bool {
+        self.outgoing_activity
+            .note_user_outgoing(crate::storage::models::now_ms());
         self.schedule_discovery(MqttOutboundCommand::AnnounceNow)
     }
 
@@ -5481,6 +5567,8 @@ impl P2PCore {
         if !self.state.is_running() {
             return false;
         }
+        self.outgoing_activity
+            .note_user_outgoing(crate::storage::models::now_ms());
         let prefer_authenticated_session =
             ciphertext_chunk_len & FILE_SESSION_V1_PREFERRED_FLAG != 0;
         let ciphertext_chunk_len = ciphertext_chunk_len & !FILE_SESSION_V1_PREFERRED_FLAG;
@@ -5576,6 +5664,18 @@ impl P2PCore {
         // если приложение ещё не передало контакты отдельным вызовом.
         self.presence_scope
             .add_own(&recipient_id, self.node_id_str.as_deref());
+
+        if refresh_retention
+            || super::outgoing_activity::is_user_correspondence_send(
+                &message_id,
+                &chat_id,
+                text.as_bytes(),
+            )
+        {
+            self.outgoing_activity
+                .note_user_outgoing(crate::storage::models::now_ms());
+            self.peer_exchange.wake();
+        }
 
         let _ = self.storage.save_message(
             message_id.clone(),

@@ -32,9 +32,13 @@ class CoreMulticastLock(context: Context) {
         runCatching {
             if (onScreen && !l.isHeld) {
                 l.acquire()
+                com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
+                    .multicast.acquire(android.os.SystemClock.elapsedRealtime(), Long.MAX_VALUE / 4)
                 Log.i(TAG, "MulticastLock acquired (foreground)")
             } else if (!onScreen && l.isHeld) {
                 l.release()
+                com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
+                    .multicast.release(android.os.SystemClock.elapsedRealtime())
                 Log.i(TAG, "MulticastLock released (background)")
             }
         }.onFailure { Log.w(TAG, "multicast lock sync failed: ${it.message}") }
@@ -45,7 +49,11 @@ class CoreMulticastLock(context: Context) {
         // not reacquire the lock after the service has been destroyed.
         closed = true
         runCatching {
-            if (lock?.isHeld == true) lock.release()
+            if (lock?.isHeld == true) {
+                lock.release()
+                com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
+                    .multicast.release(android.os.SystemClock.elapsedRealtime())
+            }
         }.onFailure { Log.w(TAG, "multicast lock release failed: ${it.message}") }
     }
 
