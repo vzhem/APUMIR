@@ -9,7 +9,7 @@
     "android-app/app/src/main/java/com/vladimir/messenger/data/group/GroupFileSwarm.kt": 1207,
     "android-app/app/src/main/java/com/vladimir/messenger/data/group/GroupRepository.kt": 5755,
     "android-app/app/src/main/java/com/vladimir/messenger/data/group/GroupWire.kt": 2730,
-    "android-app/app/src/main/java/com/vladimir/messenger/data/mirror/MirrorSync.kt": 3779,
+    "android-app/app/src/main/java/com/vladimir/messenger/data/mirror/MirrorSync.kt": 3777,
     "android-app/app/src/main/java/com/vladimir/messenger/data/repository/ChatRepository.kt": 1290,
     "android-app/app/src/main/java/com/vladimir/messenger/data/update/ApkSeeder.kt": 1752,
     "android-app/app/src/main/java/com/vladimir/messenger/service/CoreServerService.kt": 2980,

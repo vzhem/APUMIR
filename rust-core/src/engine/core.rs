@@ -3642,7 +3642,7 @@ impl P2PCore {
                         // M3(c.1): отправляем peer сводку RelayQueue только если в очереди
                         // действительно есть что синхронизировать или открыто окно отправки.
                         // Пустую сводку ("gossip_summary|0") на каждый чужой presence в покое не шлём.
-                        if let Some(ref q) = relay_queue.as_ref().filter(|q| !q.is_empty() || outgoing_activity.is_active(now_ms)) {
+                        if let Some(ref q) = relay_queue.as_ref().filter(|q| q.total_count() > 0 || outgoing_activity.is_active(now_ms)) {
                             let now = std::time::Instant::now();
                             if mesh_summary_window_started.elapsed().as_secs()
                                 >= MESH_SUMMARY_WINDOW_SECS

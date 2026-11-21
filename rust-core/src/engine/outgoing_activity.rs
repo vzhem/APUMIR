@@ -126,7 +126,7 @@ pub fn is_user_correspondence_send(
         return false;
     }
     crate::network::relay_queue::message_kind(message_id, trimmed, payload)
-        == crate::network::relay_queue::MessageKind::Correspondence
+        == crate::network::relay_queue::RelayPayloadKind::Correspondence
 }
 
 #[derive(Debug, Default)]
