@@ -17,6 +17,7 @@ import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.swarm.OnlineHelperSettings
 import com.vladimir.messenger.data.swarm.ServerMode
+import com.vladimir.messenger.data.swarm.ServerModePolicy
 import com.vladimir.messenger.data.swarm.SwarmSettings
 import com.vladimir.messenger.service.CoreStatus
 import com.vladimir.messenger.service.UpdateDiagnosticsStore
@@ -604,7 +605,8 @@ object TransferDiagnostics {
             updateDiagnostics = runCatching {
                 UpdateDiagnosticsStore.snapshot(context)
             }.getOrDefault(com.vladimir.messenger.data.diagnostics.UpdateDiagnosticFacts.EMPTY),
-            serverMode = runCatching { ServerMode.isEnabled(context) }.getOrDefault(true),
+            serverMode = runCatching { ServerMode.isEnabled(context) }
+                .getOrDefault(ServerModePolicy.DEFAULT_ENABLED),
             batteryPercent = battery.percent,
             batteryCharging = battery.charging,
             powerSave = battery.powerSave,

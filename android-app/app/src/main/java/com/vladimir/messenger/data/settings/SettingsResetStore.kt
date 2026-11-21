@@ -15,6 +15,7 @@ import com.vladimir.messenger.data.profile.InvitePrivacy
 import com.vladimir.messenger.data.profile.InvitePrivacyStore
 import com.vladimir.messenger.data.swarm.OnlineHelperSettings
 import com.vladimir.messenger.data.swarm.ServerMode
+import com.vladimir.messenger.data.swarm.ServerModePolicy
 import com.vladimir.messenger.data.swarm.StoragePolicy
 import com.vladimir.messenger.data.swarm.StorageSettings
 import com.vladimir.messenger.data.swarm.SwarmMode
@@ -133,7 +134,7 @@ object SettingsResetStore {
     fun resetFiles(context: Context) {
         SwarmSettings.set(context, SwarmMode.NORMAL)
         OnlineHelperSettings.set(context, true)
-        ServerMode.set(context, true)
+        ServerMode.set(context, ServerModePolicy.DEFAULT_ENABLED)
         StorageSettings.set(context, StoragePolicy.DEFAULT_QUOTA_BYTES)
     }
 

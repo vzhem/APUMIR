@@ -6,18 +6,18 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Режим «Я сервер» (раунд 215, вопрос владельца: «если брокер выключится то
- * приложение не может работать?» и пожелание дать каждому телефону роль).
+ * Режим «Я сервер» (раунд 215).
  *
- * ВКЛ (по умолчанию - так работает и сегодня): телефон - полноправный узел
- * сети: хранит чужие файлы на хранении для контактов не в сети, раздаёт
- * файлы сообществ, которые сам скачал, и раздаёт обновления приложения.
+ * По умолчанию выключен: серверная роль и хранение/раздача чужих данных
+ * требуют явного выбора владельца телефона. При выключенном режиме телефон
+ * работает абонентом; собственные сообщения и файлы продолжают отправляться.
+ * Включение роли сохраняется как явное предпочтение и не сбрасывается при
+ * обновлении приложения.
  *
- * ВЫКЛ - «режим абонента»: телефон хранит и дожидается доставки только СВОИХ
- * данных (свои неотправленные файлы и сообщения - исходящая очередь и
- * раздача собственных файлов работают всегда). Чужое не хранится и не
- * раздаётся: предложения хранения отклоняются, файлы сообществ и обновления
- * этот телефон другим не отдаёт (сам скачать может как раньше).
+ * ВКЛ: телефон может хранить чужие файлы на хранении для контактов не в сети
+ * и раздавать тяжёлые файлы сообществ. ВЫКЛ: чужое на хранение не берётся,
+ * тяжёлое содержимое сообществ не отдаётся; разрешённые лёгкие файлы и
+ * отдельные пути (например, APK-раздача) управляются своими политиками.
  *
  * Хранится в p2p_prefs под ключом im_the_server. Чтение [isEnabled] -
  * каждый раз из prefs (дёшево, решения принимаются на каждый запрос без
@@ -36,7 +36,7 @@ object ServerMode {
      */
     const val LIGHT_SERVE_MAX_BYTES: Long = 2L * 1024 * 1024
 
-    private val _enabled = MutableStateFlow(true)
+    private val _enabled = MutableStateFlow(ServerModePolicy.DEFAULT_ENABLED)
 
     /** Текущий режим для экрана настроек. */
     val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
@@ -47,8 +47,7 @@ object ServerMode {
     /** Прочитать сохранённый режим. Безопасно звать многократно. */
     fun init(context: Context) {
         if (initialized) return
-        val value = prefs(context).getBoolean(KEY, true)
-        _enabled.value = value
+        _enabled.value = currentValue(context)
         initialized = true
     }
 
@@ -63,8 +62,13 @@ object ServerMode {
      * Решение на месте: читать prefs каждый раз - дёшево, а подписки и
      * приёмники не нужны (тот же приём, что у SwarmSettings/бюджета).
      */
-    fun isEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(KEY, true)
+    fun isEnabled(context: Context): Boolean = currentValue(context)
+
+    private fun currentValue(context: Context): Boolean {
+        val preferences = prefs(context)
+        val stored = if (preferences.contains(KEY)) preferences.getBoolean(KEY, false) else null
+        return ServerModePolicy.enabled(stored)
+    }
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
