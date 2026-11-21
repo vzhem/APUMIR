@@ -5576,6 +5576,7 @@ seeding и собственную передачу, так что гаранти
 В аудите записаны ограничения и безопасный A/B-план. Локальные contracts
 `check-online-helper.py` (4/4), `check-diagnostics-report.py` (38/38) и новый
 `check-server-mode-default.py` (3/3) прошли.
-Адресный Gradle-тест локально не запустился из-за отсутствия Java/JAVA_HOME;
-полный branch APK workflow ожидается после push. Физический A/B на устройствах
-не выполнялся; релиз/PR не создаются.
+Адресный Gradle-тест локально не запустился из-за отсутствия Java/JAVA_HOME.
+Ручной `gh workflow run build-release.yml --ref arena/335d8df4-apumir`
+отклонён GitHub с 403 `Resource not accessible by integration`, но push-triggered
+`Build Release APK` для `b548bae` прошёл: [run 44873052369](https://github.com/vzhem/APUMIR/actions/runs/44873052369), включая все ABIs, полные JVM unit tests (309 классов, 2286 тестов, 0 падений/пропусков), контрактный guard и APK upload. Это зелёная проверка коммита с функциональной правкой. Физический A/B на устройствах не выполнялся; релиз/PR не создаются.
