@@ -2,8 +2,8 @@ package com.vladimir.messenger.data.update
 
 import android.content.Context
 import android.util.Log
+import com.vladimir.messenger.data.file.FileTransferRouter
 import com.vladimir.messenger.data.local.dao.FileTransferDao
-import com.vladimir.messenger.data.transfer.FileTransferRouter
 import java.io.File
 
 /**
